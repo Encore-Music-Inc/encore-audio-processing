@@ -83,6 +83,14 @@ extern "C"
         return 0.0f;
     }
 
+    // Calibration: change a style's voicing for every instance
+    EMSCRIPTEN_KEEPALIVE void mc_override_style (int style, float t0, float t1, float t2, float t3, float t4,
+                                                 float c0, float c1, float c2, float sat, float width, float monoHz)
+    {
+        const float t[] { t0, t1, t2, t3, t4 }, c[] { c0, c1, c2 };
+        vs::MasterChain::overrideStyle (style, t, c, sat, width, monoHz);
+    }
+
     EMSCRIPTEN_KEEPALIVE void mc_lock_learned (void* p, float pre, float drive, float t0, float t1, float t2, float t3, float t4,
                                                float b0, float b1, float b2)
     {
