@@ -29,6 +29,15 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE float* mc_right (void* p) { return static_cast<Instance*> (p)->r.data(); }
     EMSCRIPTEN_KEEPALIVE int mc_latency (void* p)  { return static_cast<Instance*> (p)->chain.getLatency(); }
 
+    // Broad user EQ (low shelf 160 Hz, mid 1.2 kHz, high shelf 5 kHz), dB; call after mc_settings
+    EMSCRIPTEN_KEEPALIVE void mc_user_eq (void* p, float low, float mid, float high)
+    {
+        auto& chain = static_cast<Instance*> (p)->chain;
+        auto s = chain.getSettings();
+        s.userEq[0] = low; s.userEq[1] = mid; s.userEq[2] = high;
+        chain.setSettings (s);
+    }
+
     EMSCRIPTEN_KEEPALIVE void mc_settings (void* p, int style, float intensity, float inputDb, float targetLufs, float ceilingDb,
                                            float glue, float width, float sat, float t0, float t1, float t2, float t3, float t4)
     {
