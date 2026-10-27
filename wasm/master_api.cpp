@@ -1,4 +1,4 @@
-// WebAssembly bridge for the Sick & Sad mastering chain. The browser calls
+// WebAssembly bridge for the Encore mastering chain. The browser calls
 // these plain C functions; audio is passed through two float buffers that
 // live inside the module's memory.
 #include <emscripten/emscripten.h>

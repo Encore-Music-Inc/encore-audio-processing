@@ -1,4 +1,4 @@
-# Compiles the Sick & Sad mastering chain to WebAssembly (master.wasm).
+# Compiles the Encore mastering chain to WebAssembly (master.wasm).
 # Needs Emscripten (installed at E:\tools\emsdk).
 $ErrorActionPreference = "Stop"
 $emcc = "E:\tools\emsdk\upstream\emscripten\em++.exe"
