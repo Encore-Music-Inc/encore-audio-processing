@@ -163,7 +163,7 @@ int main()
     }
 
     // 3. Every style learns the song and lands on the target, quiet or hot mix
-    const char* names[] { "Universal", "Fire", "Clarity", "Tape", "Natural", "Spatial", "Cinematic", "Punch" };
+    const char* names[] { "Balanced", "Heavy", "Bright", "Warm", "Gentle", "Wide", "Arena", "Drive" };
     for (int st = 0; st < vs::MasterChain::numStyles; ++st)
     {
         for (float inGain : { 0.08f, 0.9f })
@@ -192,7 +192,7 @@ int main()
         chain.setSettings (s);
         auto out = runChain (chain, music (40.0, 0.2f, 9));
         const float got = lufsOf (out, (size_t) (30 * fs));
-        expect ("Fire -> " + juce::String ((int) target) + " LUFS", std::abs (got - target) < 1.0f, juce::String (got, 2) + " LUFS, TP " + juce::String (truePeakDb (out), 2));
+        expect ("Heavy -> " + juce::String ((int) target) + " LUFS", std::abs (got - target) < 1.0f, juce::String (got, 2) + " LUFS, TP " + juce::String (truePeakDb (out), 2));
     }
 
     // 5. Switching style after learning re-levels to the target
@@ -206,7 +206,7 @@ int main()
         chain.setSettings (s);
         auto out = runChain (chain, music (20.0, 0.2f, 12));
         const float got = lufsOf (out, (size_t) (12 * fs));
-        expect ("Natural -> Cinematic after learning stays at -14", std::abs (got + 14.0f) < 1.0f, juce::String (got, 2) + " LUFS");
+        expect ("Gentle -> Arena after learning stays at -14", std::abs (got + 14.0f) < 1.0f, juce::String (got, 2) + " LUFS");
     }
 
     // 6. Tone matching moves the right way
@@ -247,7 +247,7 @@ int main()
         auto in = music (20.0, 0.2f, 21);
         const auto t0 = juce::Time::getMillisecondCounterHiRes();
         runChain (chain, in);
-        std::printf ("INFO Master CPU (Cinematic, full intensity): %.2f%% of one core at 48 kHz\n",
+        std::printf ("INFO Master CPU (Arena, full intensity): %.2f%% of one core at 48 kHz\n",
                      (juce::Time::getMillisecondCounterHiRes() - t0) / 20000.0 * 100.0);
     }
 

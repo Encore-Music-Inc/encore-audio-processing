@@ -103,7 +103,7 @@ int main()
         expect ("meter: EBU 3341 #1 (-23 LUFS)", std::abs (got + 23.0f) < 0.1f, "%.2f LUFS", got);
     }
 
-    const char* names[] { "Universal", "Fire", "Clarity", "Tape", "Natural", "Spatial", "Cinematic", "Punch" };
+    const char* names[] { "Balanced", "Heavy", "Bright", "Warm", "Gentle", "Wide", "Arena", "Drive" };
     for (int st = 0; st < vs::MasterChain::numStyles; ++st)
         for (float g : { 0.08f, 0.9f })
         {
