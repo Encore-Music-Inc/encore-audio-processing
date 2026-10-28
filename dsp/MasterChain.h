@@ -59,20 +59,20 @@ namespace vs
     private:
         static StyleDef* styleTable()
         {
-            // Universal, Fire, Clarity and Tape are fitted to measurements of
-            // BandLab's same-named styles at "Normal" intensity (tone per
-            // octave and dynamics, on "And it Rained", 2026-10-23). Tone values
+            // Balanced, Heavy, Bright and Warm are fitted to measurements of
+            // reference masters at "Normal" intensity (tone per octave and
+            // dynamics, on "And it Rained", 2026-10-23). Tone values
             // apply at full intensity, so Normal (0.5) gets half.
             static StyleDef defs[numStyles] {
                 //  name         blurb                                              tone: low, lowmid, mid, pres, air     glue low/mid/high       fast   sat    width  space match  rel  mono Hz
-                { "Universal", "Balanced tone and solid glue for any mix",        { -2.84f, -1.01f, -1.42f, -1.16f, 3.81f },                   { 1.29f, 1.24f, 1.19f }, false, 0.10f, 1.05f, 0.00f, 1.0f, 80,  60 },
-                { "Fire",      "Huge lows, scooped mids, bite up top",            { 15.34f, -8.49f, -6.72f, 0.33f, 4.83f },                   { 2.30f, 2.30f, 2.30f }, true,  0.30f, 1.00f, 0.00f, 1.0f, 60,  120 },
-                { "Clarity",   "Open and airy: lows and highs up, mids clear",    { 1.09f, -1.65f, -6.10f, -0.51f, 5.30f },                   { 0.71f, 0.66f, 0.66f }, false, 0.05f, 1.05f, 0.00f, 1.0f, 120, 60 },
-                { "Tape",      "Smooth upper mids, sparkle on top, warm glue",    { -4.80f, -0.48f, -3.75f, -6.46f, 8.14f },                   { 0.83f, 0.78f, 0.73f }, false, 0.40f, 1.00f, 0.00f, 1.0f, 100, 60 },
-                { "Natural",   "Barely there: light glue, keeps the dynamics",    { 0, 0, 0, 0, 0 },                   { 0.20f, 0.20f, 0.15f }, false, 0.00f, 1.00f, 0.00f, 0.5f, 150, 60 },
-                { "Spatial",   "Wide stereo and a touch of air and ambience",     { 0, -0.5f, 0, 0.5f, 1.0f },         { 0.30f, 0.30f, 0.25f }, false, 0.05f, 1.35f, 0.12f, 0.9f, 120, 60 },
-                { "Cinematic", "Big, saturated and wide",                         { 1.5f, 0, -0.5f, 0.5f, 1.0f },      { 0.50f, 0.45f, 0.40f }, false, 0.70f, 1.25f, 0.06f, 0.9f, 100, 60 },
-                { "Punch",     "Energetic bass and bright highs",                 { 2.0f, 0, 0, 1.0f, 1.5f },          { 0.50f, 0.45f, 0.40f }, true,  0.25f, 1.10f, 0.00f, 0.9f, 60,  60 },
+                { "Balanced",  "Balanced tone and solid glue for any mix",        { -2.84f, -1.01f, -1.42f, -1.16f, 3.81f },                   { 1.29f, 1.24f, 1.19f }, false, 0.10f, 1.05f, 0.00f, 1.0f, 80,  60 },
+                { "Heavy",     "Huge lows, scooped mids, bite up top",            { 15.34f, -8.49f, -6.72f, 0.33f, 4.83f },                   { 2.30f, 2.30f, 2.30f }, true,  0.30f, 1.00f, 0.00f, 1.0f, 60,  120 },
+                { "Bright",    "Open and airy: lows and highs up, mids clear",    { 1.09f, -1.65f, -6.10f, -0.51f, 5.30f },                   { 0.71f, 0.66f, 0.66f }, false, 0.05f, 1.05f, 0.00f, 1.0f, 120, 60 },
+                { "Warm",      "Smooth upper mids, sparkle on top, warm glue",    { -4.80f, -0.48f, -3.75f, -6.46f, 8.14f },                   { 0.83f, 0.78f, 0.73f }, false, 0.40f, 1.00f, 0.00f, 1.0f, 100, 60 },
+                { "Gentle",    "Barely there: light glue, keeps the dynamics",    { 0, 0, 0, 0, 0 },                   { 0.20f, 0.20f, 0.15f }, false, 0.00f, 1.00f, 0.00f, 0.5f, 150, 60 },
+                { "Wide",      "Wide stereo and a touch of air and ambience",     { 0, -0.5f, 0, 0.5f, 1.0f },         { 0.30f, 0.30f, 0.25f }, false, 0.05f, 1.35f, 0.12f, 0.9f, 120, 60 },
+                { "Arena",     "Big, saturated and wide",                         { 1.5f, 0, -0.5f, 0.5f, 1.0f },      { 0.50f, 0.45f, 0.40f }, false, 0.70f, 1.25f, 0.06f, 0.9f, 100, 60 },
+                { "Drive",     "Energetic bass and bright highs",                 { 2.0f, 0, 0, 1.0f, 1.5f },          { 0.50f, 0.45f, 0.40f }, true,  0.25f, 1.10f, 0.00f, 0.9f, 60,  60 },
             };
             return defs;
         }
@@ -351,7 +351,7 @@ namespace vs
             static const float atkMs[3] { 30.0f, 15.0f, 5.0f }, relMs[3] { 200.0f, 150.0f, 80.0f };
             for (int band = 0; band < 3; ++band)
             {
-                // up to 1.5: ratio ~5.5:1 for the heaviest styles (Fire)
+                // up to 1.5: ratio ~5.5:1 for the heaviest styles (Heavy)
                 const float a = juce::jlimit (0.0f, 1.5f, st.comp[band] * amount);
                 const float thr = learned.bandLevelDb[band] + 6.0f - a * 10.0f;
                 const float ratio = 1.0f + a * 3.0f;
