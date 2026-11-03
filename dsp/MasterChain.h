@@ -141,6 +141,7 @@ namespace vs
             preGain.setCurrentAndTargetValue (dbToGain (learned.preGainDb));
             drive.setCurrentAndTargetValue (dbToGain (learned.driveDb));
             inGain.reset (fs, 0.05);
+            inGain.setCurrentAndTargetValue (dbToGain (settings.inputGainDb));   // the song starts at its own level, not faded in from silence
         }
 
         int getLatency() const { return saturator.getLatencySamples() + limiter.getLatency(); }
