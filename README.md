@@ -82,8 +82,10 @@ against a local build.
 ## Versioning
 
 Releases are tagged `vMAJOR.MINOR.PATCH` (semantic versioning), starting at
-v1.0.0. A tag builds and tests everything and attaches `master.wasm` and
-`master.wasm.sha256` to a GitHub Release.
+v1.0.0. A person at Encore Music, Inc. creates each release in GitHub
+(Releases, Draft a new release, a new tag on `main`, Publish). The tag starts
+CI, which builds and tests everything and attaches `master.wasm` and
+`master.wasm.sha256` to the Release.
 
 - MAJOR: a change that breaks a consumer: a renamed or removed header, class
   or function, a changed `mc_*` export in `master.wasm`, or a change in the

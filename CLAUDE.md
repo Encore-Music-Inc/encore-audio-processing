@@ -62,8 +62,14 @@ products. encore-studio's CLAUDE.md does not apply here; this file does.
   anything that breaks a consumer (headers, classes, functions, the `mc_*` wasm
   exports, or a sound change a product must re-check); MINOR for additions;
   PATCH for fixes. The README has the details.
-- A `v*` tag makes CI attach `master.wasm` and `master.wasm.sha256` to a GitHub Release.
-- Only create tags when your human asks.
+- Releases are created by a person, never by a Claude session. In GitHub: Releases,
+  Draft a new release, choose a new tag `vX.Y.Z` on `main`, Publish. That tag starts
+  CI, which builds and tests everything and attaches `master.wasm` and
+  `master.wasm.sha256` to the Release.
+- Claude sessions can't push tags: the push is refused with HTTP 403. Don't try, and
+  don't look for another way (the API, a workflow, a different remote). When a
+  release is due, tell your human the version number, why that number, and what
+  changed since the last release, then wait for them to publish it.
 
 ## Changes
 
