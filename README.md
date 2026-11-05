@@ -38,7 +38,9 @@ target_include_directories(MyTarget PRIVATE ${CMAKE_SOURCE_DIR}/external/encore-
 ```
 
 Includes then stay as they are today: `#include "dsp/MasterChain.h"`.
-Pin the submodule to a release tag.
+Pin the submodule to a release tag. Don't initialise it recursively: this
+repo's own `external/JUCE` is only for its tests, and each product brings
+its own JUCE.
 
 With JUCE (desktop), link `juce::juce_dsp`; `dsp/JuceInclude.h` includes it.
 Without JUCE, define `VS_NO_JUCE=1` and `dsp/lite/JuceLite.h` is used instead
