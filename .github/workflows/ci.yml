@@ -1,8 +1,9 @@
 name: CI
 
+# Pull requests run once (pull_request); main and v* tags run on push.
 on:
   push:
-    branches: ['**']
+    branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
