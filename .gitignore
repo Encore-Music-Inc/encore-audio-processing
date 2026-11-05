@@ -1,0 +1,3 @@
+build/
+wasm/master.wasm
+wasm/master.wasm.sha256

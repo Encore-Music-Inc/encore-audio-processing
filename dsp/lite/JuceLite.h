@@ -1,9 +1,9 @@
 #pragma once
 
-// Minimal stand-ins for the handful of JUCE utilities the Encore DSP
-// core uses, so the same DSP code compiles without JUCE (e.g. to WebAssembly
+// Minimal stand-ins for the handful of JUCE utilities the ENCORE. audio
+// processing core uses, so the same code compiles without JUCE (e.g. to WebAssembly
 // for the browser). Written from scratch for this project; only the names
-// match, so the DSP headers don't need to change. Enabled with VS_NO_JUCE.
+// match, so the headers don't need to change. Enabled with VS_NO_JUCE.
 
 #include <algorithm>
 #include <cmath>

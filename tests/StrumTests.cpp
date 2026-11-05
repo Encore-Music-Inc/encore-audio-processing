@@ -1,4 +1,7 @@
-// Offline checks for Encore: Strum. Run: build\StrumTests_artefacts\Release\StrumTests.exe
+// Offline checks for ENCORE. Strum's audio processing (BodyMatch, GuitarFixes,
+// Doubler). Run: build/StrumTests_artefacts/StrumTests (see tests/CMakeLists.txt).
+// The whole-plugin checks and --snapshot need the plugin's own sources, so they
+// only build with ENCORE_STRUM_PLUGIN_TESTS=1 (the plugin repo does that).
 // Everything here is synthesized (noise, Karplus-Strong strings) and measured;
 // none of it says anything about how Strum sounds on a real guitar.
 #include <juce_dsp/juce_dsp.h>
@@ -7,7 +10,12 @@
 #include "dsp/BodyMatch.h"
 #include "dsp/GuitarFixes.h"
 #include "dsp/Doubler.h"
-#include "PluginProcessor.h"
+#ifndef ENCORE_STRUM_PLUGIN_TESTS
+ #define ENCORE_STRUM_PLUGIN_TESTS 0
+#endif
+#if ENCORE_STRUM_PLUGIN_TESTS
+ #include "PluginProcessor.h"
+#endif
 
 namespace
 {
@@ -613,6 +621,7 @@ namespace
         expect ("width 0 is bit-exact pass-through", err == 0.0, "max diff " + num (err, 9));
     }
 
+#if ENCORE_STRUM_PLUGIN_TESTS
     //==============================================================================
     // The whole plugin, as a host would run it
     struct Host
@@ -810,8 +819,10 @@ namespace
                     "processed " + num (processed) + " dB, original " + num (original) + " dB, tone deviation " + num (shape) + " dB");
         }
     }
+#endif
 }
 
+#if ENCORE_STRUM_PLUGIN_TESTS
 // StrumTests --snapshot <folder>: renders the editor offscreen to PNGs (generic
 // curve, then after a Learn), to check the layout without opening an audio device.
 static int snapshot (const juce::File& folder)
@@ -838,18 +849,25 @@ static int snapshot (const juce::File& folder)
     save ("strum-learned.png");
     return 0;
 }
+#endif
 
 int main (int argc, char** argv)
 {
+   #if ENCORE_STRUM_PLUGIN_TESTS
     juce::ScopedJuceInitialiser_GUI init;
     if (argc > 2 && juce::String (argv[1]) == "--snapshot")
         return snapshot (juce::File (juce::String (argv[2])));
+   #else
+    juce::ignoreUnused (argc, argv);
+   #endif
     learnTests();
     squeakTests();
     boomTests();
     pickTests();
     doubleTests();
+   #if ENCORE_STRUM_PLUGIN_TESTS
     pluginTests();
+   #endif
     std::printf ("\n%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
     return failures == 0 ? 0 : 1;
 }
