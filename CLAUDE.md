@@ -13,7 +13,7 @@ products. encore-studio's CLAUDE.md does not apply here; this file does.
 ## Decisions (already made, don't revisit)
 
 - Licence: GNU AGPLv3 (`LICENSE`). Copyright holder: Encore Music, Inc.
-- The repo will be made public later. Outside contributions are not accepted
+- The repo is public. Outside contributions are not accepted
   (`CONTRIBUTING.md`). The ENCORE. name and logo are not licensed (`TRADEMARKS.md`).
 - Contact: support@encoremusic.studio
 - Always write ENCORE. (capitals and the period) in anything people read.
@@ -62,6 +62,7 @@ products. encore-studio's CLAUDE.md does not apply here; this file does.
   anything that breaks a consumer (headers, classes, functions, the `mc_*` wasm
   exports, or a sound change a product must re-check); MINOR for additions;
   PATCH for fixes. The README has the details.
+
 ## Release process
 
 1. The version lives in exactly one place: `project(EncoreAudioProcessingTests VERSION x.y.z)`
