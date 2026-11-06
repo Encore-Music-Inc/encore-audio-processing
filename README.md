@@ -15,7 +15,7 @@ License v3 (see `LICENSE`). The ENCORE. name and logo are not licensed (see
 |---|---|
 | ENCORE. VST (the plugins) | builds the headers with JUCE (`juce_dsp`) |
 | ENCORE. Basement Studio (the desktop DAW) | builds the headers with JUCE, with the plugins built in |
-| ENCORE. Green Room (the browser tools) | loads `master.wasm`, built from `wasm/master_api.cpp` and the headers without JUCE |
+| Green Room, the artist tools in the ENCORE. app (browser) | loads `master.wasm`, built from `wasm/master_api.cpp` and the headers without JUCE |
 
 ## What is here
 
