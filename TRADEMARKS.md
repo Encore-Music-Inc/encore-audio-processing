@@ -2,7 +2,7 @@
 
 The code in this repository is licensed under the GNU Affero General Public
 License v3 (see `LICENSE`). The brand is not. "ENCORE.", "ENCORE. VST",
-"ENCORE. Basement Studio", "ENCORE. Green Room", the plugin names shown with
+"ENCORE. Basement Studio", "ENCORE. Green Room", "ENCORE. OS", the plugin names shown with
 the ENCORE. mark, the wordmark and the logo belong to Encore Music, Inc., and
 the AGPLv3 gives no right to use them.
 
