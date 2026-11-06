@@ -1,7 +1,7 @@
 # Notes for Claude (and whoever is driving it)
 
 This is ENCORE.'s shared audio processing code: header-only C++20 used by three
-products. encore-studio's CLAUDE.md does not apply here; this file does.
+products.
 
 ## What uses it
 
