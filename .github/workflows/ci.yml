@@ -1,6 +1,7 @@
 name: CI
 
 # Pull requests run once (pull_request); main and v* tags run on push.
+# Docs-only changes skip the heavy jobs (see the changes job).
 on:
   push:
     branches: [main]
@@ -21,8 +22,44 @@ env:
   EMSCRIPTEN_VERSION: 6.0.13
 
 jobs:
+  # Decides whether the heavy jobs need to run. A pull request or push that only
+  # touches docs (*.md, LICENSE, .github/CODEOWNERS) skips them; skipped jobs count
+  # as passing, so docs-only pull requests stay mergeable when checks are required.
+  # Tags and manual runs always run everything.
+  changes:
+    name: What changed
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" == "pull_request" ]]; then
+            files=$(git diff --name-only "$PR_BASE" "$PR_HEAD")
+          elif [[ "$EVENT" == "push" && "$REF" == refs/heads/* && -n "$PUSH_BEFORE" && "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ]]; then
+            files=$(git diff --name-only "$PUSH_BEFORE" "$SHA")
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"; echo "Tag or manual run: everything runs"; exit 0
+          fi
+          echo "Changed files:"; echo "$files"
+          code=$(echo "$files" | grep -Ev '(\.md$|^LICENSE$|^\.github/CODEOWNERS$)' | grep -c . || true)
+          if [[ "$code" -gt 0 ]]; then echo "code=true" >> "$GITHUB_OUTPUT"; else echo "code=false" >> "$GITHUB_OUTPUT"; echo "Docs only: tests and master.wasm are skipped"; fi
+
   tests:
     name: Tests (Linux)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +76,8 @@ jobs:
 
   wasm:
     name: master.wasm
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

@@ -32,7 +32,7 @@ products. encore-studio's CLAUDE.md does not apply here; this file does.
 | `wasm/master_api.cpp`, `wasm/build.sh` | the browser engine and its Emscripten build |
 | `tests/` | six offline test suites and their CMake build |
 | `external/JUCE` | JUCE 9 submodule pinned at `7ff644f`, for the tests only |
-| `.github/workflows/ci.yml` | tests and master.wasm on pull requests and main; a Release on `v*` tags |
+| `.github/workflows/ci.yml` | tests and master.wasm on pull requests and main (skipped when only docs change); a Release on `v*` tags |
 
 ## Consumers
 
