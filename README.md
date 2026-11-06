@@ -82,10 +82,12 @@ against a local build.
 ## Versioning
 
 Releases are tagged `vMAJOR.MINOR.PATCH` (semantic versioning), starting at
-v1.0.0. A person at Encore Music, Inc. creates each release in GitHub
-(Releases, Draft a new release, a new tag on `main`, Publish). The tag starts
-CI, which builds and tests everything and attaches `master.wasm` and
-`master.wasm.sha256` to the Release.
+v1.0.0. The version is set in one place, `tests/CMakeLists.txt`, and changed
+in its own pull request. Every merge to `main` builds and tests `master.wasm`.
+A person at Encore Music, Inc. then creates the release in GitHub (Releases,
+Draft a new release, a new tag on that `main` commit, Publish). The release
+isn't rebuilt: CI checks that the tag matches the version and attaches the
+`master.wasm` and `master.wasm.sha256` that `main` built from the same commit.
 
 - MAJOR: a change that breaks a consumer: a renamed or removed header, class
   or function, a changed `mc_*` export in `master.wasm`, or a change in the

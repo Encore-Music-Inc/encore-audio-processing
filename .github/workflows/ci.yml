@@ -2,6 +2,7 @@ name: CI
 
 # Pull requests run once (pull_request); main and v* tags run on push.
 # Docs-only changes skip the heavy jobs (see the changes job).
+# A v* tag doesn't rebuild: it attaches master.wasm from the main build of that commit.
 on:
   push:
     branches: [main]
@@ -31,6 +32,8 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       code: ${{ steps.diff.outputs.code }}
+      kind: ${{ steps.diff.outputs.kind }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,21 +48,41 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # kind: pr or build (tests and master.wasm), release (no build: attach main's master.wasm)
+          if [[ "$REF" == refs/tags/v* ]]; then kind=release
+          elif [[ "$EVENT" == "pull_request" ]]; then kind=pr
+          else kind=build; fi
+          echo "kind=$kind" >> "$GITHUB_OUTPUT"
           if [[ "$EVENT" == "pull_request" ]]; then
             files=$(git diff --name-only "$PR_BASE" "$PR_HEAD")
           elif [[ "$EVENT" == "push" && "$REF" == refs/heads/* && -n "$PUSH_BEFORE" && "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ]]; then
             files=$(git diff --name-only "$PUSH_BEFORE" "$SHA")
           else
-            echo "code=true" >> "$GITHUB_OUTPUT"; echo "Tag or manual run: everything runs"; exit 0
+            echo "code=true" >> "$GITHUB_OUTPUT"; echo "Tag or manual run: everything it needs runs"; exit 0
           fi
           echo "Changed files:"; echo "$files"
           code=$(echo "$files" | grep -Ev '(\.md$|^LICENSE$|^\.github/CODEOWNERS$)' | grep -c . || true)
           if [[ "$code" -gt 0 ]]; then echo "code=true" >> "$GITHUB_OUTPUT"; else echo "code=false" >> "$GITHUB_OUTPUT"; echo "Docs only: tests and master.wasm are skipped"; fi
 
+      - id: version
+        name: Version (from tests/CMakeLists.txt; a tag must match it)
+        env:
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(sed -nE 's/^project\(EncoreAudioProcessingTests VERSION ([0-9.]+).*/\1/p' tests/CMakeLists.txt)
+          test -n "$version" || { echo "::error::No version found in tests/CMakeLists.txt"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Version: $version"
+          if [[ "$REF" == refs/tags/v* && "v$version" != "$REF_NAME" ]]; then
+            echo "::error::Tag $REF_NAME does not match the version in tests/CMakeLists.txt ($version). Change project(EncoreAudioProcessingTests VERSION ...) on main first."
+            exit 1
+          fi
   tests:
     name: Tests (Linux)
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.kind != 'release'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -77,7 +100,7 @@ jobs:
   wasm:
     name: master.wasm
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.kind != 'release'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -102,21 +125,45 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [tests, wasm]
+    name: Release (files from the main build)
+    needs: changes
+    if: needs.changes.outputs.kind == 'release'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      actions: read
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: master.wasm
-      - name: Attach master.wasm to the release
+      - name: Find the main build of this commit
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&head_sha=$SHA&status=success&per_page=50" \
+                 --jq '.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch") | .id')
+          for id in $runs; do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts?per_page=100" \
+                 --jq '.artifacts[] | select(.expired == false) | .name' | grep -qx master.wasm; then
+              echo "run=$id" >> "$GITHUB_OUTPUT"; echo "Using run $id"; exit 0
+            fi
+          done
+          echo "::error::No successful main build with master.wasm for $TAG ($SHA). Releases are not rebuilt. Wait for the main build of this commit to finish (or, if that push only changed docs and skipped the build, run CI by hand on main: Actions, CI, Run workflow), then re-run this job."
+          exit 1
+      - name: Download its files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ steps.find.outputs.run }}
+        run: gh run download "$RUN" --repo "$GITHUB_REPOSITORY" -n master.wasm -D files
+      - name: Attach them to the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+          cd files
+          ls -l
           sha256sum -c master.wasm.sha256
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" master.wasm master.wasm.sha256 --clobber --repo "$GITHUB_REPOSITORY"
