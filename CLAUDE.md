@@ -7,7 +7,7 @@ products.
 
 - ENCORE. VST (encore-vst): the plugins, built with JUCE (`juce_dsp`).
 - ENCORE. Basement Studio (encore-basement-studio): the desktop DAW, built with JUCE.
-- ENCORE. Green Room: the browser tools, through `master.wasm` (built from
+- Green Room, the artist tools in the ENCORE. app (encoremusic.studio): through `master.wasm` (built from
   `wasm/master_api.cpp` and the headers, without JUCE).
 
 ## Decisions (already made, don't revisit)
