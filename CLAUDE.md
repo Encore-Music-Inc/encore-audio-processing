@@ -32,7 +32,7 @@ products. encore-studio's CLAUDE.md does not apply here; this file does.
 | `wasm/master_api.cpp`, `wasm/build.sh` | the browser engine and its Emscripten build |
 | `tests/` | six offline test suites and their CMake build |
 | `external/JUCE` | JUCE 9 submodule pinned at `7ff644f`, for the tests only |
-| `.github/workflows/ci.yml` | tests and master.wasm on pull requests and main (skipped when only docs change); a Release on `v*` tags |
+| `.github/workflows/ci.yml` | tests and master.wasm on pull requests and main (skipped when only docs change); `v*` tags attach main's master.wasm to the Release, no rebuild |
 
 ## Consumers
 
@@ -62,14 +62,29 @@ products. encore-studio's CLAUDE.md does not apply here; this file does.
   anything that breaks a consumer (headers, classes, functions, the `mc_*` wasm
   exports, or a sound change a product must re-check); MINOR for additions;
   PATCH for fixes. The README has the details.
-- Releases are created by a person, never by a Claude session. In GitHub: Releases,
-  Draft a new release, choose a new tag `vX.Y.Z` on `main`, Publish. That tag starts
-  CI, which builds and tests everything and attaches `master.wasm` and
-  `master.wasm.sha256` to the Release.
+## Release process
+
+1. The version lives in exactly one place: `project(EncoreAudioProcessingTests VERSION x.y.z)`
+   in `tests/CMakeLists.txt`.
+2. Changing it is its own small pull request ("Release vX.Y.Z"), so a person sees the
+   number before it's built.
+3. Merging builds everything on `main`: the tests run and `master.wasm` is uploaded as
+   a workflow artifact.
+4. A person publishes the release in GitHub (Releases, Draft a new release, a new tag
+   `vX.Y.Z` on that `main` commit, Publish). Never a Claude session.
+5. The tag's CI run doesn't rebuild. It checks that the tag matches the version, finds
+   the successful `main` build of that exact commit and attaches its `master.wasm` and
+   `master.wasm.sha256` to the Release. If either check fails, nothing is attached.
+   If that commit was docs-only (its build was skipped), run CI by hand on `main`
+   (Actions, CI, Run workflow) and then re-run the release job.
+
 - Claude sessions can't push tags: the push is refused with HTTP 403. Don't try, and
   don't look for another way (the API, a workflow, a different remote). When a
-  release is due, tell your human the version number, why that number, and what
-  changed since the last release, then wait for them to publish it.
+  release is due, open the version pull request, then tell your human the version
+  number, why that number, and what changed since the last release, and wait for
+  them to publish it.
+- Tags `v*` are protected: they can't be moved or deleted (an org admin can, in an
+  emergency).
 
 ## Changes
 
