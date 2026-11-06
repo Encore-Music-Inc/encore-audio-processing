@@ -62,7 +62,7 @@ products. encore-studio's CLAUDE.md does not apply here; this file does.
   anything that breaks a consumer (headers, classes, functions, the `mc_*` wasm
   exports, or a sound change a product must re-check); MINOR for additions;
   PATCH for fixes. The README has the details.
-## Release process (the same in every ENCORE. repo)
+## Release process
 
 1. The version lives in exactly one place: `project(EncoreAudioProcessingTests VERSION x.y.z)`
    in `tests/CMakeLists.txt`.
