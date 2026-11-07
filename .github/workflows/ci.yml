@@ -356,7 +356,7 @@ jobs:
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" master.wasm master.wasm.sha256 --clobber --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" master.wasm master.wasm.sha256 --verify-tag --title "$TAG" \
+            gh release create "$TAG" master.wasm master.wasm.sha256 --verify-tag --title "ENCORE. Audio Processing $TAG" \
               --notes "master.wasm built with Emscripten $EMSCRIPTEN_VERSION. SHA-256: $(cut -d' ' -f1 master.wasm.sha256)" \
               --repo "$GITHUB_REPOSITORY"
           fi

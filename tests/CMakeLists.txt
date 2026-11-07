@@ -1,4 +1,4 @@
-# Offline tests for the ENCORE. audio processing code. Build and run:
+# Offline tests for the ENCORE. Audio Processing code. Build and run:
 #   git submodule update --init --depth 1 external/JUCE
 #   cmake -S tests -B build -DCMAKE_BUILD_TYPE=Release
 #   cmake --build build --parallel

@@ -1,4 +1,4 @@
-# ENCORE. audio processing
+# ENCORE. Audio Processing
 
 The audio processing code shared by ENCORE.'s products: the mastering chain,
 EQ, compressor, de-esser, gate, rider, reverb, pitch detection and correction,
@@ -146,7 +146,9 @@ Releases are tagged `vMAJOR.MINOR.PATCH` (semantic versioning), starting at
 v1.0.0. The version is set in one place, `tests/CMakeLists.txt`, and changed
 in its own pull request. Every merge to `main` builds and tests `master.wasm`.
 A person at Encore Music, Inc. then creates the release in GitHub (Releases,
-Draft a new release, a new tag on that `main` commit, Publish). The release
+Draft a new release, a new tag on that `main` commit, titled
+"ENCORE. Audio Processing vX.Y.Z", with the notes from the release pull
+request, Publish). The release
 isn't rebuilt: CI checks that the tag matches the version and attaches the
 `master.wasm` and `master.wasm.sha256` that `main` built from the same commit.
 
