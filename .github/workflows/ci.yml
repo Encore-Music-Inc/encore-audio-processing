@@ -280,12 +280,27 @@ jobs:
             wasm/master.wasm.sha256
           if-no-files-found: error
 
+  # Every pin is a published release (or a listed exception): the README's
+  # Pinned releases table against what each folder is pinned to. Runs on every
+  # pull request and push, docs-only ones too: it reads the README.
+  pins:
+    name: Pinned releases
+    needs: changes
+    if: needs.changes.outputs.kind != 'release'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the pins
+        run: bash .github/pins/check.sh
+
   # The one check to require on main. It fails if any build or test job failed or
   # was cancelled, and passes when they passed or were skipped (docs-only changes).
   ci-passed:
     name: CI passed
     if: always()
-    needs: [changes, tests, sanitizers, wasm]
+    needs: [changes, pins, tests, sanitizers, wasm]
     runs-on: ubuntu-24.04
     steps:
       - name: Check the build and test jobs

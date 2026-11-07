@@ -5,7 +5,7 @@ under the GNU Affero General Public License v3 (see `LICENSE`).
 
 ## JUCE
 
-- What: the JUCE framework, version 9, at commit `7ff644f65d7daa1428c34b9738ebb5c449dc9172`
+- What: the JUCE framework, release 9.0.5 (commit `d60b7a78030661574a615b586d9325ba7a7fa7dd`)
 - Where: git submodule at `external/JUCE` (https://github.com/juce-framework/JUCE)
 - Used by: the tests in `tests/` and the desktop build of the headers in `dsp/`
   (through `juce_dsp`). The WebAssembly build (`master.wasm`) does not use JUCE:

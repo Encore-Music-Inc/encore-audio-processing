@@ -31,7 +31,8 @@ products.
 | `dsp/lite/JuceLite.h` | stand-in for the JUCE pieces the headers use, for builds without JUCE (`VS_NO_JUCE=1`). Don't delete it: the wasm build needs it |
 | `wasm/master_api.cpp`, `wasm/build.sh` | the browser engine and its Emscripten build |
 | `tests/` | six offline test suites and their CMake build |
-| `external/JUCE` | JUCE 9 submodule pinned at `7ff644f`, for the tests only |
+| `external/JUCE` | JUCE, pinned to release `9.0.5`: the JUCE version for all of ENCORE. (see below) |
+| `.github/pins/check.sh` | CI's check that every pin is a release (the README's Pinned releases table) |
 | `.github/sanitizers/` | the weekly sanitizer run's exceptions (`ubsan.supp`, each with its reason; keep it short) and `report.sh` |
 | `.github/workflows/ci.yml` | tests on Linux, Windows and macOS and master.wasm on pull requests and main (skipped when only docs change); weekly: the tests with sanitizers; `v*` tags attach main's master.wasm to the Release, no rebuild; "CI passed" is the one check to require |
 
@@ -40,9 +41,44 @@ products.
 - They add this repo as a submodule at `external/encore-audio-processing` and put
   that folder on their include path, so `#include "dsp/MasterChain.h"` resolves.
   Keep includes in that form: never move or rename headers without a major version.
-- They must not recurse into this repo's submodules (no `--recursive` for this
-  one). They bring their own JUCE; `external/JUCE` here is only for the tests.
+- `external/JUCE` here is the JUCE version for all of ENCORE. encore-vst builds
+  with this repo's JUCE (it has no JUCE of its own), and encore-basement-studio
+  with encore-vst's, so the JUCE these tests run on is the JUCE that ships.
+  Consumers fetch it by its path (`git -C external/encore-audio-processing
+  submodule update --init --depth 1 external/JUCE`), never with `--recursive`.
+  Move JUCE only to a JUCE release, here first, then up the chain.
 - They pin the submodule to a release tag. Green Room pins `master.wasm` by its SHA-256.
+
+## How ENCORE.'s repositories fit together
+
+```
+encore-audio-processing ──▶ JUCE                        (the JUCE version for all of ENCORE.)
+encore-vst              ──▶ encore-audio-processing     (brings JUCE with it)
+encore-basement-studio  ──▶ encore-vst                  (brings the sound engine and JUCE with it)
+                        ──▶ Tracktion Engine
+encore-os               ──▶ encore-vst and encore-basement-studio releases
+Green Room (encoremusic)──▶ master.wasm from encore-audio-processing, by its SHA-256
+```
+
+- Each repository pins each thing it uses in one place, and only to a
+  published release. The Pinned releases table in the README names them, and
+  CI (`.github/pins/check.sh`) checks that each one is a release and is exactly
+  what the folder is pinned to. An exception (no usable release exists) is
+  written in the table with its reason.
+- Nothing is pinned twice. A repository that uses encore-vst uses encore-vst's
+  sound engine and JUCE, never its own copy; one that uses
+  encore-audio-processing uses its JUCE.
+- Fetch pinned folders by their paths, one level at a time
+  (`git -C <folder> submodule update --init --depth 1 <path>`), never with
+  `--recursive`: some pinned repositories have test-only folders of their own.
+- Changes travel up one repository at a time, each through a release:
+  encore-audio-processing, then encore-vst, then encore-basement-studio, then
+  encore-os (Green Room beside them). A repository moves to a new release only
+  when something changes for its own users, and picks its own version number
+  by what its users notice, not by the number of what it uses.
+- Pull request titles: "Use <repository> vX.Y.Z (was vA.B.C)" in the repository
+  that moves a pin; "Release vX.Y.Z" only for the repository's own version.
+- After this repository publishes a release: if something the plugins use changed, encore-vst opens "Use encore-audio-processing vX.Y.Z". If `master.wasm` changed (its SHA-256 differs from the last release), Green Room takes the new file. A JUCE change here moves JUCE for encore-vst and encore-basement-studio too, through the same chain.
 
 ## Building and testing
 
