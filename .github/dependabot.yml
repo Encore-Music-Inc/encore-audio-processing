@@ -1,0 +1,15 @@
+# Proposes updates to the GitHub Actions in .github/workflows (they are pinned to
+# commits), once a month, in one pull request. The JUCE submodule is moved by
+# hand, on purpose. The Emscripten version (EMSCRIPTEN_VERSION in ci.yml) too:
+# a new one can change the bytes of master.wasm.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']
+    commit-message:
+      prefix: CI
