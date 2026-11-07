@@ -25,7 +25,7 @@ dsp/lite/JuceLite.h   a small stand-in for the JUCE pieces the headers use, for 
 wasm/master_api.cpp   the browser engine: plain C functions around the mastering chain
 wasm/build.sh         builds master.wasm with Emscripten
 tests/                offline test suites and their CMake build
-external/JUCE         JUCE 9 (submodule, used by the tests)
+external/JUCE         JUCE (submodule): the JUCE version for all of ENCORE.
 ```
 
 ## Using it in a product
@@ -38,13 +38,61 @@ target_include_directories(MyTarget PRIVATE ${CMAKE_SOURCE_DIR}/external/encore-
 ```
 
 Includes then stay as they are today: `#include "dsp/MasterChain.h"`.
-Pin the submodule to a release tag. Don't initialise it recursively: this
-repo's own `external/JUCE` is only for its tests, and each product brings
-its own JUCE.
+Pin the submodule to a release tag. This repo's `external/JUCE` is the JUCE
+version for all of ENCORE.: a product builds with it instead of a JUCE of its
+own, so the JUCE these tests run on is the JUCE that ships. Fetch it by its
+path, not recursively:
+
+```bash
+git -C external/encore-audio-processing submodule update --init --depth 1 external/JUCE
+```
 
 With JUCE (desktop), link `juce::juce_dsp`; `dsp/JuceInclude.h` includes it.
 Without JUCE, define `VS_NO_JUCE=1` and `dsp/lite/JuceLite.h` is used instead
 (only the headers the mastering chain needs work this way).
+
+## Pinned releases
+
+What this repository uses, each pinned to a published release. CI checks that
+each row is a release and is exactly what the folder is pinned to
+(`.github/pins/check.sh`).
+
+<!-- pinned-releases:start -->
+| Folder | Repository | Release |
+|---|---|---|
+| `external/JUCE` | [JUCE](https://github.com/juce-framework/JUCE) | `9.0.5` |
+<!-- pinned-releases:end -->
+
+## How ENCORE.'s repositories fit together
+
+```
+encore-audio-processing ──▶ JUCE                        (the JUCE version for all of ENCORE.)
+encore-vst              ──▶ encore-audio-processing     (brings JUCE with it)
+encore-basement-studio  ──▶ encore-vst                  (brings the sound engine and JUCE with it)
+                        ──▶ Tracktion Engine
+encore-os               ──▶ encore-vst and encore-basement-studio releases
+Green Room (encoremusic)──▶ master.wasm from encore-audio-processing, by its SHA-256
+```
+
+- Each repository pins each thing it uses in one place, and only to a
+  published release. The Pinned releases table in the README names them, and
+  CI (`.github/pins/check.sh`) checks that each one is a release and is exactly
+  what the folder is pinned to. An exception (no usable release exists) is
+  written in the table with its reason.
+- Nothing is pinned twice. A repository that uses encore-vst uses encore-vst's
+  sound engine and JUCE, never its own copy; one that uses
+  encore-audio-processing uses its JUCE.
+- Fetch pinned folders by their paths, one level at a time
+  (`git -C <folder> submodule update --init --depth 1 <path>`), never with
+  `--recursive`: some pinned repositories have test-only folders of their own.
+- Changes travel up one repository at a time, each through a release:
+  encore-audio-processing, then encore-vst, then encore-basement-studio, then
+  encore-os (Green Room beside them). A repository moves to a new release only
+  when something changes for its own users, and picks its own version number
+  by what its users notice, not by the number of what it uses.
+- Pull request titles: "Use <repository> vX.Y.Z (was vA.B.C)" in the repository
+  that moves a pin; "Release vX.Y.Z" only for the repository's own version.
+- After this repository publishes a release: if something the plugins use changed, encore-vst opens "Use encore-audio-processing vX.Y.Z". If `master.wasm` changed (its SHA-256 differs from the last release), Green Room takes the new file. A JUCE change here moves JUCE for encore-vst and encore-basement-studio too, through the same chain.
 
 ## Building and running the tests
 
