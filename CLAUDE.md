@@ -32,7 +32,7 @@ products.
 | `wasm/master_api.cpp`, `wasm/build.sh` | the browser engine and its Emscripten build |
 | `tests/` | six offline test suites and their CMake build |
 | `external/JUCE` | JUCE 9 submodule pinned at `7ff644f`, for the tests only |
-| `.github/workflows/ci.yml` | tests and master.wasm on pull requests and main (skipped when only docs change); `v*` tags attach main's master.wasm to the Release, no rebuild; "CI passed" is the one check to require |
+| `.github/workflows/ci.yml` | tests on Linux, Windows and macOS and master.wasm on pull requests and main (skipped when only docs change); weekly: the tests with sanitizers; `v*` tags attach main's master.wasm to the Release, no rebuild; "CI passed" is the one check to require |
 
 ## Consumers
 
@@ -45,6 +45,8 @@ products.
 
 ## Building and testing
 
+- Actions in `ci.yml` are pinned to commits (version in a comment); Dependabot
+  proposes updates. Keep new ones pinned the same way.
 - Tests: `git submodule update --init --depth 1 external/JUCE`, then
   `cmake -S tests -B build -DCMAKE_BUILD_TYPE=Release`, `cmake --build build --parallel`,
   `ctest --test-dir build --output-on-failure`. All must pass before a pull request.

@@ -65,6 +65,17 @@ with `-DENCORE_JUCE_TESTS=OFF`.
 `StrumTests` also has whole-plugin checks that need the Strum plugin's own
 sources; they build only with `ENCORE_STRUM_PLUGIN_TESTS=1`, in the plugin repo.
 
+### CI
+
+`.github/workflows/ci.yml` runs the six suites on Linux x64, Windows x64 (MSVC)
+and macOS (Apple Silicon), in parallel, and builds `master.wasm`, on every pull
+request and every push to `main`. The products build these headers with all
+three compilers, so the suites run on all three. Every Monday (or a manual run
+with `checks: weekly`) the suites are also built with AddressSanitizer and
+UndefinedBehaviorSanitizer on Linux, to catch memory errors and undefined
+behaviour. Builds use Ninja and a compiler cache (ccache, sccache on Windows).
+Every action is pinned to a commit, and Dependabot proposes updates monthly.
+
 ## Building master.wasm
 
 Install Emscripten (CI uses the version in `.github/workflows/ci.yml`,
