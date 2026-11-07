@@ -106,6 +106,14 @@ jobs:
             echo "::error::Tag $REF_NAME does not match the version in tests/CMakeLists.txt ($version). Change project(EncoreAudioProcessingTests VERSION ...) on main first."
             exit 1
           fi
+
+      # Every version has its release notes in CHANGELOG.md, so the "Release
+      # vX.Y.Z" pull request can't merge without them. The release job puts
+      # them on the GitHub release.
+      - name: Release notes for this version (CHANGELOG.md)
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: .github/release-notes.sh "$VERSION"
   # The products build these headers with GCC or Clang on Linux, MSVC on Windows
   # and Apple Clang on macOS, so the suites run on all three.
   tests:
@@ -344,19 +352,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN: ${{ steps.find.outputs.run }}
         run: gh run download "$RUN" --repo "$GITHUB_REPOSITORY" -n master.wasm -D files
-      - name: Attach them to the release
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+          sparse-checkout: |
+            CHANGELOG.md
+            .github/release-notes.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Attach them to the release, with its title and notes
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.changes.outputs.version }}
         run: |
           set -euo pipefail
+          # Title and notes come from the repository (CHANGELOG.md), whatever
+          # was typed when the release was published.
+          title="ENCORE. Audio Processing $TAG"
+          (cd src && .github/release-notes.sh "$VERSION") > notes.md
           cd files
           ls -l
           sha256sum -c master.wasm.sha256
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$TAG" master.wasm master.wasm.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --title "$title" --notes-file ../notes.md --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" master.wasm master.wasm.sha256 --verify-tag --title "ENCORE. Audio Processing $TAG" \
-              --notes "master.wasm built with Emscripten $EMSCRIPTEN_VERSION. SHA-256: $(cut -d' ' -f1 master.wasm.sha256)" \
-              --repo "$GITHUB_REPOSITORY"
+            gh release create "$TAG" master.wasm master.wasm.sha256 --verify-tag --title "$title" \
+              --notes-file ../notes.md --repo "$GITHUB_REPOSITORY"
           fi

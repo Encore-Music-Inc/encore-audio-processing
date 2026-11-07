@@ -34,6 +34,8 @@ products.
 | `wasm/master_api.cpp`, `wasm/build.sh` | the browser engine and its Emscripten build |
 | `tests/` | six offline test suites and their CMake build |
 | `external/JUCE` | JUCE, pinned to release `9.0.5`: the JUCE version for all of ENCORE. (see below) |
+| `CHANGELOG.md` | every release's notes, newest first; the release job copies the version's section onto the GitHub release |
+| `.github/release-notes.sh` | prints a version's notes from `CHANGELOG.md`, and fails if they're missing (CI runs it on every build) |
 | `.github/pins/check.sh` | CI's check that every pin is a release (the README's Pinned releases table) |
 | `.github/sanitizers/` | the weekly sanitizer run's exceptions (`ubsan.supp`, each with its reason; keep it short) and `report.sh` |
 | `.github/workflows/ci.yml` | tests on Linux, Windows and macOS and master.wasm on pull requests and main (skipped when only docs change); weekly: the tests with sanitizers; `v*` tags attach main's master.wasm to the Release, no rebuild; "CI passed" is the one check to require |
@@ -109,20 +111,21 @@ Green Room (encoremusic)──▶ master.wasm from encore-audio-processing, by i
 1. The version lives in exactly one place: `project(EncoreAudioProcessingTests VERSION x.y.z)`
    in `tests/CMakeLists.txt`.
 2. Changing it is its own small pull request ("Release vX.Y.Z"), so a person sees the
-   number before it's built. It includes the release notes, ready to paste (see
-   Release notes below).
+   number before it's built. It adds the release notes to `CHANGELOG.md` (see
+   Release notes below); CI fails until they're there.
 3. Merging builds everything on `main`: the tests run and `master.wasm` is uploaded as
    a workflow artifact.
 4. After the `main` build of that commit has passed, a person publishes the release in
    GitHub. Never a Claude session. Releases, Draft a new release; tag `vX.Y.Z` (Create
-   new tag) with target `main` at the "Release vX.Y.Z" commit; title `ENCORE. Audio Processing vX.Y.Z`;
-   paste the release notes from the pull request; leave Previous tag as it is, don't
-   click Generate release notes and don't attach files (the release job attaches
-   them); Publish. Never publish an old draft release: publishing creates its tag on
-   whatever its target is at that moment.
+   new tag) with target `main` at the "Release vX.Y.Z" commit; leave the title and the
+   description empty, don't click Generate release notes and don't attach files (the
+   release job fills all of them in); Publish. Never publish an old draft release:
+   publishing creates its tag on whatever its target is at that moment.
 5. The tag's CI run doesn't rebuild. It checks that the tag matches the version, finds
    the successful `main` build of that exact commit and attaches its `master.wasm` and
-   `master.wasm.sha256` to the Release. If either check fails, nothing is attached.
+   `master.wasm.sha256` to the Release, and sets its title
+   (`ENCORE. Audio Processing vX.Y.Z`) and notes (the version's section of
+   `CHANGELOG.md`). If either check fails, nothing is attached.
    If that commit was docs-only (its build was skipped), run CI by hand on `main`
    (Actions, CI, Run workflow) and then re-run the release job.
 
@@ -154,9 +157,14 @@ Questions or problems: support@encoremusic.studio
 - The notes describe the release as it is on the day it's published: no links
   to or mentions of later releases, and no promises ("coming soon", "will
   support"). If a limitation matters to people, state the limitation, not a plan.
-- They're written once, in plain language, in the "Release vX.Y.Z" pull
-  request (under "Release notes (paste when publishing)"), and not edited after
-  publishing except to fix a factual error.
+- They live in `CHANGELOG.md`, newest first, one `## vX.Y.Z` section each,
+  written once, in plain language, in the "Release vX.Y.Z" pull request. CI
+  (`.github/release-notes.sh`) fails while the version has no section, or the
+  section has no Downloads, Built on or Questions line. The release job copies
+  the section onto the GitHub release, so nobody pastes notes.
+- A published section isn't edited except to fix a factual error. Then fix it
+  in a pull request and make the same fix on the GitHub release (Edit), so the
+  two stay the same.
 - "Built on" names each top-level pin's release, and what it brings in
   brackets when that matters to people (for example the JUCE version).
 
