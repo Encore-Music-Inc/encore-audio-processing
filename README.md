@@ -73,7 +73,9 @@ request and every push to `main`. The products build these headers with all
 three compilers, so the suites run on all three. Every Monday (or a manual run
 with `checks: weekly`) the suites are also built with AddressSanitizer and
 UndefinedBehaviorSanitizer on Linux, to catch memory errors and undefined
-behaviour. Builds use Ninja and a compiler cache (ccache, sccache on Windows).
+behaviour. Undefined behaviour is reported and the suites carry on, so one run
+lists every finding; a memory error stops it. Exceptions, each with its
+reason, go in `.github/sanitizers/ubsan.supp` (none today). Builds use Ninja and a compiler cache (ccache, sccache on Windows).
 Every action is pinned to a commit, and Dependabot proposes updates monthly.
 
 ## Building master.wasm

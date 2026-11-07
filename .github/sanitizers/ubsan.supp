@@ -1,0 +1,5 @@
+# UndefinedBehaviorSanitizer exceptions for the weekly sanitizer run (ci.yml).
+# Each entry is one kind of check in one function, with the reason. Keep the
+# list short: everything not listed here stays fully checked.
+#
+# None yet.
