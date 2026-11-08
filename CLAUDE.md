@@ -45,7 +45,7 @@ products.
 | `.github/release-notes.sh` | prints a version's notes from `CHANGELOG.md`, and fails if they're missing (CI runs it on every build) |
 | `.github/pins/check.sh` | CI's check that every pin is a release (the README's Pinned releases table) |
 | `.github/sanitizers/` | the scheduled sanitizer run's exceptions (`ubsan.supp`, each with its reason; keep it short) and `report.sh` |
-| `.github/workflows/ci.yml` | tests on Linux, Windows and macOS and master.wasm on pull requests and main (skipped when only docs change); on a schedule: the tests with sanitizers; `v*` tags attach main's master.wasm to the Release, no rebuild; "CI passed" is the one check to require |
+| `.github/workflows/ci.yml` | tests on Linux, Windows and macOS and master.wasm on pull requests and main (skipped when only docs change, and for a pull request that only changes the version line and `CHANGELOG.md`); on a schedule: the tests with sanitizers; `v*` tags attach main's master.wasm to the Release, no rebuild; "CI passed" is the one check to require |
 
 ## Consumers
 
