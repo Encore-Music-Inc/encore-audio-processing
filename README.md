@@ -6,7 +6,7 @@ and the acoustic guitar fixes. It is header-only C++20.
 
 Copyright (c) Encore Music, Inc. Licensed under the GNU Affero General Public
 License v3 (see `LICENSE`). The ENCORE. name and logo are not licensed (see
-`TRADEMARKS.md`). Outside contributions are not accepted yet (see
+`TRADEMARKS.md`). Outside contributions are not accepted (see
 `CONTRIBUTING.md`). Contact: support@encoremusic.studio
 
 ## Who uses it
