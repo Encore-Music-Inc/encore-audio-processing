@@ -81,6 +81,8 @@ The headers, by area (each header's top comment says more):
 | | `Windows.h` | window functions and the shared windowed-sinc table |
 | | `Biquad.h` | second-order filter coefficients (the RBJ cookbook designs) and their curves |
 | | `Crossover.h` | Linkwitz-Riley band splits that recombine flat |
+| | `Svf.h` | the state-variable filter (the de-esser's split, and the step the Linkwitz-Riley splits use) |
+| | `Convolution.h` | zero-latency convolution, with crossfaded filter changes (Body match) |
 | | `DelayLine.h` | the delay line and reading between samples |
 | | `FracDelay.h` | fixed fractional delays per channel |
 | | `Oversampler.h` | power-of-two oversampling |
@@ -144,9 +146,8 @@ new file with its own prefix.
   tests run on is the JUCE that ships. Consumers fetch it by its path
   (`git -C external/encore-audio-processing submodule update --init --depth 1 external/JUCE`),
   never with `--recursive`. Move JUCE only to a JUCE release.
-- Every header builds without JUCE (`VS_NO_JUCE=1`, through `dsp/JuceInclude.h`)
-  except `DeEsser.h`, `PitchEngine.h` and `BodyMatch.h`, which include `juce_dsp`
-  directly. Keep new headers buildable without JUCE.
+- Every header builds without JUCE (`VS_NO_JUCE=1`, through `dsp/JuceInclude.h`);
+  only `JuceInclude.h` includes `juce_dsp`. Keep it that way for new headers.
 - On Apple systems `dsp/Fft.h` runs on Apple's Accelerate framework, so a product that uses
   the headers there links the Accelerate framework (JUCE's `juce_dsp` already
   does; `tests/CMakeLists.txt` does it for the suites without JUCE).

@@ -63,6 +63,8 @@ CI fails if either differs from what the script writes.
 | | `Windows.h` | window functions and the windowed-sinc table |
 | | `Biquad.h` | second-order filter designs (the RBJ cookbook) and their curves |
 | | `Crossover.h` | Linkwitz-Riley band splits that recombine flat |
+| | `Svf.h` | the state-variable filter |
+| | `Convolution.h` | zero-latency convolution, with crossfaded filter changes |
 | | `DelayLine.h` | a delay line, read between samples |
 | | `FracDelay.h` | fixed fractional delays per channel |
 | | `Oversampler.h` | power-of-two oversampling |
@@ -143,8 +145,7 @@ git -C external/encore-audio-processing submodule update --init --depth 1 extern
 
 With JUCE (desktop), link `juce::juce_dsp`; `dsp/JuceInclude.h` includes it.
 Without JUCE, define `VS_NO_JUCE=1` and `dsp/lite/JuceLite.h` is used instead.
-Every header builds this way except `DeEsser.h`, `PitchEngine.h` and
-`BodyMatch.h`, which need JUCE.
+Every header builds this way, so the browser build can use any of them.
 
 On macOS (and other Apple systems), link the Accelerate framework:
 `dsp/Fft.h` runs its transforms on Apple's Accelerate framework there. JUCE products
