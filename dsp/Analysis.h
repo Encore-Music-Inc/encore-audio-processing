@@ -95,6 +95,106 @@ namespace vs
         };
     }
 
+    // Flat-topped peaks (clipping) in one channel: runs of 3 or more samples
+    // in a row at the channel's own top level (within tol of its peak, either
+    // sign), reached steeply (the samples either side more than 4 tol below
+    // it). The channel's peak must be known before (a first pass over it).
+    // Runs starting within 50 ms of the last one's start join its event.
+    class FlatRuns
+    {
+    public:
+        struct Event { double start, end; int n; };
+
+        // How close to the peak counts as at it: 1.5 steps of an integer
+        // format (at least 2e-6), 1e-5 for float or unknown depth (0).
+        static double tolerance (int bitDepth, bool isFloat)
+        {
+            const double bits = isFloat ? 0 : bitDepth;
+            return bits > 0 ? std::max (1.5 / std::pow (2.0, bits - 1), 2e-6) : 1e-5;
+        }
+
+        void prepare (float channelPeak, double tol, double sampleRate)
+        {
+            *this = {};
+            fs = sampleRate;
+            tolerance_ = tol;
+            level = channelPeak;
+            thr = (double) channelPeak - tol;
+        }
+
+        // The next count samples of the channel
+        void process (const float* x, int count)
+        {
+            for (int i = 0; i < count; ++i) sample (x[i]);
+        }
+
+        // After the last sample: a run reaching the end closes there.
+        void finish() { if (fed) closeRun (at, 0.0); }
+
+        int runs() const { return runCount; }
+        int longest() const { return longestRun; }
+        float peak() const { return level; }
+        const std::vector<Event>& events() const { return ev; }
+
+        // Events of several channels as one list, in time order, joined
+        // when one starts within `gap` seconds of the last one's end.
+        static std::vector<Event> merge (std::vector<Event> all, double gap = 0.05)
+        {
+            std::stable_sort (all.begin(), all.end(), [] (const Event& a, const Event& b) { return a.start < b.start; });
+            std::vector<Event> merged;
+            for (const auto& e : all)
+            {
+                if (! merged.empty() && e.start - merged.back().end <= gap)
+                {
+                    auto& lst = merged.back();
+                    lst.end = std::max (lst.end, e.end);
+                    lst.n += e.n;
+                }
+                else merged.push_back (e);
+            }
+            return merged;
+        }
+
+    private:
+        void closeRun (std::int64_t i, double after)
+        {
+            if (sign != 0 && i - start >= 3)
+            {
+                if (level - beforeStart > 4 * tolerance_ && level - after > 4 * tolerance_)
+                {
+                    ++runCount;
+                    longestRun = std::max (longestRun, (int) (i - start));
+                    const double t = (double) start / fs;
+                    if (! ev.empty() && t - ev.back().end <= 0.05) { ev.back().end = t; ++ev.back().n; }
+                    else ev.push_back ({ t, t, 1 });
+                }
+            }
+        }
+
+        void sample (float x)
+        {
+            const double v = x;
+            const int s = v >= thr ? 1 : v <= -thr ? -1 : 0;
+            fed = true;
+            if (s != sign)
+            {
+                closeRun (at, std::abs (v));
+                start = at;
+                sign = s;
+                beforeStart = at > 0 ? prev : 0.0;
+            }
+            prev = std::abs (v);
+            ++at;
+        }
+
+        double fs = 48000.0, tolerance_ = 1e-5, thr = 0.0, beforeStart = 0.0, prev = 0.0;
+        float level = 0.0f;
+        bool fed = false;
+        std::int64_t at = 0, start = -1;
+        int sign = 0, runCount = 0, longestRun = 0;
+        std::vector<Event> ev;
+    };
+
     // The measuring, block by block. The song's length must be known first
     // (where the analysis windows fall depends on it). Feed every sample once
     // (process), then call nextPass(): when it returns true, feed every sample
@@ -161,7 +261,7 @@ namespace vs
             gridDone[0] = gridDone[1] = ! deep;
             if (! stereo) gridDone[1] = true;
 
-            for (auto& c : clipCh) c = {};
+            for (int c = 0; c < 2; ++c) { clipCh[c] = {}; clipOn[c] = false; }
         }
 
         void process (const float* l, const float* r, int count)
@@ -179,18 +279,14 @@ namespace vs
             {
                 pass = 2;
                 at = 0;
-                const double bits = opts.isFloat ? 0 : opts.bitDepth;
-                tol = bits > 0 ? std::max (1.5 / std::pow (2.0, bits - 1), 2e-6) : 1e-5;
+                const double tol = FlatRuns::tolerance (opts.bitDepth, opts.isFloat);
                 const float pk[2] { pkL, pkR };
                 bool any = false;
                 for (int c = 0; c < (stereo ? 2 : 1); ++c)
                 {
-                    auto& cc = clipCh[c];
-                    cc.on = pk[c] >= 0.5f;
-                    cc.level = pk[c];
-                    cc.thr = (double) pk[c] - tol;
-                    cc.start = -1; cc.sign = 0; cc.beforeStart = 0.0; cc.prev = 0.0;
-                    any = any || cc.on;
+                    clipOn[c] = pk[c] >= 0.5f; // only a channel peaking at 0.5 or more is checked
+                    clipCh[c].prepare (pk[c], tol, fs);
+                    any = any || clipOn[c];
                 }
                 if (any) return true;
             }
@@ -250,30 +346,18 @@ namespace vs
 
             // clipping
             {
-                // a run reaching the end closes there
-                for (int c = 0; c < 2; ++c) if (clipCh[c].on && clipCh[c].fed) closeRun (clipCh[c], n, 0.0, true);
-                std::vector<Event> all;
-                for (int c = 0; c < 2; ++c) if (clipCh[c].on) all.insert (all.end(), clipCh[c].ev.begin(), clipCh[c].ev.end());
-                std::stable_sort (all.begin(), all.end(), [] (const Event& a, const Event& b) { return a.start < b.start; });
-                std::vector<Event> merged;
-                for (const auto& e : all)
-                {
-                    if (! merged.empty() && e.start - merged.back().end <= 0.05)
-                    {
-                        auto& lst = merged.back();
-                        lst.end = std::max (lst.end, e.end);
-                        lst.n += e.n;
-                    }
-                    else merged.push_back (e);
-                }
+                for (int c = 0; c < 2; ++c) if (clipOn[c]) clipCh[c].finish();
+                std::vector<FlatRuns::Event> all;
+                for (int c = 0; c < 2; ++c) if (clipOn[c]) all.insert (all.end(), clipCh[c].events().begin(), clipCh[c].events().end());
+                const auto merged = FlatRuns::merge (all);
                 int runs = 0, longest = 0;
                 double level = 0.0;
                 for (int c = 0; c < 2; ++c)
-                    if (clipCh[c].on && clipCh[c].runs > 0)
+                    if (clipOn[c] && clipCh[c].runs() > 0)
                     {
-                        runs += clipCh[c].runs;
-                        longest = std::max (longest, clipCh[c].longest);
-                        level = std::max (level, (double) clipCh[c].level);
+                        runs += clipCh[c].runs();
+                        longest = std::max (longest, clipCh[c].longest());
+                        level = std::max (level, (double) clipCh[c].peak());
                     }
                 m.clip.runs = runs;
                 m.clip.events = (int) merged.size();
@@ -348,20 +432,6 @@ namespace vs
         }
 
     private:
-        struct Event { double start, end; int n; };
-
-        struct ClipChannel
-        {
-            bool on = false, fed = false;
-            float level = 0.0f;
-            double thr = 0.0;
-            std::int64_t start = -1;
-            int sign = 0;
-            double beforeStart = 0.0, prev = 0.0;
-            int runs = 0, longest = 0;
-            std::vector<Event> ev;
-        };
-
         struct BandAcc
         {
             BiquadChain chain;
@@ -483,47 +553,11 @@ namespace vs
             }
         }
 
-        // flat-topped peaks: 3+ samples in a row at the channel's own top
-        // level, reached steeply (both neighbours more than 4 tol below)
-        void closeRun (ClipChannel& c, std::int64_t i, double after, bool)
-        {
-            if (c.sign != 0 && i - c.start >= 3)
-            {
-                const double level = c.level;
-                if (level - c.beforeStart > 4 * tol && level - after > 4 * tol)
-                {
-                    ++c.runs;
-                    c.longest = std::max (c.longest, (int) (i - c.start));
-                    const double t = (double) c.start / fs;
-                    if (! c.ev.empty() && t - c.ev.back().end <= 0.05) { c.ev.back().end = t; ++c.ev.back().n; }
-                    else c.ev.push_back ({ t, t, 1 });
-                }
-            }
-        }
-
-        void clipSample (ClipChannel& c, std::int64_t i, float x)
-        {
-            const double v = x;
-            const int s = v >= c.thr ? 1 : v <= -c.thr ? -1 : 0;
-            c.fed = true;
-            if (s != c.sign)
-            {
-                closeRun (c, i, std::abs (v), false);
-                c.start = i;
-                c.sign = s;
-                c.beforeStart = i > 0 ? c.prev : 0.0;
-            }
-            c.prev = std::abs (v);
-        }
-
         void secondPass (const float* l, const float* r, int count)
         {
             for (int c = 0; c < (stereo ? 2 : 1); ++c)
             {
-                auto& cc = clipCh[c];
-                if (! cc.on) continue;
-                const float* x = c == 0 ? l : r;
-                for (int i = 0; i < count; ++i) clipSample (cc, at + i, x[i]);
+                if (clipOn[c]) clipCh[c].process (c == 0 ? l : r, count);
             }
         }
 
@@ -544,8 +578,8 @@ namespace vs
         bool tailDone = false;
         std::vector<int> secOver, secZero;
 
-        double tol = 1e-5;
-        ClipChannel clipCh[2];
+        FlatRuns clipCh[2];
+        bool clipOn[2] { false, false };
 
         int D = 8;
         double fsd = 6000.0;
