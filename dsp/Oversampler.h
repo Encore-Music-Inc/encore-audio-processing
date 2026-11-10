@@ -16,15 +16,19 @@ namespace vs
     // see the peaks between samples (true-peak limiting); the same filters run
     // on the desktop and in the browser.
     //
+    // The half-band filter's taps at even distances from the centre (all but
+    // the centre itself) are 0: they are set to exactly 0 in the design, and
+    // left out of the sums.
+    //
     // Each stage does only the work whose result is used: up, the
-    // zero-stuffed samples are left out of the sums (each output uses every
-    // other tap); down, only the outputs that are kept are computed. Up, a
-    // stage keeps its last inputs in front of the new block in one line and
-    // sums tap by tap over the whole block (so the sums of several outputs
-    // run side by side); down, it keeps its history in a ring buffer written
-    // twice (at p and p + length) so the taps always read one contiguous run.
-    // Each output's sum runs in the same order as a plain FIR over the
-    // zero-stuffed signal, so the results are the same to the bit.
+    // zero-stuffed samples and the zero taps are left out of the sums, so
+    // one of each pair of outputs is a single tap times its input; down, only
+    // the outputs that are kept are computed, from the nonzero taps. Both
+    // directions keep a stage's last inputs in front of the new block in one
+    // line (down: two lines, the even and the odd samples, so each tap reads
+    // one contiguous run) and sum tap by tap over the whole block, so the
+    // sums of sixteen outputs run side by side. Each output's sum runs over
+    // its taps in order, nearest the newest input first.
     template <typename T>
     class Oversampler
     {
@@ -41,12 +45,24 @@ namespace vs
             for (int i = 0; i < n; ++i)
             {
                 const double m = i - (n - 1) / 2.0;
-                const double sinc = m == 0.0 ? 0.5 : std::sin (pi * m * 0.5) / (pi * m);
+                // 0 at every even distance from the centre: sin (pi m / 2) is
+                // 0 there, though not when computed in floating point
+                const bool zero = m != 0.0 && std::fmod (m, 2.0) == 0.0;
+                const double sinc = m == 0.0 ? 0.5 : zero ? 0.0 : std::sin (pi * m * 0.5) / (pi * m);
                 const double r = 2.0 * i / (n - 1) - 1.0;
                 coeff[i] = (T) (sinc * windows::besselI0 (beta * std::sqrt (1.0 - r * r), 30, 0.0) / windows::besselI0 (beta, 30, 0.0));
             }
             for (int j = 0; j < upEvenTaps; ++j) evenTaps[j] = coeff[2 * j];
             for (int j = 0; j < upOddTaps; ++j) oddTaps[j] = coeff[2 * j + 1];
+            // the nonzero taps, in order: up, for each of the two outputs per
+            // input, tap 2j (+1) reads the input j back; down, tap k reads the
+            // even line k / 2 back (k even) or the odd line (k + 1) / 2 back
+            for (int k = 0; k < n; ++k)
+            {
+                if (coeff[k] == T (0)) continue;
+                upNonzero[k & 1].push_back ({ 0, k / 2, coeff[k] });
+                downNonzero.push_back ({ k & 1, (k + 1) / 2, coeff[k] });
+            }
         }
 
         int getFactor() const { return 1 << stages; }
@@ -83,7 +99,8 @@ namespace vs
             for (int s = 0; s < stages; ++s)
             {
                 line[s].assign ((size_t) channels, std::vector<T> ((size_t) (upEvenTaps - 1 + (maxBlock << s)), T (0)));
-                down[s].assign ((size_t) channels, Ring (taps));
+                downEven[s].assign ((size_t) channels, std::vector<T> ((size_t) (upOddTaps + (maxBlock << s)), T (0)));
+                downOdd[s].assign ((size_t) channels, std::vector<T> ((size_t) (upOddTaps + (maxBlock << s)), T (0)));
             }
             ptrs.assign ((size_t) channels, nullptr);
             reset();
@@ -94,7 +111,8 @@ namespace vs
             for (int s = 0; s < stages; ++s)
             {
                 for (auto& l : line[s]) std::fill (l.begin(), l.end(), T (0));
-                for (auto& r : down[s]) r.clear();
+                for (auto& l : downEven[s]) std::fill (l.begin(), l.end(), T (0));
+                for (auto& l : downOdd[s]) std::fill (l.begin(), l.end(), T (0));
             }
         }
 
@@ -121,37 +139,28 @@ namespace vs
                     auto& l = line[s][(size_t) c];
                     const int keep = upEvenTaps - 1;
                     for (int i = 0; i < n; ++i) l[(size_t) (keep + i)] = src[i] * T (2);
-                    // output i reads input i - j at tap j (newest first): with x
-                    // pushed, the inputs sit on the even taps; with the zero
-                    // after it, on the odd taps. Sixteen outputs at a time,
-                    // each summed tap by tap in that order.
+                    // output 2i + p is the sum of tap 2j + p times input i - j
                     const T* base = l.data() + keep;
-                    int i0 = 0;
-                    for (; i0 + tile <= n; i0 += tile)
+                    for (int p = 0; p < 2; ++p)
                     {
-                        T ae[tile] {}, ao[tile] {};
-                        // (upOddTaps is upEvenTaps - 1: the last even tap on its own)
-                        for (int j = 0; j < upOddTaps; ++j)
+                        const auto& list = upNonzero[p];
+                        int i0 = 0;
+                        for (; i0 + tile <= n; i0 += tile)
                         {
-                            const T te = evenTaps[(size_t) j], to = oddTaps[(size_t) j];
-                            const T* x = base + i0 - j;
-                            for (int k = 0; k < tile; ++k) { ae[k] += te * x[k]; ao[k] += to * x[k]; }
+                            T a[tile] {};
+                            for (const auto& t : list)
+                            {
+                                const T* x = base + i0 - t.back;
+                                for (int k = 0; k < tile; ++k) a[k] += t.value * x[k];
+                            }
+                            for (int k = 0; k < tile; ++k) dst[2 * (i0 + k) + p] = a[k];
                         }
-                        for (int j = upOddTaps; j < upEvenTaps; ++j)
+                        for (int i = i0; i < n; ++i)
                         {
-                            const T te = evenTaps[(size_t) j];
-                            const T* x = base + i0 - j;
-                            for (int k = 0; k < tile; ++k) ae[k] += te * x[k];
+                            T a = T (0);
+                            for (const auto& t : list) a += t.value * base[i - t.back];
+                            dst[2 * i + p] = a;
                         }
-                        for (int k = 0; k < tile; ++k) { dst[2 * (i0 + k)] = ae[k]; dst[2 * (i0 + k) + 1] = ao[k]; }
-                    }
-                    for (int i = i0; i < n; ++i)
-                    {
-                        T e = T (0), o = T (0);
-                        for (int j = 0; j < upEvenTaps; ++j) e += evenTaps[(size_t) j] * base[i - j];
-                        for (int j = 0; j < upOddTaps; ++j) o += oddTaps[(size_t) j] * base[i - j];
-                        dst[2 * i] = e;
-                        dst[2 * i + 1] = o;
                     }
                     std::copy (l.begin() + n, l.begin() + n + keep, l.begin());
                 }
@@ -168,43 +177,51 @@ namespace vs
             nch = std::min (nch, channels);
             for (int s = stages; s-- > 0;)
             {
-                const int nHigh = n << (s + 1);
+                const int m = n << s; // outputs of this stage
                 for (int c = 0; c < nch; ++c)
                 {
                     const T* src = buf[s][(size_t) c].data();
                     T* dst = s == 0 ? out[c] : buf[s - 1][(size_t) c].data();
-                    auto& z = down[s][(size_t) c];
-                    for (int i = 0; i < nHigh; i += 2)
+                    auto& le = downEven[s][(size_t) c];
+                    auto& lo = downOdd[s][(size_t) c];
+                    const int keep = upOddTaps;
+                    for (int i = 0; i < m; ++i)
                     {
-                        const T* h = z.push (src[i]);
-                        T acc = T (0);
-                        for (int k = 0; k < taps; ++k) acc += coeff[k] * h[k];
-                        dst[i / 2] = acc;
-                        z.push (src[i + 1]);
+                        le[(size_t) (keep + i)] = src[2 * i];
+                        lo[(size_t) (keep + i)] = src[2 * i + 1];
                     }
+                    // output i is the sum of tap k times input 2i - k: the even
+                    // line k / 2 back, or the odd line (k + 1) / 2 back
+                    const T* lines[2] { le.data() + keep, lo.data() + keep };
+                    int i0 = 0;
+                    for (; i0 + tile <= m; i0 += tile)
+                    {
+                        T a[tile] {};
+                        for (const auto& t : downNonzero)
+                        {
+                            const T* x = lines[t.line] + i0 - t.back;
+                            for (int k = 0; k < tile; ++k) a[k] += t.value * x[k];
+                        }
+                        for (int k = 0; k < tile; ++k) dst[i0 + k] = a[k];
+                    }
+                    for (int i = i0; i < m; ++i)
+                    {
+                        T a = T (0);
+                        for (const auto& t : downNonzero) a += t.value * lines[t.line][i - t.back];
+                        dst[i] = a;
+                    }
+                    std::copy (le.begin() + m, le.begin() + m + keep, le.begin());
+                    std::copy (lo.begin() + m, lo.begin() + m + keep, lo.begin());
                 }
             }
         }
 
     private:
-        // The last L values, newest first, readable as one run of L.
-        struct Ring
+        // A nonzero tap: its value, and how far back (and, down, in which line) its input is.
+        struct Tap
         {
-            explicit Ring (int length) : L (length), v ((size_t) (2 * length), T (0)) {}
-
-            int L;
-            std::vector<T> v;
-            int p = 0;
-
-            void clear() { std::fill (v.begin(), v.end(), T (0)); p = 0; }
-
-            const T* push (T x)
-            {
-                p = p == 0 ? L - 1 : p - 1;
-                v[(size_t) p] = x;
-                v[(size_t) (p + L)] = x;
-                return v.data() + p;
-            }
+            int line, back;
+            T value;
         };
 
         int channels, stages, taps;
@@ -215,8 +232,11 @@ namespace vs
         std::vector<std::vector<T>> buf[4];
         // up: per stage and channel, the last upEvenTaps - 1 inputs, then the block
         std::vector<std::vector<T>> line[4];
+        // down: per stage and channel, the last upOddTaps even and odd
+        // inputs, then the block's
+        std::vector<std::vector<T>> downEven[4], downOdd[4];
+        std::vector<Tap> upNonzero[2], downNonzero;
         static constexpr int tile = 16;
-        std::vector<Ring> down[4];
         std::vector<T*> ptrs;
     };
 }

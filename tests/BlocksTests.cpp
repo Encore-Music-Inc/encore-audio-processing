@@ -84,6 +84,59 @@ namespace
             std::snprintf (name, sizeof (name), "RealFft %d: bins match the complex FFT, and back", n);
             expect (name, e < 1e-10 && eb < 1e-13, std::max (e, eb));
         }
+
+        // vDSP runs the transforms on Apple systems (unless VS_FFT_PORTABLE),
+        // and nowhere else
+        expect ("Fft: vDSP on Apple systems only", vs::fftFor (1024).usesAccelerate() == (VS_FFT_ACCELERATE == 1) && vs::RealFft (1024).usesAccelerate() == (VS_FFT_ACCELERATE == 1)
+                                                && ! vs::Fft (1024, true).usesAccelerate() && ! vs::RealFft (1024, true).usesAccelerate());
+       #if VS_FFT_ACCELERATE
+        // vDSP against the code here, every size: the largest difference
+        // against the largest bin (forward) or sample (inverse)
+        {
+            double worst = 0.0;
+            for (int l = 1; l <= 20; ++l)
+            {
+                const int n = 1 << l;
+                const vs::Fft fa (n), fp (n, true);
+                auto re = noise (n, 20 + (unsigned) l), im = noise (n, 40 + (unsigned) l);
+                auto ra = re, ia = im, rp = re, ip = im;
+                fa.forward (ra.data(), ia.data());
+                fp.forward (rp.data(), ip.data());
+                double big = 0.0, d = 0.0;
+                for (int k = 0; k < n; ++k)
+                {
+                    big = std::max (big, std::hypot (rp[(size_t) k], ip[(size_t) k]));
+                    d = std::max (d, std::hypot (ra[(size_t) k] - rp[(size_t) k], ia[(size_t) k] - ip[(size_t) k]));
+                }
+                worst = std::max (worst, d / big);
+                fa.inverse (ra.data(), ia.data());
+                fp.inverse (rp.data(), ip.data());
+                d = 0.0;
+                for (int k = 0; k < n; ++k) d = std::max ({ d, std::abs (ra[(size_t) k] - rp[(size_t) k]), std::abs (ia[(size_t) k] - ip[(size_t) k]) });
+                worst = std::max (worst, d); // the samples are at most 1
+
+                vs::RealFft qa (n), qp (n, true);
+                const auto x = noise (n, 60 + (unsigned) l);
+                const int b = n / 2 + 1;
+                std::vector<double> ar ((size_t) b), ai ((size_t) b), pr ((size_t) b), pi_ ((size_t) b), ya ((size_t) n), yp ((size_t) n);
+                qa.forward (x.data(), ar.data(), ai.data());
+                qp.forward (x.data(), pr.data(), pi_.data());
+                big = 0.0; d = 0.0;
+                for (int k = 0; k < b; ++k)
+                {
+                    big = std::max (big, std::hypot (pr[(size_t) k], pi_[(size_t) k]));
+                    d = std::max (d, std::hypot (ar[(size_t) k] - pr[(size_t) k], ai[(size_t) k] - pi_[(size_t) k]));
+                }
+                worst = std::max (worst, d / big);
+                qa.inverse (pr.data(), pi_.data(), ya.data());
+                qp.inverse (pr.data(), pi_.data(), yp.data());
+                d = 0.0;
+                for (int k = 0; k < n; ++k) d = std::max (d, std::abs (ya[(size_t) k] - yp[(size_t) k]));
+                worst = std::max (worst, d);
+            }
+            expect ("Fft and RealFft: vDSP agrees with the code here (2 to 2^20)", worst < 1e-12, worst);
+        }
+       #endif
     }
 
     void windowTests()
@@ -261,6 +314,19 @@ namespace
                 const float* in[1] { c.data() };
                 auto* const* up = probe.processSamplesUp (in, 1, 256);
                 for (int k = 0; k < taps; ++k) h[(size_t) k] = up[0][k];
+            }
+            {
+                // half-band: every tap an even distance from the centre (but the centre) is exactly 0
+                bool zeros = true, others = true;
+                for (int k = 0; k < taps; ++k)
+                {
+                    const int m = k - (taps - 1) / 2;
+                    if (m != 0 && m % 2 == 0) zeros = zeros && h[(size_t) k] == 0.0f;
+                    else others = others && h[(size_t) k] != 0.0f;
+                }
+                char zname[96];
+                std::snprintf (zname, sizeof (zname), "Oversampler (%d taps): the half-band's zero taps are exactly 0", taps);
+                expect (zname, zeros && others);
             }
             auto src = noise (n, 9);
             std::vector<float> x (src.begin(), src.end());
