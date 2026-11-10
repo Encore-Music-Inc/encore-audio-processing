@@ -233,6 +233,8 @@ namespace vs::music
     // A frequency as a MIDI note with a fraction (69.5 is a quarter tone above A4)
     inline double hzToMidi (double hz, double a4 = 440.0) { return 69.0 + 12.0 * std::log2 (hz / a4); }
     inline double midiToHz (double midi, double a4 = 440.0) { return a4 * std::pow (2.0, (midi - 69.0) / 12.0); }
+    // The same in single precision, as the pitch engine works (both arguments float)
+    inline float hzToMidi (float hz, float a4) { return 69.0f + 12.0f * std::log2 (hz / a4); }
 
     // ---- General MIDI drums
 
