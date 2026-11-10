@@ -55,7 +55,8 @@ namespace vs
             w = 0;
         }
 
-        void clear() { std::fill (buf.begin(), buf.end(), 0.0f); w = 0; }
+        // Every sample set to v (silence by default), the write position back to the start.
+        void clear (float v = 0.0f) { std::fill (buf.begin(), buf.end(), v); w = 0; }
 
         void write (float x) { buf[(size_t) w] = x; w = (w + 1) & mask; }
         void put (float x) { buf[(size_t) w] = x; }
@@ -67,6 +68,9 @@ namespace vs
         template <typename P>
         float read (P delay) const { return readLinear (buf.data(), mask, (P) w - delay); }
         float readHermite (double delay) const { return vs::readHermite (buf.data(), mask, (double) w - delay); }
+
+        // The sample exactly delay samples back (a fixed, whole-sample delay)
+        float at (int delay) const { return buf[(size_t) ((w - delay) & mask)]; }
 
         int size() const { return mask + 1; }
 
