@@ -97,7 +97,7 @@ int main()
     expect ("it learns on the loudest 30 s (the loud part, at the end)", a.window.from == (long long) (15 * fs) && a.window.length == (long long) (30 * fs),
             "(from %.1f s, %.1f s long)", a.window.from / fs, a.window.length / fs);
     expect ("the master is exactly the song's length", a.l.size() == song.l.size());
-    expect ("it lands within 0.25 LU of the target", std::abs (a.lufs - s.targetLufs) < 0.25, "(%.2f LUFS in %.0f render(s))", a.lufs, a.renders);
+    expect ("it lands within 0.1 LU of the target", std::abs (a.lufs - s.targetLufs) < 0.1, "(%.2f LUFS in %.0f render(s))", a.lufs, a.renders);
 
     // in line with the song: the master's correlation with the song peaks at no delay
     {

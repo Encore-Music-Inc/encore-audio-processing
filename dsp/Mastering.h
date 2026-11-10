@@ -19,10 +19,14 @@ namespace vs
     // 3. Render: the whole song through a new chain with what was learned
     //    locked, the chain's latency taken back out (the master lines up with
     //    the original sample for sample), its integrated loudness measured as
-    //    it goes. If that is 0.25 LU or more off the target, the learned drive
-    //    moves by the difference (kept to -6 .. +24 dB) and the song is
-    //    rendered again, at most 3 renders in all (fewer when the drive is held
-    //    at a limit, since the render would come out the same).
+    //    it goes. While that is 0.1 LU or more off the target the drive is
+    //    corrected and the song rendered again: the first correction moves the
+    //    drive by the difference, later ones by the difference over the slope
+    //    measured between the last two renders (LU per dB, kept to 1/3 .. 2).
+    //    It stops when on target, when the drive is held at -6 or +24 dB (the
+    //    next render would be the same), or when a render comes out no closer
+    //    than the best so far (the best is rendered once more, as the master),
+    //    and after maxRenders renders at most.
     //
     // Each pass is fed block by block, so a song never has to fit in memory
     // at once: only the 30 s learning stretch is kept. A mono song is fed with
@@ -40,8 +44,11 @@ namespace vs
     public:
         static constexpr int block = 1024;
         static constexpr double windowSeconds = 30.0, maxLearnSeconds = 90.0;
-        static constexpr float toleranceLu = 0.25f, minDriveDb = -6.0f, maxDriveDb = 24.0f;
-        static constexpr int maxRenders = 3;
+        static constexpr float toleranceLu = 0.1f, minDriveDb = -6.0f, maxDriveDb = 24.0f;
+        // LU of loudness per dB of drive that a correction assumes, at least and at most
+        static constexpr double minSlope = 1.0 / 3.0, maxSlope = 2.0;
+        // Every test song converges in 5 renders or fewer; 8 leaves room.
+        static constexpr int maxRenders = 8;
 
         void begin (double sampleRate, const MasterChain::Settings& s, long long songLength)
         {
@@ -56,6 +63,7 @@ namespace vs
             learnedValues = {};
             renders = 0;
             lastLufs = -100.0f;
+            finalRender = false;
             energyDone = false;
         }
 
@@ -190,16 +198,33 @@ namespace vs
         float renderedLufs() const { return lastLufs; }
         int rendersDone() const { return renders; }
 
-        // After a render: true when the master is 0.25 LU or more off the
-        // target, fewer than 3 renders were made and the drive can still move
-        // (not held at -6 or +24 dB), with the drive already moved for the
-        // next render.
+        // After a render: true when the song must be rendered again (the
+        // drive already moved for it), false when the last render is the master.
         bool nextPass()
         {
             const double err = (double) settings.targetLufs - (double) lastLufs;
+            if (finalRender) return false;
+            const bool closer = renders == 1 || std::abs (err) < std::abs (bestErr);
+            if (closer) { bestErr = err; bestDrive = drive; }
             if (std::abs (err) < toleranceLu || renders >= maxRenders) return false;
-            const double moved = std::max ((double) minDriveDb, std::min ((double) maxDriveDb, drive + err));
+            if (! closer)
+            {
+                // this render got no closer: render the best one again and stop there
+                drive = bestDrive;
+                learnedValues.driveDb = (float) drive;
+                finalRender = true;
+                return true;
+            }
+            double step = err;
+            if (renders > 1 && drive != prevDrive)
+            {
+                const double slope = ((double) lastLufs - prevLufs) / (drive - prevDrive);
+                step = err / std::clamp (slope, minSlope, maxSlope);
+            }
+            const double moved = std::max ((double) minDriveDb, std::min ((double) maxDriveDb, drive + step));
             if (moved == drive) return false; // held at a limit: another render would be the same
+            prevDrive = drive;
+            prevLufs = lastLufs;
             drive = moved;
             learnedValues.driveDb = (float) drive;
             return true;
@@ -272,5 +297,7 @@ namespace vs
         long long fed = 0, written = 0;
         float lastLufs = -100.0f;
         double drive = 6.0; // the drive between renders, kept in double as it moves
+        double prevDrive = 0.0, prevLufs = 0.0, bestDrive = 0.0, bestErr = 0.0;
+        bool finalRender = false;
     };
 }
