@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <vector>
+#include "Biquad.h"
 #include "Fft.h"
 #include "Windows.h"
 #include "Util.h"
@@ -12,8 +13,10 @@
 namespace vs
 {
     // Spectrum analysis: the live analyser the products draw behind an EQ
-    // (SpectrumAnalyser), and the long-term spectrum of a whole song with the
-    // "cliff" a lossy encoder leaves at the top (CliffFinder).
+    // (SpectrumAnalyser); the long-term spectrum (LongTermSpectrum: the one
+    // averaged power spectrum, under welch(), CliffFinder and tonalBalance());
+    // the "cliff" a lossy encoder leaves at the top of a song (CliffFinder);
+    // and a mix's tonal balance against a finished mix's (tonalBalance).
 
     // A live analyser. The newest `size` samples of what it is fed, windowed
     // (Hann), through the FFT, as each bin's magnitude divided by `scale`. On
@@ -168,6 +171,174 @@ namespace vs
         std::vector<double> re, im;
     };
 
+    // A long-term power spectrum: frames of n samples (n a power of two),
+    // each times a periodic Hann window, through the FFT; each frame's power
+    // |X(k)|^2 added up per bin k = 0..n/2. sum() is the total; average over
+    // whatever the caller counts (frames, or segments of several channels).
+    class LongTermSpectrum
+    {
+    public:
+        void prepare (int frameSize)
+        {
+            n = frameSize;
+            win = windows::hannPeriodic (n);
+            pow.assign ((size_t) n / 2 + 1, 0.0);
+            re.assign ((size_t) n, 0.0);
+            im.assign ((size_t) n, 0.0);
+            count = 0;
+        }
+
+        // n samples, windowed here
+        template <typename T>
+        void addFrame (const T* x)
+        {
+            for (int i = 0; i < n; ++i) { re[(size_t) i] = (double) x[i] * win[(size_t) i]; im[(size_t) i] = 0.0; }
+            transformAndAdd();
+        }
+
+        // A stretch shorter than a frame: the window stretched over its
+        // `count` samples (sample i takes the window at i n / count), the
+        // rest of the frame zero.
+        template <typename T>
+        void addShort (const T* x, int length)
+        {
+            std::fill (re.begin(), re.end(), 0.0);
+            std::fill (im.begin(), im.end(), 0.0);
+            for (int i = 0; i < length; ++i) re[(size_t) i] = (double) x[i] * win[(size_t) (((std::int64_t) i * n) / length)];
+            transformAndAdd();
+        }
+
+        int size() const { return n; }
+        int frames() const { return count; }
+        const std::vector<double>& sum() const { return pow; }
+
+        // The sum divided by `by` (at least 1)
+        std::vector<double> averaged (double by) const
+        {
+            std::vector<double> p (pow);
+            for (auto& v : p) v /= std::max (1.0, by);
+            return p;
+        }
+
+        // The power of a periodic Hann window (sum of w^2: 3 n / 8), for
+        // turning bin powers into a mean square.
+        double windowPower() const { return 3.0 * n / 8.0; }
+
+    private:
+        void transformAndAdd()
+        {
+            fftFor (n).forward (re.data(), im.data());
+            for (int k = 0; k <= n / 2; ++k) pow[(size_t) k] += re[(size_t) k] * re[(size_t) k] + im[(size_t) k] * im[(size_t) k];
+            ++count;
+        }
+
+        int n = 0, count = 0;
+        std::vector<double> win, pow, re, im;
+    };
+
+    // An averaged power spectrum and its bin spacing
+    struct AveragedSpectrum
+    {
+        std::vector<double> power;   // per bin, 0..n/2
+        double binHz = 0.0;
+        int size = 0;                // the frame size n
+    };
+
+    // Welch's averaged spectrum of one or more channels of `total` samples:
+    // frames of n overlapping by half, up to maxSegments of them spread
+    // evenly over the whole (segment s starts at the hop nearest (s + 0.5)
+    // of its share), every channel's frame added, the sum divided by the
+    // number of segments. Shorter than one frame: one frame with the window
+    // stretched over what there is.
+    inline AveragedSpectrum welch (const float* const* chans, int numCh, std::int64_t total, double fs, int n, int maxSegments = 64)
+    {
+        const std::int64_t hop = n >> 1;
+        const std::int64_t segs = std::max<std::int64_t> (1, (total - n) / hop + 1);
+        const std::int64_t pick = std::min<std::int64_t> (segs, maxSegments);
+        LongTermSpectrum lts;
+        lts.prepare (n);
+        int used = 0;
+        for (std::int64_t s = 0; s < pick; ++s)
+        {
+            const std::int64_t at = (std::int64_t) std::floor ((s + 0.5) * ((double) segs / (double) pick)) * hop;
+            if (at + n > total) continue;
+            for (int c = 0; c < numCh; ++c) lts.addFrame (chans[c] + at);
+            ++used;
+        }
+        if (total < n)
+        {
+            for (int c = 0; c < numCh; ++c) lts.addShort (chans[c], (int) total);
+            used = 1;
+        }
+        return { lts.averaged (used), fs / n, n };
+    }
+
+    // The same over frames that start at the given positions (every channel's
+    // frame added, divided by the number of starts).
+    inline AveragedSpectrum welchAt (const float* const* chans, int numCh, double fs, int n, const std::vector<std::int64_t>& starts)
+    {
+        LongTermSpectrum lts;
+        lts.prepare (n);
+        for (auto at : starts)
+            for (int c = 0; c < numCh; ++c) lts.addFrame (chans[c] + at);
+        return { lts.averaged ((double) starts.size()), fs / n, n };
+    }
+
+    // A mix's tonal balance: its level in ten octave bands (40 Hz to 12 kHz)
+    // against a finished mix's (roughly equal energy per octave from 100 Hz
+    // to 2 kHz, 1.05 dB per octave more below 100 Hz, 2.5 dB per octave
+    // less above 2 kHz), relative to the 125 Hz to 4 kHz average, and the four
+    // figures a mix check reports from it: lows (40, 63 Hz), mud (250, 500
+    // Hz), harshness (2, 4 kHz) and top (8, 12 kHz), in dB above a finished
+    // mix. Each band's level is the mean square the band would have after
+    // two cascaded RBJ band-passes (Q 1.41) at its centre, read from the
+    // long-term spectrum of the mid signal (Welch, frames of about 0.35 s).
+    struct TonalBalance
+    {
+        static constexpr int numBands = 10;
+        static constexpr double bandHz[numBands] { 40, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 12000 };
+        double levelDb[numBands] {}, relDb[numBands] {};
+        double lows = 0, mud = 0, harsh = 0, top = 0;
+    };
+
+    // The reference curve: a finished mix's level in a band at hz (dB)
+    inline double finishedMixDb (double hz)
+    {
+        return (hz < 100 ? 1.05 * std::log2 (100 / hz) : 0) - (hz > 2000 ? 2.5 * std::log2 (hz / 2000) : 0);
+    }
+
+    inline TonalBalance tonalBalance (const float* mid, std::int64_t n, double fs)
+    {
+        TonalBalance t;
+        const int size = 1 << (int) std::lround (std::log2 (fs * 0.35));
+        const float* ch[1] { mid };
+        const auto sp = welch (ch, 1, n, fs, size, std::numeric_limits<int>::max());
+        const double norm = (double) size * (3.0 * size / 8.0);
+        double diff[TonalBalance::numBands];
+        for (int b = 0; b < TonalBalance::numBands; ++b)
+        {
+            const double f = TonalBalance::bandHz[b];
+            const std::vector<BiquadCoefs> bp { BiquadCoefs::rbj (BiquadCoefs::Type::bandPass, fs, f, 1.41), BiquadCoefs::rbj (BiquadCoefs::Type::bandPass, fs, f, 1.41) };
+            double e = 0.0;
+            for (int k = 0; k <= size / 2; ++k)
+            {
+                const double h = sectionsResponse (bp, k * sp.binHz, fs);
+                e += (k == 0 || k == size / 2 ? 1.0 : 2.0) * h * h * sp.power[(size_t) k];
+            }
+            t.levelDb[b] = db10 (e / norm);
+            diff[b] = t.levelDb[b] - finishedMixDb (f);
+        }
+        double normDb = 0.0;
+        for (int b = 2; b <= 7; ++b) normDb += diff[b];
+        normDb /= 6;
+        for (int b = 0; b < TonalBalance::numBands; ++b) t.relDb[b] = diff[b] - normDb;
+        t.lows = (t.relDb[0] + t.relDb[1]) / 2;
+        t.mud = (t.relDb[3] + t.relDb[4]) / 2;
+        t.harsh = (t.relDb[6] + t.relDb[7]) / 2;
+        t.top = (t.relDb[8] + t.relDb[9]) / 2;
+        return t;
+    }
+
     // Where a song's highs stop like a wall, and how far they drop there (dB).
     struct SpectrumCliff
     {
@@ -193,11 +364,9 @@ namespace vs
             frames = (int) std::min<std::int64_t> (160, totalFrames / N);
             if (frames < 4) frames = 0; // too short to judge
             step = frames > 0 ? (totalFrames - N) / (frames - 1) : 0;
-            win = windows::hannPeriodic (N);
-            pow.assign (N / 2, 0.0);
+            spectrum.prepare (N);
             frame.assign (N, 0.0);
             next = 0;
-            used = 0;
             at = 0;
         }
 
@@ -222,7 +391,8 @@ namespace vs
         bool result (SpectrumCliff& out) const
         {
             out = {};
-            if (frames < 4 || used < 4) return false;
+            if (frames < 4 || spectrum.frames() < 4) return false;
+            const auto& pow = spectrum.sum();
             const double bw = 250.0;
             const int nb = (int) std::floor (fs / 2 / bw);
             std::vector<double> lev ((size_t) nb), lin ((size_t) nb);
@@ -273,23 +443,16 @@ namespace vs
     private:
         void analyseFrame()
         {
-            std::vector<double> re ((size_t) N), im ((size_t) N, 0.0);
             double e = 0.0;
-            for (int i = 0; i < N; ++i)
-            {
-                const double v = frame[(size_t) i];
-                re[(size_t) i] = v * win[(size_t) i];
-                e += v * v;
-            }
+            for (int i = 0; i < N; ++i) e += frame[(size_t) i] * frame[(size_t) i];
             if (e / N < 1e-5) return; // quieter than -50 dB: an intro, a gap
-            fftFor (N).forward (re.data(), im.data());
-            for (int k = 0; k < N / 2; ++k) pow[(size_t) k] += re[(size_t) k] * re[(size_t) k] + im[(size_t) k] * im[(size_t) k];
-            ++used;
+            spectrum.addFrame (frame.data());
         }
 
         double fs = 48000.0;
-        int frames = 0, next = 0, used = 0;
+        int frames = 0, next = 0;
         std::int64_t step = 0, at = 0;
-        std::vector<double> win, pow, frame;
+        LongTermSpectrum spectrum;
+        std::vector<double> frame;
     };
 }
