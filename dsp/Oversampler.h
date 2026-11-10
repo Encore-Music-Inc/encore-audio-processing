@@ -5,6 +5,12 @@
 #include <vector>
 #include "Windows.h"
 
+#if defined(__FP_FAST_FMA) || defined(__FP_FAST_FMAF) || defined(__FMA__) || defined(__ARM_FEATURE_FMA) || defined(_M_ARM64)
+ #define VS_OVERSAMPLER_DOWN_ONE_AT_A_TIME 1
+#else
+ #define VS_OVERSAMPLER_DOWN_ONE_AT_A_TIME 0
+#endif
+
 namespace vs
 {
     // Power-of-two oversampling: 2x, 4x, 8x or 16x in stages of 2x, each stage
@@ -18,13 +24,24 @@ namespace vs
     //
     // Each stage does only the work whose result is used: up, the
     // zero-stuffed samples are left out of the sums (each output uses every
-    // other tap); down, only the outputs that are kept are computed. Up, a
-    // stage keeps its last inputs in front of the new block in one line and
-    // sums tap by tap over the whole block (so the sums of several outputs
-    // run side by side); down, it keeps its history in a ring buffer written
-    // twice (at p and p + length) so the taps always read one contiguous run.
-    // Each output's sum runs in the same order as a plain FIR over the
-    // zero-stuffed signal, so the results are the same to the bit.
+    // other tap); down, only the outputs that are kept are computed. Both
+    // directions keep a stage's last inputs in front of the new block in one
+    // line and sum tap by tap over the whole block, so the sums of several
+    // outputs run side by side. Down splits the block into its even and odd
+    // samples (two lines), so that each tap reads one contiguous run. Each
+    // output's sum runs in the same order as a plain FIR (tap 0 first), so the
+    // results are the same to the bit as summing it one output at a time.
+    //
+    // The taps a half-band filter would have at exactly 0 (every other one
+    // but the centre) come out of the design as rounding residue, not as 0,
+    // so they are summed like the others.
+    //
+    // One exception, down: where the compiler can fuse a multiply and an add
+    // into one rounding (arm64, or x86 built for FMA), it compiles the
+    // one-output-at-a-time sum with some products fused and some not, which
+    // blocked sums can't follow. There each output is summed on its own, from
+    // a ring buffer of the history written twice (at p and p + length) so the
+    // taps read one contiguous run, and the results are that loop's.
     template <typename T>
     class Oversampler
     {
@@ -83,7 +100,12 @@ namespace vs
             for (int s = 0; s < stages; ++s)
             {
                 line[s].assign ((size_t) channels, std::vector<T> ((size_t) (upEvenTaps - 1 + (maxBlock << s)), T (0)));
+               #if VS_OVERSAMPLER_DOWN_ONE_AT_A_TIME
                 down[s].assign ((size_t) channels, Ring (taps));
+               #else
+                downEven[s].assign ((size_t) channels, std::vector<T> ((size_t) (upOddTaps + (maxBlock << s)), T (0)));
+                downOdd[s].assign ((size_t) channels, std::vector<T> ((size_t) (upOddTaps + (maxBlock << s)), T (0)));
+               #endif
             }
             ptrs.assign ((size_t) channels, nullptr);
             reset();
@@ -94,7 +116,12 @@ namespace vs
             for (int s = 0; s < stages; ++s)
             {
                 for (auto& l : line[s]) std::fill (l.begin(), l.end(), T (0));
+               #if VS_OVERSAMPLER_DOWN_ONE_AT_A_TIME
                 for (auto& r : down[s]) r.clear();
+               #else
+                for (auto& l : downEven[s]) std::fill (l.begin(), l.end(), T (0));
+                for (auto& l : downOdd[s]) std::fill (l.begin(), l.end(), T (0));
+               #endif
             }
         }
 
@@ -166,6 +193,7 @@ namespace vs
         void processSamplesDown (T* const* out, int nch, int n)
         {
             nch = std::min (nch, channels);
+           #if VS_OVERSAMPLER_DOWN_ONE_AT_A_TIME
             for (int s = stages; s-- > 0;)
             {
                 const int nHigh = n << (s + 1);
@@ -184,9 +212,67 @@ namespace vs
                     }
                 }
             }
+           #else
+            for (int s = stages; s-- > 0;)
+            {
+                const int m = n << s; // outputs of this stage
+                for (int c = 0; c < nch; ++c)
+                {
+                    const T* src = buf[s][(size_t) c].data();
+                    T* dst = s == 0 ? out[c] : buf[s - 1][(size_t) c].data();
+                    auto& le = downEven[s][(size_t) c];
+                    auto& lo = downOdd[s][(size_t) c];
+                    const int keep = upOddTaps;
+                    for (int i = 0; i < m; ++i)
+                    {
+                        le[(size_t) (keep + i)] = src[2 * i];
+                        lo[(size_t) (keep + i)] = src[2 * i + 1];
+                    }
+                    // output i is the sum over taps k (from 0 up) of tap k
+                    // times input 2i - k: for k = 2j that is even[i - j], for
+                    // k = 2j + 1 it is odd[i - 1 - j]. Sixteen outputs at a
+                    // time, each summed tap by tap in that order.
+                    const T* e = le.data() + keep;
+                    const T* o = lo.data() + keep;
+                    int i0 = 0;
+                    for (; i0 + tile <= m; i0 += tile)
+                    {
+                        T a[tile] {};
+                        for (int j = 0; j < upOddTaps; ++j)
+                        {
+                            const T te = evenTaps[(size_t) j], to = oddTaps[(size_t) j];
+                            const T* xe = e + i0 - j;
+                            const T* xo = o + i0 - 1 - j;
+                            for (int k = 0; k < tile; ++k) { a[k] += te * xe[k]; a[k] += to * xo[k]; }
+                        }
+                        {
+                            // the last tap (even) on its own
+                            const T te = evenTaps[(size_t) upOddTaps];
+                            const T* xe = e + i0 - upOddTaps;
+                            for (int k = 0; k < tile; ++k) a[k] += te * xe[k];
+                        }
+                        for (int k = 0; k < tile; ++k) dst[i0 + k] = a[k];
+                    }
+                    for (int i = i0; i < m; ++i)
+                    {
+                        T acc = T (0);
+                        for (int j = 0; j < upOddTaps; ++j)
+                        {
+                            acc += evenTaps[(size_t) j] * e[i - j];
+                            acc += oddTaps[(size_t) j] * o[i - 1 - j];
+                        }
+                        acc += evenTaps[(size_t) upOddTaps] * e[i - upOddTaps];
+                        dst[i] = acc;
+                    }
+                    std::copy (le.begin() + m, le.begin() + m + keep, le.begin());
+                    std::copy (lo.begin() + m, lo.begin() + m + keep, lo.begin());
+                }
+            }
+           #endif
         }
 
     private:
+       #if VS_OVERSAMPLER_DOWN_ONE_AT_A_TIME
         // The last L values, newest first, readable as one run of L.
         struct Ring
         {
@@ -206,6 +292,8 @@ namespace vs
                 return v.data() + p;
             }
         };
+        std::vector<Ring> down[4];
+       #endif
 
         int channels, stages, taps;
         // Up: the zero-stuffed history holds one input every other tap, so
@@ -215,8 +303,12 @@ namespace vs
         std::vector<std::vector<T>> buf[4];
         // up: per stage and channel, the last upEvenTaps - 1 inputs, then the block
         std::vector<std::vector<T>> line[4];
+       #if ! VS_OVERSAMPLER_DOWN_ONE_AT_A_TIME
+        // down: per stage and channel, the last upOddTaps even and odd
+        // inputs, then the block's
+        std::vector<std::vector<T>> downEven[4], downOdd[4];
+       #endif
         static constexpr int tile = 16;
-        std::vector<Ring> down[4];
         std::vector<T*> ptrs;
     };
 }
