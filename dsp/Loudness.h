@@ -202,7 +202,7 @@ namespace vs
 
         // 0.3 dB of margin: a 4x detector can under-read the very top octave, and
         // the ceiling should hold even when measured more strictly than BS.1770
-        void setCeilingDb (float db) { ceiling = std::pow (10.0f, db / 20.0f); target = ceiling * 0.966f; }
+        void setCeilingDb (float db) { ceiling = dbToGain (db); target = ceiling * 0.966f; }
         void setReleaseMs (float ms, double) { relCoef = onePole (ms, fs); }
 
         void process (juce::dsp::AudioBlock<float>& block)

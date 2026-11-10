@@ -309,7 +309,7 @@ namespace vs
             {
                 double s = 0.0;
                 for (float v : ring) s += (double) v * v;
-                return 10.0f * (float) std::log10 (s / size + 1e-20);
+                return (float) db10 (s / size);
             };
             const float dDb = frameDb (ringDi), mDb = frameDb (ringMic);
             peakDi = std::max (peakDi, dDb);
