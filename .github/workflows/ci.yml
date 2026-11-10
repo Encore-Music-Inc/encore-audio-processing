@@ -276,10 +276,10 @@ jobs:
           ctest --test-dir build --output-on-failure --parallel 4 || code=$?
           bash .github/sanitizers/report.sh "$reports" "$code"
 
-  # The browser's files: master.wasm, and every data/*.json (the lists the
-  # tools/*.py scripts write: the tuner's instruments, the scale library, ...),
-  # each with its SHA-256. The artifact keeps the name master.wasm, which the
-  # release job looks for.
+  # The browser's files: master.wasm, and every data/*.json (what the
+  # tools/*.py scripts write: the tuner's instruments, the scale library, the
+  # reference set's expected results, ...), each with its SHA-256. The artifact
+  # keeps the name master.wasm, which the release job looks for.
   wasm:
     name: master.wasm
     needs: changes
@@ -289,7 +289,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Each tools/*.py script writes a header in dsp/ and a file in data/
+      # Each tools/*.py script writes files in dsp/ and data/ (tools/reference.py
+      # builds tests/ReferenceTests.cpp with this runner's compiler and writes
+      # data/reference.json from its results)
       - name: The generated files are what tools/*.py write
         run: |
           for script in tools/*.py; do python3 "$script"; done
@@ -312,6 +314,9 @@ jobs:
           cp data/*.json wasm/
           (cd wasm && for f in master.wasm *.json; do sha256sum "$f" > "$f.sha256"; done)
           cat wasm/*.sha256
+      # The reference set through master.wasm, as a web product runs it
+      - name: The reference set through master.wasm
+        run: node wasm/reference.mjs wasm/master.wasm data/reference.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: master.wasm
