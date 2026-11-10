@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include "Util.h"
 
 namespace vs
 {
@@ -29,7 +30,7 @@ namespace vs
         {
             const int b1 = binFor (f * std::pow (2.0f, -octaves * 0.5f));
             const int b2 = std::max (b1, binFor (f * std::pow (2.0f, octaves * 0.5f)));
-            return 10.0 * std::log10 ((prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / (b2 - b1 + 1) + 1e-20);
+            return db10 ((prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / (b2 - b1 + 1));
         };
 
         constexpr int points = 220;
@@ -55,7 +56,7 @@ namespace vs
             r.freq = freqs[(size_t) i];
             r.prominenceDb = p;
             const int b1 = binFor (r.freq * 0.9f), b2 = std::max (b1, binFor (r.freq * 1.1f));
-            r.relDb = (float) (10.0 * std::log10 ((prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / total + 1e-20));
+            r.relDb = (float) db10 ((prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / total);
             found.push_back (r);
         }
         std::sort (found.begin(), found.end(), [] (const Resonance& a, const Resonance& b) { return a.prominenceDb > b.prominenceDb; });

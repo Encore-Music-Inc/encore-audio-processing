@@ -1,9 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <vector>
 #include "JuceInclude.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -20,7 +22,7 @@ namespace vs
             const double w = juce::MathConstants<double>::twoPi * freq / fs;
             const std::complex<double> z1 = std::polar (1.0, -w), z2 = z1 * z1;
             const auto h = (b0 + b1 * z1 + b2 * z2) / (1.0 + a1 * z1 + a2 * z2);
-            return 20.0 * std::log10 (std::max (std::abs (h), 1.0e-12));
+            return db20 (std::max (std::abs (h), 1.0e-12), 0.0);
         }
 
         static BiquadCoefs make (double b0, double b1, double b2, double a0, double a1, double a2)
@@ -118,6 +120,16 @@ namespace vs
             x2 = x1; x1 = v; y2 = y1; y1 = y;
             x[i] = (T) y;
         }
+    }
+
+    // An RBJ section over a whole buffer in place (direct form I, as
+    // filterDirectFormI), its frequency kept at or under 0.45 of the sample
+    // rate so a filter set above that (a hat's 12 kHz at 22.05 kHz) stays
+    // stable. The click and drum synthesizers filter their sounds with it.
+    template <typename T>
+    void filterRbjCapped (T* x, int n, double fs, BiquadCoefs::Type type, double hz, double q, double gainDb = 0.0)
+    {
+        filterDirectFormI (BiquadCoefs::rbjRaw (type, fs, std::min (hz, fs * 0.45), q, gainDb), x, n);
     }
 
     // An even-order Butterworth filter (low-pass or high-pass) as order / 2

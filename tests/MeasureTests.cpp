@@ -1,8 +1,9 @@
 // The measurements (dsp/TruePeak.h, LoudnessReport.h, Analysis.h, Spectrum.h,
-// Waveform.h) built without JUCE, as the browser build is: reference values,
+// Waveform.h), the long-term spectrum and the clipping check among them, built without JUCE, as the browser build is: reference values,
 // the true-peak meter reading what the limiter holds, and each measurement on
 // signals whose answer is known. Each check prints PASS or FAIL; the suite
 // exits non-zero on any failure.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -309,6 +310,54 @@ int main()
         const float* ch[1] { x.data() };
         const auto px = vs::waveform::pixelPeaks (ch, 1, 1000, 100);
         expect ("pixel peaks", px.size() == 100 && px[1] == 0.8f && px[99] == 0.25f);
+    }
+
+    // ---- the long-term spectrum: Welch, the tonal balance ----
+    {
+        const double fs = 48000.0;
+        const auto x = sine (fs, 10.0, 1500.0, 0.5);
+        const float* ch[1] { x.data() };
+        const auto w = vs::welch (ch, 1, (std::int64_t) x.size(), fs, 4096);
+        const auto top = std::max_element (w.power.begin(), w.power.end()) - w.power.begin();
+        // a sine of amplitude a: bin power (a n / 4)^2 at its bin (Hann's 0.5 gain)
+        const double want = std::pow (0.5 * 4096 / 4, 2.0);
+        expect ("welch: a 1500 Hz sine peaks at bin 128 at its expected power", top == 128 && std::abs (w.power[128] / want - 1.0) < 1e-6,
+                "bin %.0f, %.8f of the expected power", (double) top, w.power[128] / want);
+        const auto at = vs::welchAt (ch, 1, fs, 4096, { 0, 48000, 96000 });
+        expect ("welchAt: the same sine, the same spectrum", std::abs (at.power[128] / w.power[128] - 1.0) < 1e-6, "%.8f", at.power[128] / w.power[128]);
+        const auto shortOne = vs::welch (ch, 1, 1000, fs, 4096);
+        expect ("welch: shorter than a frame, one stretched frame", shortOne.power.size() == 2049 && shortOne.power[0] > 0.0);
+
+        // a steady tone's band level is its mean square
+        const auto t = vs::tonalBalance (x.data(), (std::int64_t) x.size(), fs);
+        expect ("tonal balance: no band is louder than the signal itself", *std::max_element (std::begin (t.levelDb), std::end (t.levelDb)) < 10 * std::log10 (0.125) + 0.01);
+        // white noise: equal energy per Hz rises 3 dB an octave, so the top reads bright
+        const auto n = noise ((size_t) fs * 20, 0.3f, 11);
+        const auto tn = vs::tonalBalance (n.data(), (std::int64_t) n.size(), fs);
+        expect ("tonal balance: white noise rises about 3 dB an octave (500 Hz to 1 kHz)", std::abs ((tn.levelDb[5] - tn.levelDb[4]) - 3.0) < 0.3,
+                "%.2f dB", tn.levelDb[5] - tn.levelDb[4]);
+        expect ("tonal balance: white noise reads lean low end and a hot top", tn.lows < -5 && tn.top > 4, "lows %.1f, top %.1f", tn.lows, tn.top);
+    }
+
+    // ---- the clipping check on its own ----
+    {
+        const double fs = 44100.0;
+        auto x = sine (fs, 2.0, 220.0, 1.5);
+        for (auto& v : x) v = std::max (-0.9f, std::min (0.9f, v));
+        vs::FlatRuns fr;
+        fr.prepare (0.9f, vs::FlatRuns::tolerance (24, false), fs);
+        fr.process (x.data(), (int) x.size());
+        fr.finish();
+        const auto spots = vs::FlatRuns::merge (fr.events());
+        // 440 flattened tops in 2 s, all joined into one spot (each within 50 ms of the last)
+        expect ("flat runs: a sine clipped at 0.9 has a flat top every half cycle", fr.runs() == 880 && spots.size() == 1, "%.0f runs, %.0f spots", (double) fr.runs(), (double) spots.size());
+        auto clean = sine (fs, 2.0, 220.0, 0.9);
+        vs::FlatRuns fc;
+        fc.prepare (0.9f, vs::FlatRuns::tolerance (24, false), fs);
+        fc.process (clean.data(), (int) clean.size());
+        fc.finish();
+        expect ("flat runs: an unclipped sine has none", fc.runs() == 0, "%.0f runs", (double) fc.runs());
+        expect ("flat runs: the tolerance is 1.5 steps of the format", vs::FlatRuns::tolerance (16, false) == 1.5 / 32768 && vs::FlatRuns::tolerance (0, true) == 1e-5);
     }
 
     std::printf ("%s\n", failures == 0 ? "All measurement tests passed" : "MEASUREMENT TESTS FAILED");

@@ -27,6 +27,7 @@
 #include "Music.h"
 #include "Stats.h"
 #include "Yin.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -35,12 +36,7 @@ namespace vs
         // Seconds of sound per pitch reading.
         inline constexpr double trackWindow = 0.045;
 
-        // Rounds to the nearest whole number, halves up (2.5 to 3, -2.5 to -2).
-        inline double roundHalfUp (double x)
-        {
-            const double f = std::floor (x);
-            return x - f >= 0.5 ? f + 1.0 : f;
-        }
+        using vs::roundHalfUp;
 
         inline double clampTo (double v, double lo, double hi) { return std::max (lo, std::min (hi, v)); }
 

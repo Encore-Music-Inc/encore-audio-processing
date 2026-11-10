@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 #include "Oversampler.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -149,7 +150,7 @@ namespace vs
         std::int64_t samplePeakPosition() const { return spAt; }
         std::int64_t samplesMeasured() const { return frames; }
 
-        static float toDb (float linear) { return 20.0f * std::log10 (linear); }
+        static float toDb (float linear) { return ampToDb (linear, 0.0f); }
 
     private:
         // Where the meter can skip work: a stretch is upsampled only when what

@@ -7,6 +7,7 @@
 #include "Biquad.h"
 #include "Fft.h"
 #include "Util.h"
+#include "Windows.h"
 
 // Strum's Body stage: make a pickup (DI) sound like a mic on the same guitar.
 //
@@ -47,7 +48,7 @@ namespace vs
             if (pos >= (float) (numPoints - 1)) return db[numPoints - 1];
             const int i = (int) pos;
             const float t = pos - (float) i;
-            return db[(size_t) i] + t * (db[(size_t) i + 1] - db[(size_t) i]);
+            return lerp (db[(size_t) i], db[(size_t) i + 1], t);
         }
 
         bool operator== (const BodyCurve& o) const { return db == o.db && levelDb == o.levelDb && valid == o.valid; }
@@ -125,9 +126,7 @@ namespace vs
             size = 1 << order;
             hop = size / 2;
             fft.setSize (size);
-            window.resize ((size_t) size);
-            for (int i = 0; i < size; ++i)
-                window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size);
+            window = windows::hannPeriodicFloat (size);
             ringDi.assign ((size_t) size, 0.0f);
             ringMic.assign ((size_t) size, 0.0f);
             work.assign ((size_t) size, 0.0f);
@@ -233,7 +232,7 @@ namespace vs
 
             std::array<float, BodyCurve::numPoints> ratio {};
             for (int i = 0; i < BodyCurve::numPoints; ++i)
-                if (ok[(size_t) i]) ratio[(size_t) i] = (float) (10.0 * std::log10 (pm[(size_t) i] / pd[(size_t) i]));
+                if (ok[(size_t) i]) ratio[(size_t) i] = (float) db10 (pm[(size_t) i] / pd[(size_t) i], 0.0);
             // untrusted points take the nearest trusted value
             for (int i = 0; i < BodyCurve::numPoints; ++i)
                 if (! ok[(size_t) i])
@@ -310,7 +309,7 @@ namespace vs
             {
                 double s = 0.0;
                 for (float v : ring) s += (double) v * v;
-                return 10.0f * (float) std::log10 (s / size + 1e-20);
+                return (float) db10 (s / size);
             };
             const float dDb = frameDb (ringDi), mDb = frameDb (ringMic);
             peakDi = std::max (peakDi, dDb);

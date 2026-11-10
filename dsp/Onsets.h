@@ -32,6 +32,7 @@
 #include <vector>
 #include "dsp/Lpc.h"
 #include "dsp/Windows.h"
+#include "dsp/Util.h"
 
 namespace vs
 {
@@ -153,7 +154,6 @@ namespace vs
         }
 
     private:
-        static double roundHalfUp (double v) { return std::floor (v + 0.5); }
 
         static constexpr int order = 20;   // the detection predictor's order
         double sr;

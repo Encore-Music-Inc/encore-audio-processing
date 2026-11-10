@@ -5,6 +5,8 @@
 #include <vector>
 #include "Biquad.h"
 #include "TruePeak.h"
+#include "Util.h"
+#include "DelayLine.h"
 
 namespace vs
 {
@@ -147,20 +149,20 @@ namespace vs
             // one sample of slack each side of the detector alignment
             delayLen = look + detLatency + 1;
             window = look + 4;
-            for (auto& d : delay) d.assign ((size_t) delayLen, 0.0f);
-            boxBuf.assign ((size_t) look, 1.0f);
+            for (auto& d : delay) d.prepare (delayLen);
+            boxBuf.prepare (look);
             minQ.assign ((size_t) window + 4, { 0, 1.0f });
             scratch.setSize (2, maxBlock);
-            relCoef = (float) (1.0 - std::exp (-1.0 / (0.08 * sampleRate)));
+            relCoef = onePole (80.0f, sampleRate);
             fs = sampleRate;
             reset();
         }
 
         void reset()
         {
-            for (auto& d : delay) std::fill (d.begin(), d.end(), 0.0f);
-            std::fill (boxBuf.begin(), boxBuf.end(), 1.0f);
-            boxSum = (double) look; boxIdx = 0; dIdx = 0;
+            for (auto& d : delay) d.clear();
+            boxBuf.clear (1.0f);
+            boxSum = (double) look;
             qHead = qTail = 0; t = 0;
             relState = 1.0f;
             os.reset();
@@ -200,8 +202,8 @@ namespace vs
 
         // 0.3 dB of margin: a 4x detector can under-read the very top octave, and
         // the ceiling should hold even when measured more strictly than BS.1770
-        void setCeilingDb (float db) { ceiling = std::pow (10.0f, db / 20.0f); target = ceiling * 0.966f; }
-        void setReleaseMs (float ms, double) { relCoef = (float) (1.0 - std::exp (-1.0 / (ms * 0.001 * fs))); }
+        void setCeilingDb (float db) { ceiling = dbToGain (db); target = ceiling * 0.966f; }
+        void setReleaseMs (float ms, double) { relCoef = onePole (ms, fs); }
 
         void process (juce::dsp::AudioBlock<float>& block)
         {
@@ -234,24 +236,22 @@ namespace vs
                 relState = held < relState ? held : relState + relCoef * (held - relState);
 
                 // box average: the gain is fully down before the peak leaves the delay
-                boxSum += relState - boxBuf[(size_t) boxIdx];
-                boxBuf[(size_t) boxIdx] = relState;
-                boxIdx = (boxIdx + 1) % look;
+                boxSum += relState - boxBuf.at (look);
+                boxBuf.write (relState);
                 const float g = (float) std::min (1.0, boxSum / look);
                 minGain = std::min (minGain, g);
 
-                for (int c = 0; c < nch; ++c)
+                for (int c = 0; c < 2; ++c)
                 {
-                    auto& d = delay[c];
-                    const float delayed = d[(size_t) dIdx];
+                    if (c >= nch) { delay[c].advance(); continue; } // keeps both channels' delays in step
+                    const float delayed = delay[c].at (delayLen);
                     auto* p = block.getChannelPointer ((size_t) c);
-                    d[(size_t) dIdx] = p[i];
+                    delay[c].write (p[i]);
                     p[i] = juce::jlimit (-ceiling, ceiling, delayed * g); // safety net, normally never touches
                 }
-                dIdx = (dIdx + 1) % delayLen;
                 ++t;
             }
-            grDb.store (20.0f * std::log10 (std::max (minGain, 1e-6f)));
+            grDb.store (ampToDb (std::max (minGain, 1e-6f), 0.0f));
         }
 
         std::atomic<float> grDb { 0.0f };
@@ -259,9 +259,9 @@ namespace vs
     private:
         Oversampler<float> os = TruePeakDetector::makeOversampler<float> (2);
         juce::AudioBuffer<float> scratch;
-        std::vector<float> delay[2], boxBuf;
+        DelayLine delay[2], boxBuf;
         std::vector<std::pair<juce::int64, float>> minQ;
-        int look = 72, detLatency = 0, delayLen = 72, window = 74, boxIdx = 0, dIdx = 0, qHead = 0, qTail = 0;
+        int look = 72, detLatency = 0, delayLen = 72, window = 74, qHead = 0, qTail = 0;
         juce::int64 t = 0;
         double boxSum = 0.0, fs = 48000.0;
         float ceiling = 0.891f, target = 0.88f, relCoef = 0.001f, relState = 1.0f;

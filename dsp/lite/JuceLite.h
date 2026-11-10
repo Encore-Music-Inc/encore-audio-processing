@@ -11,6 +11,7 @@
 #include <cstring>
 #include <type_traits>
 #include <vector>
+#include "../Ramp.h"
 
 namespace juce
 {
@@ -27,40 +28,25 @@ namespace juce
 
     namespace ValueSmoothingTypes { struct Linear {}; struct Multiplicative {}; }
 
-    // Ramps toward a target over a set time (linear, or in equal ratios)
+    // JUCE's SmoothedValue, as vs::Ramp (the same numbers): a ramp toward
+    // a target over a set time, linear or in equal ratios.
     template <typename T, typename Type = ValueSmoothingTypes::Linear>
     class SmoothedValue
     {
+        static_assert (std::is_same_v<T, float>, "the browser build smooths floats");
+
     public:
-        void reset (double sampleRate, double seconds) { steps = std::max (1, (int) std::floor (sampleRate * seconds)); setCurrentAndTargetValue (target); }
-        void setCurrentAndTargetValue (T v) { current = target = v; countdown = 0; }
-        void setTargetValue (T v)
-        {
-            if (v == target) return;
-            target = v;
-            countdown = steps;
-            if constexpr (std::is_same_v<Type, ValueSmoothingTypes::Multiplicative>)
-                step = std::exp ((std::log (std::abs (target) + T (1e-12)) - std::log (std::abs (current) + T (1e-12))) / (T) countdown);
-            else
-                step = (target - current) / (T) countdown;
-        }
-        T getNextValue()
-        {
-            if (countdown <= 0) return target;
-            --countdown;
-            if constexpr (std::is_same_v<Type, ValueSmoothingTypes::Multiplicative>) current *= step; else current += step;
-            if (countdown == 0) current = target;
-            return current;
-        }
-        void skip (int n) { for (int i = 0; i < n && countdown > 0; ++i) getNextValue(); }
-        bool isSmoothing() const { return countdown > 0; }
-        T getTargetValue() const { return target; }
+        void reset (double sampleRate, double seconds) { ramp.reset (sampleRate, seconds); }
+        void setCurrentAndTargetValue (T v) { ramp.setCurrentAndTarget (v); }
+        void setTargetValue (T v) { ramp.setTarget (v); }
+        T getNextValue() { return ramp.next(); }
+        T skip (int n) { return ramp.skip (n); }
+        bool isSmoothing() const { return ramp.isRamping(); }
+        T getTargetValue() const { return ramp.getTarget(); }
+        T getCurrentValue() const { return ramp.getCurrent(); }
 
     private:
-        // like JUCE: a multiplicative ramp starts at 1 (from 0 it could never move, and would sit at 0 until the countdown ends)
-        static constexpr T start = std::is_same_v<Type, ValueSmoothingTypes::Multiplicative> ? T (1) : T (0);
-        T current = start, target = start, step = T (0);
-        int steps = 1, countdown = 0;
+        vs::Ramp<std::is_same_v<Type, ValueSmoothingTypes::Multiplicative>> ramp;
     };
 
     template <typename T>
@@ -91,6 +77,14 @@ namespace juce
 
     namespace dsp
     {
+        // What a processor is prepared for
+        struct ProcessSpec
+        {
+            double sampleRate;
+            unsigned int maximumBlockSize;
+            unsigned int numChannels;
+        };
+
         template <typename T>
         class AudioBlock
         {

@@ -2,6 +2,7 @@
 
 #include <juce_dsp/juce_dsp.h>
 #include <atomic>
+#include "Dynamics.h"
 #include "Util.h"
 
 namespace vs
@@ -47,14 +48,14 @@ namespace vs
                     fs = std::max (fs, x * x);
                 }
 
-                hEnv += (hs > hEnv ? envAtk : envRel) * (hs - hEnv);
-                fEnv += (fs > fEnv ? envAtk : envRel) * (fs - fEnv);
+                followEnvelope (hEnv, hs, envAtk, envRel);
+                followEnvelope (fEnv, fs, envAtk, envRel);
 
                 const float ratioDb = powerToDb (hEnv) - powerToDb (fEnv);
                 const float over = ratioDb - thresholdDb;
-                const float target = (over > 0.0f && powerToDb (fEnv) > -60.0f) ? std::min (over * 1.5f, 14.0f) : 0.0f;
+                const float target = powerToDb (fEnv) > -60.0f ? dynamics::cutDb (over, 1.5f, 0.0f, 14.0f) : 0.0f;
 
-                grDb += (target > grDb ? grAtk : grRel) * (target - grDb);
+                followEnvelope (grDb, target, grAtk, grRel);
                 maxGr = std::max (maxGr, grDb);
                 const float g = dbToGain (-grDb);
 

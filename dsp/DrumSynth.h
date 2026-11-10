@@ -25,6 +25,7 @@
 #include "Biquad.h"
 #include "Music.h"
 #include "Random.h"
+#include "Channels.h"
 
 namespace vs::drumsynth
 {
@@ -35,10 +36,7 @@ namespace vs::drumsynth
 
     // The running peak of |v|; a NaN sample makes it NaN (a NaN peak then
     // counts as no peak), as a browser's Math.max does
-    inline float peakOf (float peak, float v)
-    {
-        return std::isnan (peak) || std::isnan (v) ? std::numeric_limits<float>::quiet_NaN() : std::max (peak, std::abs (v));
-    }
+    using channels::runningPeak;
 
     // ---- the building blocks
 
@@ -46,12 +44,12 @@ namespace vs::drumsynth
     // kept at or under 0.45 of the sample rate. gainDb is for peak.
     inline Buffer& biquad (Buffer& x, double sr, Type type, double hz, double q, double gainDb = 0)
     {
-        filterDirectFormI (BiquadCoefs::rbjRaw (type, sr, std::min (hz, sr * 0.45), q, gainDb), x.data(), (int) x.size());
+        filterRbjCapped (x.data(), (int) x.size(), sr, type, hz, q, gainDb);
         return x;
     }
 
     // A square wave that doesn't alias (polyBLEP), cheap enough to stack six of for cymbal metal
-    inline Buffer square (double sr, int n, double hz, double phase0 = 0)
+    inline Buffer squarePolyBlep (double sr, int n, double hz, double phase0 = 0)
     {
         Buffer x ((size_t) n);
         const double dt = hz / sr;
@@ -81,7 +79,7 @@ namespace vs::drumsynth
         const double hz[] { 205.3, 304.4, 369.6, 522.7, 540, 800 };
         for (int k = 0; k < 6; ++k)
         {
-            const auto s = square (sr, n, hz[k] * scale, k * 0.17);
+            const auto s = squarePolyBlep (sr, n, hz[k] * scale, k * 0.17);
             for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) (x[i] + (double) s[i] / 6);
         }
         return x;
@@ -105,24 +103,13 @@ namespace vs::drumsynth
     }
 
     // Starts a sound where it first gets loud (filters ease into a hit)
-    inline Buffer onTime (const Buffer& x)
-    {
-        float peak = 0;
-        for (float v : x) peak = peakOf (peak, v);
-        size_t i = 0;
-        while (i < x.size() && std::abs (x[i]) < 0.3 * peak) ++i;
-        return i > 2 ? Buffer (x.begin() + (std::ptrdiff_t) (i - 2), x.end()) : x;
-    }
+    inline Buffer onTime (const Buffer& x) { return channels::fromOnset (x); }
 
     // Peak to `level`, with a short fade at the very end so nothing clicks off
     inline Buffer finish (const Buffer& in, double level)
     {
         Buffer x = onTime (in);
-        float peak = 0;
-        for (float v : x) peak = peakOf (peak, v);
-        const int len = (int) x.size(), fade = std::min (len, 512);
-        const double g = level / (peak != 0 && ! std::isnan (peak) ? (double) peak : 1.0);
-        for (int i = 0; i < len; ++i) x[(size_t) i] = (float) (x[(size_t) i] * (g * (i > len - fade ? (double) (len - i) / fade : 1.0)));
+        channels::toPeakWithEndFade (x, level, 512);
         return x;
     }
 
@@ -405,7 +392,7 @@ namespace vs::drumsynth
             { "boomCowbell", 0.6, [] (double sr)
               {
                   const int n = (int) std::floor (sr * 0.45);
-                  const auto a = square (sr, n, 540), b = square (sr, n, 800);
+                  const auto a = squarePolyBlep (sr, n, 540), b = squarePolyBlep (sr, n, 800);
                   Buffer x ((size_t) n);
                   for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) ((double) a[i] + (double) b[i]);
                   biquad (x, sr, Type::bandPass, 2000, 0.9);

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include "Util.h"
 
 namespace vs
 {
@@ -17,6 +18,17 @@ namespace vs
         {
             std::vector<double> w ((size_t) n);
             for (int i = 0; i < n; ++i) w[(size_t) i] = 0.5 - 0.5 * std::cos ((2 * pi * i) / n);
+            return w;
+        }
+
+        // Periodic Hann worked out in float, for i = 0..count - 1 (count
+        // defaults to n; n + 1 adds the closing zero, for a table read between
+        // its points). The live processors window their FFT frames with it.
+        inline std::vector<float> hannPeriodicFloat (int n, int count = -1)
+        {
+            constexpr float twoPi = (float) (2 * 3.141592653589793238L);
+            std::vector<float> w ((size_t) (count < 0 ? n : count));
+            for (size_t i = 0; i < w.size(); ++i) w[i] = 0.5f - 0.5f * std::cos (twoPi * (float) i / (float) n);
             return w;
         }
 
@@ -139,7 +151,7 @@ namespace vs
             if (! (u < (double) (t.size() - 1))) return 0.0;
             const int i = (int) u;
             const double f = u - i;
-            return t[(size_t) i] + f * (t[(size_t) i + 1] - t[(size_t) i]);
+            return lerp (t[(size_t) i], t[(size_t) i + 1], f);
         }
 
         int halfWidth() const { return half; }

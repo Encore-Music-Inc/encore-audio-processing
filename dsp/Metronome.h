@@ -22,6 +22,8 @@
 #include <vector>
 #include "Biquad.h"
 #include "Random.h"
+#include "Util.h"
+#include "Channels.h"
 
 namespace vs::metronome
 {
@@ -29,17 +31,10 @@ namespace vs::metronome
 
     // The running peak of |v|; a NaN sample makes it NaN (a NaN peak then
     // counts as no peak), as a browser's Math.max does
-    inline float peakOf (float peak, float v)
-    {
-        return std::isnan (peak) || std::isnan (v) ? std::numeric_limits<float>::quiet_NaN() : std::max (peak, std::abs (v));
-    }
+    using channels::runningPeak;
 
     // Rounds half up, as a browser's Math.round does (2.5 to 3, -2.5 to -2)
-    inline double roundHalfUp (double x)
-    {
-        const double f = std::floor (x);
-        return x - f >= 0.5 ? f + 1.0 : f;
-    }
+    using vs::roundHalfUp;
 
     // 0 and NaN count as missing
     inline double orDefault (double v, double fallback) { return v != 0 && ! std::isnan (v) ? v : fallback; }
@@ -525,7 +520,7 @@ namespace vs::metronome
     }
 
     // A square wave without aliasing: its odd harmonics, up to just under half the sample rate
-    inline Buffer square (double sr, int n, double hz)
+    inline Buffer squareFromHarmonics (double sr, int n, double hz)
     {
         Buffer x ((size_t) n, 0.0f);
         for (int k = 1; k * hz < sr * 0.45; k += 2)
@@ -541,19 +536,12 @@ namespace vs::metronome
     // hats' 12 kHz at 22.05 kHz) stays stable.
     inline void biquad (Buffer& x, double sr, BiquadCoefs::Type type, double hz, double q)
     {
-        filterDirectFormI (BiquadCoefs::rbjRaw (type, sr, std::min (hz, sr * 0.45), q), x.data(), (int) x.size());
+        filterRbjCapped (x.data(), (int) x.size(), sr, type, hz, q);
     }
 
     // Starts a sound where it first gets loud: filters ease into a hit, and a
     // click has to land right on the beat
-    inline Buffer onTime (const Buffer& x)
-    {
-        float peak = 0;
-        for (float v : x) peak = peakOf (peak, v);
-        size_t i = 0;
-        while (i < x.size() && std::abs (x[i]) < 0.3 * peak) ++i;
-        return Buffer (x.begin() + (std::ptrdiff_t) (i >= 2 ? i - 2 : 0), x.end());
-    }
+    inline Buffer onTime (const Buffer& x) { return channels::fromOnset (x); }
 
     // The drum machine cowbell: two square waves a not-quite-fifth apart (540
     // and 800 Hz), band-passed, with a sharp drop right after the hit and then
@@ -562,7 +550,7 @@ namespace vs::metronome
     {
         using T = BiquadCoefs::Type;
         const int n = (int) std::floor (sr * seconds);
-        const auto a = square (sr, n, 540 * pitch), b = square (sr, n, 800 * pitch);
+        const auto a = squareFromHarmonics (sr, n, 540 * pitch), b = squareFromHarmonics (sr, n, 800 * pitch);
         Buffer x ((size_t) n);
         for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) ((double) a[i] + (double) b[i]);
         biquad (x, sr, T::bandPass, 2000 * pitch, 0.9);
@@ -585,7 +573,7 @@ namespace vs::metronome
         Buffer x ((size_t) n, 0.0f);
         for (double hz : { 205.3, 304.4, 369.6, 522.7, 540.0, 800.0 })
         {
-            const auto sq = square (sr, n, hz);
+            const auto sq = squareFromHarmonics (sr, n, hz);
             for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) (x[i] + (double) sq[i] / 6);
         }
         biquad (x, sr, T::bandPass, 10000, 0.8);
@@ -614,6 +602,14 @@ namespace vs::metronome
         return x;
     }
 
+    // A straight fade to silence over the last len samples (the last one at
+    // 1 / len; a fade longer than the sound is cut short)
+    inline void endFade (Buffer& x, int len)
+    {
+        float* ch[1] { x.data() };
+        channels::fadeSamples (ch, 1, (int) x.size(), 0, len, channels::FadeCurve::linear, channels::FadePoint::end);
+    }
+
     // A sine with a short release at the end
     inline Buffer beep (double sr, double hz, double seconds)
     {
@@ -621,18 +617,15 @@ namespace vs::metronome
         Buffer x ((size_t) n);
         const int rel = (int) std::floor (sr * 0.012);
         for (int i = 0; i < n; ++i)
-            x[(size_t) i] = (float) (std::sin ((2 * pi * hz * i) / sr + pi / 4) * (i > n - rel ? (double) (n - i) / rel : 1.0));
+            x[(size_t) i] = (float) std::sin ((2 * pi * hz * i) / sr + pi / 4);
+        endFade (x, rel);
         return x;
     }
 
     // Peak to `level`, with a fade at the very end so nothing clicks off
     inline Buffer finish (Buffer x, double level)
     {
-        float peak = 0;
-        for (float v : x) peak = peakOf (peak, v);
-        const int len = (int) x.size(), fade = std::min (len, 256);
-        const double g = level / (peak != 0 && ! std::isnan (peak) ? (double) peak : 1.0);
-        for (int i = 0; i < len; ++i) x[(size_t) i] = (float) (x[(size_t) i] * (g * (i > len - fade ? (double) (len - i) / fade : 1.0)));
+        channels::toPeakWithEndFade (x, level, 256);
         return x;
     }
 

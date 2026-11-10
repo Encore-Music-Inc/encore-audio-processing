@@ -22,6 +22,7 @@
 #include <vector>
 #include "dsp/Fft.h"
 #include "dsp/Windows.h"
+#include "dsp/Util.h"
 
 namespace vs::tempo
 {
@@ -59,7 +60,7 @@ namespace vs::tempo
         }
 
         // Rounds half up, as the web app does (2.5 is 3, -2.5 is -2)
-        inline double roundHalfUp (double x) { return std::floor (x + 0.5); }
+        using vs::roundHalfUp;
     }
 
     // Tempo from tap times in ms: each tap numbered by the beats since the
