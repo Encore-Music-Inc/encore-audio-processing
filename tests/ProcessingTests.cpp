@@ -266,6 +266,25 @@ namespace
         expect ("fades start and end at silence and are sin (pi/2 x) shaped", f[0] == 0.0f && f[(size_t) n - 1] == 0.0f && std::abs (f[50] - std::sin (3.14159265 / 4)) < 1e-6 && f[500] == 1.0f,
                 "(%.6f at the middle of the fade)", f[50]);
 
+        // the other curves: sin^2 is 0.5 halfway, linear is t, and "end" leaves no sample silent
+        {
+            std::vector<float> g ((size_t) n, 1.0f), h ((size_t) n, 1.0f);
+            float* gp[1] { g.data() }; float* hp[1] { h.data() };
+            vs::channels::fades (gp, 1, n, 1000, 0.1, 0, vs::channels::FadeCurve::sineSquared);
+            vs::channels::fadeSamples (hp, 1, n, 0, 100, vs::channels::FadeCurve::linear, vs::channels::FadePoint::end);
+            expect ("sin^2 fades are half gain halfway; linear end-point fades never reach 0", std::abs (g[50] - 0.5f) < 1e-6 && g[0] == 0.0f && h[(size_t) n - 1] == 0.01f && h[(size_t) n - 50] == 0.5f,
+                    "(%.6f, last sample %.3f)", g[50], h[(size_t) n - 1]);
+        }
+        // an equal-power crossfade keeps the power of two unrelated signals
+        {
+            auto a = noise (48000, 21), b = noise (48000, 22);
+            const double before = rms (a.data(), 48000);
+            float* ap[1] { a.data() }; const float* bp[1] { b.data() };
+            vs::channels::crossfade (ap, bp, 1, 48000);
+            const double mid = rms (a.data() + 20000, 8000);
+            expect ("an equal-power crossfade holds the level through the join", std::abs (20 * std::log10 (mid / before)) < 0.2, "(%.3f dB at the middle)", 20 * std::log10 (mid / before));
+        }
+
         // normalize: peak to -1 dBFS; LUFS to -14 unless the peak would pass -1 dBFS
         {
             auto x = sine (48000 * 4, 48000, 997, 0.25);

@@ -146,9 +146,20 @@ extern "C"
         const auto r = vs::channels::trimRange (n, fs, startSec, endSec);
         out[0] = r.first; out[1] = r.last;
     }
-    EMSCRIPTEN_KEEPALIVE void pr_fades (float* const* chans, int numCh, int n, double fs, double fadeInSec, double fadeOutSec)
+    // Fades. curve: 0 quarter sine, 1 sine squared, 2 linear. point (where in a
+    // sample the curve is read): 0 its start, 1 its centre, 2 its end
+    EMSCRIPTEN_KEEPALIVE void pr_fades (float* const* chans, int numCh, int n, double fs, double fadeInSec, double fadeOutSec, int curve)
     {
-        vs::channels::fades (chans, numCh, n, fs, fadeInSec, fadeOutSec);
+        vs::channels::fades (chans, numCh, n, fs, fadeInSec, fadeOutSec, (vs::channels::FadeCurve) curve);
+    }
+    EMSCRIPTEN_KEEPALIVE void pr_fade_samples (float* const* chans, int numCh, int n, int inLen, int outLen, int curve, int point)
+    {
+        vs::channels::fadeSamples (chans, numCh, n, inLen, outLen, (vs::channels::FadeCurve) curve, (vs::channels::FadePoint) point);
+    }
+    // into fades in over len samples while from fades out, written to into
+    EMSCRIPTEN_KEEPALIVE void pr_crossfade (float* const* into, const float* const* from, int numCh, int len, int curve, int point)
+    {
+        vs::channels::crossfade (into, from, numCh, len, (vs::channels::FadeCurve) curve, (vs::channels::FadePoint) point);
     }
     EMSCRIPTEN_KEEPALIVE float pr_peak (const float* const* chans, int numCh, int n) { return vs::channels::peakOf (chans, numCh, n); }
     // mode: 0 off, 1 peak (-1 dBFS), 2 LUFS (-14, capped at -1 dBFS peak). out: four doubles,
