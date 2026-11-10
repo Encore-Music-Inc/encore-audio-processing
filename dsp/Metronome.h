@@ -520,7 +520,7 @@ namespace vs::metronome
     }
 
     // A square wave without aliasing: its odd harmonics, up to just under half the sample rate
-    inline Buffer square (double sr, int n, double hz)
+    inline Buffer squareFromHarmonics (double sr, int n, double hz)
     {
         Buffer x ((size_t) n, 0.0f);
         for (int k = 1; k * hz < sr * 0.45; k += 2)
@@ -550,7 +550,7 @@ namespace vs::metronome
     {
         using T = BiquadCoefs::Type;
         const int n = (int) std::floor (sr * seconds);
-        const auto a = square (sr, n, 540 * pitch), b = square (sr, n, 800 * pitch);
+        const auto a = squareFromHarmonics (sr, n, 540 * pitch), b = squareFromHarmonics (sr, n, 800 * pitch);
         Buffer x ((size_t) n);
         for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) ((double) a[i] + (double) b[i]);
         biquad (x, sr, T::bandPass, 2000 * pitch, 0.9);
@@ -573,7 +573,7 @@ namespace vs::metronome
         Buffer x ((size_t) n, 0.0f);
         for (double hz : { 205.3, 304.4, 369.6, 522.7, 540.0, 800.0 })
         {
-            const auto sq = square (sr, n, hz);
+            const auto sq = squareFromHarmonics (sr, n, hz);
             for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) (x[i] + (double) sq[i] / 6);
         }
         biquad (x, sr, T::bandPass, 10000, 0.8);

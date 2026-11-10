@@ -49,7 +49,7 @@ namespace vs::drumsynth
     }
 
     // A square wave that doesn't alias (polyBLEP), cheap enough to stack six of for cymbal metal
-    inline Buffer square (double sr, int n, double hz, double phase0 = 0)
+    inline Buffer squarePolyBlep (double sr, int n, double hz, double phase0 = 0)
     {
         Buffer x ((size_t) n);
         const double dt = hz / sr;
@@ -79,7 +79,7 @@ namespace vs::drumsynth
         const double hz[] { 205.3, 304.4, 369.6, 522.7, 540, 800 };
         for (int k = 0; k < 6; ++k)
         {
-            const auto s = square (sr, n, hz[k] * scale, k * 0.17);
+            const auto s = squarePolyBlep (sr, n, hz[k] * scale, k * 0.17);
             for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) (x[i] + (double) s[i] / 6);
         }
         return x;
@@ -392,7 +392,7 @@ namespace vs::drumsynth
             { "boomCowbell", 0.6, [] (double sr)
               {
                   const int n = (int) std::floor (sr * 0.45);
-                  const auto a = square (sr, n, 540), b = square (sr, n, 800);
+                  const auto a = squarePolyBlep (sr, n, 540), b = squarePolyBlep (sr, n, 800);
                   Buffer x ((size_t) n);
                   for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) ((double) a[i] + (double) b[i]);
                   biquad (x, sr, Type::bandPass, 2000, 0.9);
