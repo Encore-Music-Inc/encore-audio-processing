@@ -8,7 +8,7 @@ products.
 - ENCORE. VST (encore-vst): the plugins, built with JUCE (`juce_dsp`).
 - ENCORE. Basement Studio (encore-basement-studio): the desktop DAW, built with JUCE.
 - Green Room, the artist tools in the ENCORE. app (encoremusic.studio): through `master.wasm` (built from
-  `wasm/master_api.cpp` and the headers, without JUCE).
+  `wasm/api_*.cpp` and the headers, without JUCE).
 
 ## Decisions (already made, don't revisit)
 
@@ -39,7 +39,7 @@ products.
 | `dsp/` | the headers (`MasterChain.h`, `EqBand.h`, `ReverbEngine.h`, ...) |
 | `dsp/lite/JuceLite.h` | stand-in for the JUCE pieces the headers use, for builds without JUCE (`VS_NO_JUCE=1`). Don't delete it: the wasm build needs it |
 | `tools/tunings.py` | the one list of the tuner's instruments, tunings, temperaments and reference pitches; writes `dsp/Tunings.h` and `data/tunings.json` (edit the list and run it, never the two files; CI fails if they differ from what it writes) |
-| `wasm/master_api.cpp`, `wasm/build.sh` | the browser engine (the mastering chain `mc_*`, the loudness meter `lm_*`, the tuner `tp_*`) and its Emscripten build |
+| `wasm/api_*.cpp`, `wasm/build.sh` | the browser engine, one file per area with its own prefix (the mastering chain `mc_*`, the loudness meter `lm_*`, the tuner `tp_*`, ...), and its Emscripten build, which exports every `EMSCRIPTEN_KEEPALIVE` function |
 | `tests/` | the offline test suites and their CMake build |
 | `external/JUCE` | JUCE, pinned to a release (the README's Pinned releases table): the JUCE version for all of ENCORE. (see below) |
 | `CHANGELOG.md` | every release's notes, newest first; the release job copies the version's section onto the GitHub release |

@@ -1,22 +1,15 @@
-// WebAssembly bridge for the browser: the ENCORE. mastering chain (mc_*),
-// the loudness meter (lm_*) and the tuner's pitch detector (tp_*). The
-// browser calls these plain C functions; audio is passed through float
-// buffers that live inside the module's memory.
+// The browser's mastering chain (mc_*): plain C functions around
+// vs::MasterChain. Audio passes through two float buffers that live inside
+// the module's memory. Built with the other wasm/api_*.cpp files into
+// master.wasm by wasm/build.sh.
 #include <emscripten/emscripten.h>
 #include "dsp/MasterChain.h"
-#include "dsp/TunerPitch.h"
 
 namespace
 {
     struct Instance
     {
         vs::MasterChain chain;
-        std::vector<float> l, r;
-    };
-
-    struct Meter
-    {
-        vs::LoudnessMeter meter;
         std::vector<float> l, r;
     };
 }
@@ -117,64 +110,5 @@ extern "C"
         for (int k = 0; k < 5; ++k) l.toneMatch[k] = t[k];
         for (int k = 0; k < 3; ++k) l.bandLevelDb[k] = b[k];
         static_cast<Instance*> (p)->chain.lockLearned (l);
-    }
-
-    // Loudness meter (BS.1770, the one the mastering chain uses): fill lm_left
-    // and lm_right with up to maxBlock samples, lm_process them, repeat, then
-    // read lm_integrated. A song is measured block by block, so its length
-    // isn't limited by the module's memory; the meter counts its first hour.
-    EMSCRIPTEN_KEEPALIVE void* lm_create (double sampleRate, int maxBlock)
-    {
-        auto* m = new Meter();
-        m->l.assign ((size_t) maxBlock, 0.0f);
-        m->r.assign ((size_t) maxBlock, 0.0f);
-        m->meter.prepare (sampleRate);
-        return m;
-    }
-
-    EMSCRIPTEN_KEEPALIVE void lm_destroy (void* p) { delete static_cast<Meter*> (p); }
-    EMSCRIPTEN_KEEPALIVE float* lm_left (void* p)  { return static_cast<Meter*> (p)->l.data(); }
-    EMSCRIPTEN_KEEPALIVE float* lm_right (void* p) { return static_cast<Meter*> (p)->r.data(); }
-    EMSCRIPTEN_KEEPALIVE void lm_reset (void* p)   { static_cast<Meter*> (p)->meter.reset(); }
-
-    // Measures n samples of the meter's buffers: stereo 0 reads only lm_left (mono)
-    EMSCRIPTEN_KEEPALIVE void lm_process (void* p, int n, int stereo)
-    {
-        auto* m = static_cast<Meter*> (p);
-        m->meter.process (m->l.data(), stereo != 0 ? m->r.data() : nullptr, n);
-    }
-
-    // Gated integrated loudness so far, LUFS (-100 for silence)
-    EMSCRIPTEN_KEEPALIVE float lm_integrated (void* p) { return static_cast<Meter*> (p)->meter.integrated(); }
-
-    // Block energies, for a report made after measuring: lm_record (p, 1)
-    // before the first lm_process, then lm_blocks counts the 100 ms blocks so
-    // far and lm_block_energy (p, channel) points at that many doubles, each
-    // block's K-weighted sum of squares (lm_block_length samples per block).
-    // Read them before the next lm_process: they move as they grow.
-    EMSCRIPTEN_KEEPALIVE void lm_record (void* p, int on) { static_cast<Meter*> (p)->meter.setRecordBlocks (on != 0); }
-    EMSCRIPTEN_KEEPALIVE int lm_blocks (void* p) { return (int) static_cast<Meter*> (p)->meter.blockEnergy (0).size(); }
-    EMSCRIPTEN_KEEPALIVE int lm_block_length (void* p) { return static_cast<Meter*> (p)->meter.blockLength(); }
-    EMSCRIPTEN_KEEPALIVE const double* lm_block_energy (void* p, int channel)
-    {
-        return static_cast<Meter*> (p)->meter.blockEnergy (channel).data();
-    }
-
-    // The tuner's pitch of x[0..n) in Hz, or 0 when there's no clear note.
-    // x is memory from malloc.
-    EMSCRIPTEN_KEEPALIVE float tp_estimate (const float* x, int n, double sampleRate, float minHz, float maxHz)
-    {
-        return vs::TunerPitch::estimate (x, n, sampleRate, minHz, maxHz);
-    }
-
-    // What hz means on the instrument (vs::TunerReading). strings: nStrings
-    // MIDI notes (0 for chromatic); offsets: the temperament's 12 cents on C;
-    // out: 4 floats, the note, the string (-1: none), the cents, the target Hz.
-    EMSCRIPTEN_KEEPALIVE void tp_reading (float hz, double a4, const int* strings, int nStrings, const float* offsets, int root, float* out)
-    {
-        std::array<float, 12> o {};
-        for (size_t k = 0; k < 12; ++k) o[k] = offsets[k];
-        const auto r = vs::TunerReading::of (hz, a4, std::vector<int> (strings, strings + std::max (0, nStrings)), o, root);
-        out[0] = (float) r.note; out[1] = (float) r.string; out[2] = r.cents; out[3] = r.targetHz;
     }
 }

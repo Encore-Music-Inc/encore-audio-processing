@@ -16,7 +16,7 @@ License v3 (see `LICENSE`). The ENCORE. name and logo are not licensed (see
 |---|---|
 | ENCORE. VST (the plugins) | builds the headers with JUCE (`juce_dsp`) |
 | ENCORE. Basement Studio (the desktop DAW) | builds the headers with JUCE, with the plugins built in |
-| Green Room, the artist tools in the ENCORE. app (browser) | loads `master.wasm`, built from `wasm/master_api.cpp` and the headers without JUCE, and `tunings.json` |
+| Green Room, the artist tools in the ENCORE. app (browser) | loads `master.wasm`, built from `wasm/api_*.cpp` and the headers without JUCE, and `tunings.json` |
 
 ## What is here
 
@@ -26,9 +26,9 @@ dsp/lite/JuceLite.h   a small stand-in for the JUCE pieces the headers use, for 
 dsp/Tunings.h         the tuner's instruments, tunings, temperaments and reference pitches (made by tools/tunings.py)
 data/tunings.json     the same list for the browser (made by tools/tunings.py)
 tools/tunings.py      the one list of instruments and tunings, and what writes the two files above
-wasm/master_api.cpp   the browser engine: plain C functions around the mastering chain (mc_*),
-                      the loudness meter (lm_*) and the tuner (tp_*)
-wasm/build.sh         builds master.wasm with Emscripten
+wasm/api_*.cpp        the browser engine: plain C functions, one file per area (the mastering
+                      chain mc_*, the loudness meter lm_*, the tuner tp_*, ...)
+wasm/build.sh         builds master.wasm with Emscripten, exporting every EMSCRIPTEN_KEEPALIVE function
 tests/                offline test suites and their CMake build
 external/JUCE         JUCE (submodule): the JUCE version for all of ENCORE.
 ```
@@ -85,9 +85,10 @@ ctest --test-dir build --output-on-failure
 ```
 
 Each suite prints a PASS or FAIL line per check and exits non-zero on any
-failure. `LiteMasterTests`, `LoudnessTests` and `TunerTests` build without
-JUCE, the way the browser build does. To build only those (no JUCE needed),
-configure with `-DENCORE_JUCE_TESTS=OFF`.
+failure. The suites that need JUCE are named in `tests/CMakeLists.txt`; every other
+`tests/*Tests.cpp` builds without JUCE, the way the browser build does, and a new one is
+picked up automatically. To build only those (no JUCE needed), configure with
+`-DENCORE_JUCE_TESTS=OFF`.
 
 `StrumTests` also has whole-plugin checks that need the Strum plugin's own
 sources; they build only with `ENCORE_STRUM_PLUGIN_TESTS=1`, in the plugin repo.

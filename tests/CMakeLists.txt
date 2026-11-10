@@ -15,8 +15,21 @@ get_filename_component(ENCORE_AUDIO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLU
 
 enable_testing()
 
-# The browser build's configuration (no JUCE: dsp/lite/JuceLite.h stands in), tested natively
-foreach (suite LiteMaster Loudness Tuner)
+# The suites that need JUCE (juce_dsp); every other tests/*Tests.cpp is built without JUCE.
+set(ENCORE_JUCE_SUITES Pitch Verb Eq Master Strum)
+
+# The browser build's configuration (no JUCE: dsp/lite/JuceLite.h stands in), tested natively.
+# A new JUCE-free suite is a new tests/<Name>Tests.cpp file; nothing else to add.
+file(GLOB ENCORE_SUITE_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*Tests.cpp")
+set(ENCORE_LITE_SUITES "")
+foreach (file ${ENCORE_SUITE_FILES})
+    string(REGEX REPLACE "Tests\\.cpp$" "" suite "${file}")
+    if (NOT suite IN_LIST ENCORE_JUCE_SUITES)
+        list(APPEND ENCORE_LITE_SUITES ${suite})
+    endif()
+endforeach()
+
+foreach (suite ${ENCORE_LITE_SUITES})
     add_executable(${suite}Tests ${suite}Tests.cpp)
     target_include_directories(${suite}Tests PRIVATE ${ENCORE_AUDIO_ROOT})
     target_compile_definitions(${suite}Tests PRIVATE VS_NO_JUCE=1 _USE_MATH_DEFINES)
@@ -34,7 +47,7 @@ if (ENCORE_JUCE_TESTS)
     endif()
     add_subdirectory("${ENCORE_AUDIO_ROOT}/external/JUCE" "${CMAKE_BINARY_DIR}/JUCE")
 
-    foreach (suite Pitch Verb Eq Master Strum)
+    foreach (suite ${ENCORE_JUCE_SUITES})
         juce_add_console_app(${suite}Tests PRODUCT_NAME "${suite}Tests")
         target_sources(${suite}Tests PRIVATE ${suite}Tests.cpp)
         target_include_directories(${suite}Tests PRIVATE ${ENCORE_AUDIO_ROOT})
