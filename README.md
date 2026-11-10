@@ -44,6 +44,7 @@ dsp/lite/JuceLite.h   a small stand-in for the JUCE pieces the headers use, for 
 tools/tunings.py      the one list of the tuner's instruments, tunings, temperaments and
                       reference pitches; writes dsp/Tunings.h and data/tunings.json
 tools/scales.py       the one list of the scale library; writes dsp/ScaleLibrary.h and data/scales.json
+tools/reference.py    the reference set: cases, tolerances and their reasons; writes data/reference.json
 data/*.json           those lists for the browser
 wasm/api_*.cpp        the browser engine: plain C functions, one file per area (below)
 wasm/build.sh         builds master.wasm with Emscripten, exporting every EMSCRIPTEN_KEEPALIVE function
@@ -184,7 +185,24 @@ picked up automatically. To build only those (no JUCE needed), configure with
 `StrumTests` also has whole-plugin checks that need the Strum plugin's own
 sources; they build only with `ENCORE_STRUM_PLUGIN_TESTS=1`, in the plugin repo.
 
-Reference test set: (added with the set)
+### The reference set
+
+`data/reference.json` holds inputs (made from recipes by
+`dsp/ReferenceSignals.h`, the same samples on every system) and the results
+this repository gives for them, each with its tolerance and the reason for it.
+It covers every area: loudness, true peak, pitch, rhythm, mastering, every
+sound, file analysis, spectrum, waveforms, processing, the music vocabulary,
+and every processor. A product proves it uses these headers by running it:
+
+```bash
+# a C++ product: build tests/ReferenceTests.cpp with the product's compiler and flags, then
+ReferenceTests external/encore-audio-processing/data/reference.json
+# the browser engine
+node external/encore-audio-processing/wasm/reference.mjs master.wasm reference.json
+```
+
+Both exit non-zero if any result is out of tolerance, missing or unexpected.
+The release attaches `reference.json` with its `.sha256`, like the other lists.
 
 ### CI
 

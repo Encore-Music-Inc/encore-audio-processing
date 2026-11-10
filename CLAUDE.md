@@ -59,6 +59,8 @@ the scale library). It returns numbers; the words people see are the products'.
 | `dsp/lite/JuceLite.h` | stand-in for the JUCE pieces the headers use, for builds without JUCE. Don't delete it: the wasm build needs it |
 | `tools/tunings.py` | the one list of the tuner's instruments, tunings, temperaments and reference pitches; writes `dsp/Tunings.h` and `data/tunings.json` |
 | `tools/scales.py` | the one list of the scale library; writes `dsp/ScaleLibrary.h` and `data/scales.json` |
+| `tools/reference.py`, `data/reference.json` | the reference set: the cases (inputs made by `dsp/ReferenceSignals.h` with integer arithmetic, so every build makes the same samples), each result's tolerance and its reason; it writes `data/reference.json` from this repository's own results |
+| `tests/ReferenceTests.cpp`, `wasm/reference.mjs` | check every result in `data/reference.json`, natively (also built with JUCE as ReferenceJuceTests) and through master.wasm; they fail on any result out of tolerance, missing or unexpected |
 | `wasm/api_*.cpp`, `wasm/build.sh` | the browser engine, one file per area with its own prefix (below), and its Emscripten build, which exports every `EMSCRIPTEN_KEEPALIVE` function |
 | `tests/` | the offline test suites and their CMake build |
 | `external/JUCE` | JUCE, pinned to a release (the README's Pinned releases table): the JUCE version for all of ENCORE. (see below) |
@@ -188,7 +190,14 @@ new file with its own prefix.
 - New processing comes with its tests (a new `tests/<Name>Tests.cpp` without
   JUCE is picked up by itself) and, when the browser needs it, its functions in
   `wasm/api_*.cpp`.
-- Reference test set: (added with the set)
+- The reference set is how every product proves it uses these headers: a
+  product builds `tests/ReferenceTests.cpp` with its own compiler and flags and
+  runs it on `data/reference.json`, and the browser runs `wasm/reference.mjs`
+  on the pinned master.wasm and reference.json. When a decided change moves a
+  result, run `python3 tools/reference.py` on Linux x64 and commit the new
+  `data/reference.json` in the same pull request: that diff is how the change
+  shows, and a changed result means a new version (see Versioning). Never edit
+  the file by hand; CI fails if it differs from what the script writes.
 
 ## Versioning and releases
 
