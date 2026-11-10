@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <vector>
+#include "Music.h"
 #include "PitchDetector.h"
 #include "Scales.h"
 #include "Util.h"
@@ -247,7 +248,7 @@ namespace vs
                 scratch[(size_t) j] = in[(size_t) ((w - n + j) & mask)];
 
             cur = detector.analyse (scratch.data());
-            detectedMidi.store (cur.voiced ? 69.0f + 12.0f * std::log2 (cur.f0 / 440.0f) : -1.0f);
+            detectedMidi.store (cur.voiced ? music::hzToMidi (cur.f0, 440.0f) : -1.0f);
         }
 
         void pushMark (const Mark& m)
@@ -318,7 +319,7 @@ namespace vs
                 return;
             }
 
-            const float note = 69.0f + 12.0f * std::log2 (m.f0 / 440.0f);
+            const float note = music::hzToMidi (m.f0, 440.0f);
             const auto sc = scales::get (settings.scale);
             const int nearest = scales::nearest (note, settings.key, sc);
 
