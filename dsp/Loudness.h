@@ -4,6 +4,9 @@
 #include <cmath>
 #include <vector>
 #include "Biquad.h"
+#include "TruePeak.h"
+#include "Util.h"
+#include "DelayLine.h"
 
 namespace vs
 {
@@ -37,10 +40,20 @@ namespace vs
             reset();
         }
 
+        // Off by default. On, the meter also keeps each channel's K-weighted
+        // energy (sum of squares) for every 100 ms block, for a report made
+        // after the fact (short-term loudness, loudness range, balance). It
+        // allocates as it goes, so it's for offline measuring, not a live meter.
+        void setRecordBlocks (bool on) { record = on; }
+        const std::vector<double>& blockEnergy (int channel) const { return channel == 0 ? energyL : energyR; }
+        int blockLength() const { return subLen; }
+
         void reset()
         {
             shelf.reset(); hp.reset();
             subAcc = 0.0; subCount = 0;
+            accL = accR = 0.0;
+            energyL.clear(); energyR.clear();
             for (auto& s : sub) s = 0.0;
             subIndex = 0; subFilled = 0;
             numBlocks.store (0);
@@ -54,6 +67,7 @@ namespace vs
                 const double kl = hp.process (0, shelf.process (0, l[i]));
                 const double kr = r != nullptr ? hp.process (1, shelf.process (1, r[i])) : 0.0;
                 subAcc += kl * kl + kr * kr;
+                if (record) { accL += kl * kl; accR += kr * kr; }
                 if (++subCount >= subLen) closeSubBlock();
             }
         }
@@ -81,6 +95,7 @@ namespace vs
     private:
         void closeSubBlock()
         {
+            if (record) { energyL.push_back (accL); energyR.push_back (accR); accL = accR = 0.0; }
             sub[subIndex] = subAcc / subCount;
             subIndex = (subIndex + 1) % 30;
             subFilled = std::min (subFilled + 1, 30);
@@ -111,39 +126,43 @@ namespace vs
         int subLen = 4800, subCount = 0, subIndex = 0, subFilled = 0;
         std::vector<float> blocks;
         std::atomic<int> numBlocks { 0 };
+        bool record = false;
+        double accL = 0.0, accR = 0.0;
+        std::vector<double> energyL, energyR;
     };
 
     // Brickwall true-peak limiter. The audio itself stays at the normal rate
     // and is only ever turned down smoothly (which can't create new peaks);
     // a 4x-oversampled copy runs alongside purely to see the peaks that land
     // *between* samples, the ones a DAC or an MP3/AAC encoder turns into
-    // clipping. Look-ahead lets it turn down before a peak arrives.
+    // clipping (the detector is TruePeakDetector, the one TruePeakMeter reads
+    // with). Look-ahead lets it turn down before a peak arrives.
     class TruePeakLimiter
     {
     public:
         void prepare (double sampleRate, int maxBlock)
         {
-            os.initProcessing ((size_t) maxBlock);
+            os.initProcessing (maxBlock);
             os.reset();
             look = std::max (4, (int) std::round (0.0015 * sampleRate));
             detLatency = measureDetectorLatency (maxBlock);
             // one sample of slack each side of the detector alignment
             delayLen = look + detLatency + 1;
             window = look + 4;
-            for (auto& d : delay) d.assign ((size_t) delayLen, 0.0f);
-            boxBuf.assign ((size_t) look, 1.0f);
+            for (auto& d : delay) d.prepare (delayLen);
+            boxBuf.prepare (look);
             minQ.assign ((size_t) window + 4, { 0, 1.0f });
             scratch.setSize (2, maxBlock);
-            relCoef = (float) (1.0 - std::exp (-1.0 / (0.08 * sampleRate)));
+            relCoef = onePole (80.0f, sampleRate);
             fs = sampleRate;
             reset();
         }
 
         void reset()
         {
-            for (auto& d : delay) std::fill (d.begin(), d.end(), 0.0f);
-            std::fill (boxBuf.begin(), boxBuf.end(), 1.0f);
-            boxSum = (double) look; boxIdx = 0; dIdx = 0;
+            for (auto& d : delay) d.clear();
+            boxBuf.clear (1.0f);
+            boxSum = (double) look;
             qHead = qTail = 0; t = 0;
             relState = 1.0f;
             os.reset();
@@ -169,22 +188,22 @@ namespace vs
                     float* p = probe.getWritePointer (c);
                     for (int i = 0; i < len; ++i) p[i] = (block == 0 && i == 0) ? 1.0f : 0.0f;
                 }
-                juce::dsp::AudioBlock<float> b (probe.getArrayOfWritePointers(), 2, (size_t) len);
-                auto up = os.processSamplesUp (b);
-                for (int i = 0; i < (int) up.getNumSamples(); ++i)
-                    if (std::abs (up.getSample (0, i)) > best) { best = std::abs (up.getSample (0, i)); found = offset + i; }
-                offset += (int) up.getNumSamples();
+                auto* const* up = os.processSamplesUp (probe.getArrayOfWritePointers(), 2, len);
+                const int nUp = len * os.getFactor();
+                for (int i = 0; i < nUp; ++i)
+                    if (std::abs (up[0][i]) > best) { best = std::abs (up[0][i]); found = offset + i; }
+                offset += nUp;
             }
             os.reset();
-            return (int) std::round (found / 4.0);
+            return (int) std::round (found / (double) TruePeakDetector::factor);
         }
 
     public:
 
         // 0.3 dB of margin: a 4x detector can under-read the very top octave, and
         // the ceiling should hold even when measured more strictly than BS.1770
-        void setCeilingDb (float db) { ceiling = std::pow (10.0f, db / 20.0f); target = ceiling * 0.966f; }
-        void setReleaseMs (float ms, double) { relCoef = (float) (1.0 - std::exp (-1.0 / (ms * 0.001 * fs))); }
+        void setCeilingDb (float db) { ceiling = dbToGain (db); target = ceiling * 0.966f; }
+        void setReleaseMs (float ms, double) { relCoef = onePole (ms, fs); }
 
         void process (juce::dsp::AudioBlock<float>& block)
         {
@@ -192,17 +211,17 @@ namespace vs
             if (scratch.getNumSamples() < n) scratch.setSize (2, n, false, false, true);
 
             // detection path: 4x upsampled copy, max |x| over each sample's 4 sub-samples
+            constexpr int f = TruePeakDetector::factor;
             for (int c = 0; c < 2; ++c)
                 scratch.copyFrom (c, 0, block.getChannelPointer ((size_t) std::min (c, nch - 1)), n);
-            juce::dsp::AudioBlock<float> sb (scratch.getArrayOfWritePointers(), 2, (size_t) n);
-            auto up = os.processSamplesUp (sb);
+            auto* const* up = os.processSamplesUp (scratch.getArrayOfWritePointers(), 2, n);
 
             float minGain = 1.0f;
             for (int i = 0; i < n; ++i)
             {
                 float peak = 0.0f;
                 for (int c = 0; c < 2; ++c)
-                    for (int k = 0; k < 4; ++k) peak = std::max (peak, std::abs (up.getSample (c, i * 4 + k)));
+                    for (int k = 0; k < f; ++k) peak = std::max (peak, std::abs (up[c][i * f + k]));
                 const float need = peak > target ? target / peak : 1.0f;
 
                 // sliding minimum of the required gain
@@ -217,34 +236,32 @@ namespace vs
                 relState = held < relState ? held : relState + relCoef * (held - relState);
 
                 // box average: the gain is fully down before the peak leaves the delay
-                boxSum += relState - boxBuf[(size_t) boxIdx];
-                boxBuf[(size_t) boxIdx] = relState;
-                boxIdx = (boxIdx + 1) % look;
+                boxSum += relState - boxBuf.at (look);
+                boxBuf.write (relState);
                 const float g = (float) std::min (1.0, boxSum / look);
                 minGain = std::min (minGain, g);
 
-                for (int c = 0; c < nch; ++c)
+                for (int c = 0; c < 2; ++c)
                 {
-                    auto& d = delay[c];
-                    const float delayed = d[(size_t) dIdx];
+                    if (c >= nch) { delay[c].advance(); continue; } // keeps both channels' delays in step
+                    const float delayed = delay[c].at (delayLen);
                     auto* p = block.getChannelPointer ((size_t) c);
-                    d[(size_t) dIdx] = p[i];
+                    delay[c].write (p[i]);
                     p[i] = juce::jlimit (-ceiling, ceiling, delayed * g); // safety net, normally never touches
                 }
-                dIdx = (dIdx + 1) % delayLen;
                 ++t;
             }
-            grDb.store (20.0f * std::log10 (std::max (minGain, 1e-6f)));
+            grDb.store (ampToDb (std::max (minGain, 1e-6f), 0.0f));
         }
 
         std::atomic<float> grDb { 0.0f };
 
     private:
-        juce::dsp::Oversampling<float> os { 2, 2, juce::dsp::Oversampling<float>::filterHalfBandFIREquiripple, true, true };
+        Oversampler<float> os = TruePeakDetector::makeOversampler<float> (2);
         juce::AudioBuffer<float> scratch;
-        std::vector<float> delay[2], boxBuf;
+        DelayLine delay[2], boxBuf;
         std::vector<std::pair<juce::int64, float>> minQ;
-        int look = 72, detLatency = 0, delayLen = 72, window = 74, boxIdx = 0, dIdx = 0, qHead = 0, qTail = 0;
+        int look = 72, detLatency = 0, delayLen = 72, window = 74, qHead = 0, qTail = 0;
         juce::int64 t = 0;
         double boxSum = 0.0, fs = 48000.0;
         float ceiling = 0.891f, target = 0.88f, relCoef = 0.001f, relState = 1.0f;

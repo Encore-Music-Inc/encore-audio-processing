@@ -7,8 +7,8 @@ name: CI
 #   weekly (schedule), or the same, plus the suites built with AddressSanitizer and
 #   manual with checks:   UndefinedBehaviorSanitizer on Linux x64
 #   weekly
-#   v* tag                no rebuild: master.wasm from the main build of that commit
-#                         is attached to the Release
+#   v* tag                no rebuild: master.wasm and the data/*.json files from
+#                         the main build of that commit are attached to the Release
 #
 # Docs-only changes, and pull requests that only change the version and
 # CHANGELOG.md, skip the heavy jobs (see the changes job).
@@ -276,6 +276,10 @@ jobs:
           ctest --test-dir build --output-on-failure --parallel 4 || code=$?
           bash .github/sanitizers/report.sh "$reports" "$code"
 
+  # The browser's files: master.wasm, and every data/*.json (what the
+  # tools/*.py scripts write: the tuner's instruments, the scale library, the
+  # reference set's expected results, ...), each with its SHA-256. The artifact
+  # keeps the name master.wasm, which the release job looks for.
   wasm:
     name: master.wasm
     needs: changes
@@ -285,6 +289,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Each tools/*.py script writes files in dsp/ and data/ (tools/reference.py
+      # builds tests/ReferenceTests.cpp with this runner's compiler and writes
+      # data/reference.json from its results)
+      - name: The generated files are what tools/*.py write
+        run: |
+          for script in tools/*.py; do python3 "$script"; done
+          changed=$(git status --porcelain -- dsp data)
+          if [[ -n "$changed" ]]; then
+            echo "$changed"
+            echo "::error::These files differ from what tools/*.py write. Run each script in tools/ (python3 tools/<name>.py) and commit what it writes."
+            exit 1
+          fi
       - name: Install Emscripten ${{ env.EMSCRIPTEN_VERSION }}
         run: |
           git clone --depth 1 --branch "$EMSCRIPTEN_VERSION" https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
@@ -295,14 +311,20 @@ jobs:
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh"
           em++ --version | head -n 1
           wasm/build.sh
-          (cd wasm && sha256sum master.wasm > master.wasm.sha256)
-          cat wasm/master.wasm.sha256
+          cp data/*.json wasm/
+          (cd wasm && for f in master.wasm *.json; do sha256sum "$f" > "$f.sha256"; done)
+          cat wasm/*.sha256
+      # The reference set through master.wasm, as a web product runs it
+      - name: The reference set through master.wasm
+        run: node wasm/reference.mjs wasm/master.wasm data/reference.json
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: master.wasm
           path: |
             wasm/master.wasm
             wasm/master.wasm.sha256
+            wasm/*.json
+            wasm/*.json.sha256
           if-no-files-found: error
 
   # Every pin is a published release (or a listed exception): the README's
@@ -390,11 +412,12 @@ jobs:
           (cd src && .github/release-notes.sh "$VERSION") > notes.md
           cd files
           ls -l
-          sha256sum -c master.wasm.sha256
+          sha256sum -c *.sha256
+          files=(master.wasm master.wasm.sha256 *.json *.json.sha256)
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$TAG" master.wasm master.wasm.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+            gh release upload "$TAG" "${files[@]}" --clobber --repo "$GITHUB_REPOSITORY"
             gh release edit "$TAG" --title "$title" --notes-file ../notes.md --repo "$GITHUB_REPOSITORY"
           else
-            gh release create "$TAG" master.wasm master.wasm.sha256 --verify-tag --title "$title" \
+            gh release create "$TAG" "${files[@]}" --verify-tag --title "$title" \
               --notes-file ../notes.md --repo "$GITHUB_REPOSITORY"
           fi

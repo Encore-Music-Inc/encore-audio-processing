@@ -1,6 +1,7 @@
-// WebAssembly bridge for the ENCORE. mastering chain. The browser calls
-// these plain C functions; audio is passed through two float buffers that
-// live inside the module's memory.
+// The browser's mastering chain (mc_*): plain C functions around
+// vs::MasterChain. Audio passes through two float buffers that live inside
+// the module's memory. Built with the other wasm/api_*.cpp files into
+// master.wasm by wasm/build.sh.
 #include <emscripten/emscripten.h>
 #include "dsp/MasterChain.h"
 

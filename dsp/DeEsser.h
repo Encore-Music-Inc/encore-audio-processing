@@ -1,7 +1,10 @@
 #pragma once
 
-#include <juce_dsp/juce_dsp.h>
+#include <algorithm>
 #include <atomic>
+#include "JuceInclude.h"
+#include "Dynamics.h"
+#include "Svf.h"
 #include "Util.h"
 
 namespace vs
@@ -10,13 +13,14 @@ namespace vs
     // the signal's energy sits above the split frequency. That makes one
     // setting work on a whisper and a scream alike, since it doesn't depend on
     // how loud the singer is. Only the band above the split is turned down.
+    // Up to two channels. The split is a state-variable high-pass (Svf.h).
     class DeEsser
     {
     public:
         void prepare (const juce::dsp::ProcessSpec& spec)
         {
-            hp.prepare (spec);
-            hp.setType (juce::dsp::StateVariableTPTFilterType::highpass);
+            hp.prepare (spec.sampleRate, (int) spec.numChannels);
+            hp.setType (StateVariableFilter<float>::Type::highPass);
             hp.setResonance (0.7071f);
             envAtk = onePole (1.0f, spec.sampleRate);
             envRel = onePole (60.0f, spec.sampleRate);
@@ -47,14 +51,14 @@ namespace vs
                     fs = std::max (fs, x * x);
                 }
 
-                hEnv += (hs > hEnv ? envAtk : envRel) * (hs - hEnv);
-                fEnv += (fs > fEnv ? envAtk : envRel) * (fs - fEnv);
+                followEnvelope (hEnv, hs, envAtk, envRel);
+                followEnvelope (fEnv, fs, envAtk, envRel);
 
                 const float ratioDb = powerToDb (hEnv) - powerToDb (fEnv);
                 const float over = ratioDb - thresholdDb;
-                const float target = (over > 0.0f && powerToDb (fEnv) > -60.0f) ? std::min (over * 1.5f, 14.0f) : 0.0f;
+                const float target = powerToDb (fEnv) > -60.0f ? dynamics::cutDb (over, 1.5f, 0.0f, 14.0f) : 0.0f;
 
-                grDb += (target > grDb ? grAtk : grRel) * (target - grDb);
+                followEnvelope (grDb, target, grAtk, grRel);
                 maxGr = std::max (maxGr, grDb);
                 const float g = dbToGain (-grDb);
 
@@ -68,7 +72,7 @@ namespace vs
         std::atomic<float> meterDb { 0.0f };
 
     private:
-        juce::dsp::StateVariableTPTFilter<float> hp;
+        StateVariableFilter<float> hp;
         float thresholdDb = -8.0f;
         float envAtk = 0.0f, envRel = 0.0f, grAtk = 0.0f, grRel = 0.0f;
         float hEnv = 0.0f, fEnv = 0.0f, grDb = 0.0f;

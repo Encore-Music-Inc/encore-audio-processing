@@ -1,12 +1,18 @@
 #pragma once
 
-#include <juce_dsp/juce_dsp.h>
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
+#include <cstdint>
 #include <vector>
+#include "DelayLine.h"
+#include "Music.h"
+#include "Random.h"
 #include "PitchDetector.h"
 #include "Scales.h"
 #include "Util.h"
+#include "Windows.h"
 
 namespace vs
 {
@@ -59,15 +65,10 @@ namespace vs
             in.assign (ringSize, 0.0f);
             for (auto& v : voices)
                 v.acc.assign (ringSize, 0.0f);
-            for (int i = 0; i <= hannSize; ++i)
-                hann[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) hannSize);
+            const auto h = windows::hannPeriodicFloat (hannSize, hannSize + 1);
+            std::copy (h.begin(), h.end(), hann.begin());
 
-            const juce::dsp::ProcessSpec mono { fs, 512, 1 };
-            for (auto& d : humanDelay)
-            {
-                d.setMaximumDelayInSamples ((int) (0.05 * fs));
-                d.prepare (mono);
-            }
+            for (auto& d : humanDelay) d.prepare ((int) (0.05 * fs));
             reset();
         }
 
@@ -85,7 +86,7 @@ namespace vs
                 v.detune = 0.0f;
                 v.active = false;
             }
-            for (auto& d : humanDelay) d.reset();
+            for (auto& d : humanDelay) d.clear();
             w = 0;
             hopCount = 0;
             markCount = markHead = 0;
@@ -99,7 +100,7 @@ namespace vs
         void setSettings (const Settings& s)
         {
             settings = s;
-            formantRatio = std::pow (2.0f, juce::jlimit (-3.0f, 3.0f, s.formantSemis) / 12.0f);
+            formantRatio = std::pow (2.0f, std::clamp (s.formantSemis, -3.0f, 3.0f) / 12.0f);
         }
 
         // monoIn -> lead (delayed by getLatency(), tuned if Tune is on) and a
@@ -113,7 +114,7 @@ namespace vs
                 const auto& hv = settings.voice[h];
                 on[h] = settings.harmonyOn && hv.interval > 0;
                 gain[h] = dbToGain (hv.levelDb);
-                const float p = (juce::jlimit (-1.0f, 1.0f, hv.pan) + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+                const float p = (std::clamp (hv.pan, -1.0f, 1.0f) + 1.0f) * pi * 0.25f;
                 panL[h] = std::cos (p);
                 panR[h] = std::sin (p);
             }
@@ -122,8 +123,8 @@ namespace vs
             setActive (1, on[0]);
             setActive (2, on[1]);
 
-            const float lfoInc[2] { juce::MathConstants<float>::twoPi * 0.23f / (float) fs,
-                                    juce::MathConstants<float>::twoPi * 0.31f / (float) fs };
+            const float lfoInc[2] { twoPi * 0.23f / (float) fs,
+                                    twoPi * 0.31f / (float) fs };
 
             for (int i = 0; i < numSamples; ++i)
             {
@@ -137,7 +138,7 @@ namespace vs
                 }
                 makeMarks();
 
-                const juce::int64 tOut = w - 1 - latency; // w-1 is the sample just written
+                const std::int64_t tOut = w - 1 - latency; // w-1 is the sample just written
                 if (tOut < 0)
                 {
                     lead[i] = harmL[i] = harmR[i] = 0.0f;
@@ -163,10 +164,12 @@ namespace vs
 
                     // Humanize: each harmony singer is a little late and drifts
                     lfo[h] += lfoInc[h];
-                    if (lfo[h] > juce::MathConstants<float>::twoPi) lfo[h] -= juce::MathConstants<float>::twoPi;
+                    if (lfo[h] > twoPi) lfo[h] -= twoPi;
                     const float delayMs = 2.0f + settings.humanize * (16.0f + 3.0f * std::sin (lfo[h]));
-                    humanDelay[(size_t) h].pushSample (0, s);
-                    s = humanDelay[(size_t) h].popSample (0, delayMs * 0.001f * (float) fs);
+                    auto& d = humanDelay[(size_t) h];
+                    d.put (s); // this sample is at delay 0
+                    s = d.read ((double) (delayMs * 0.001f * (float) fs));
+                    d.advance();
 
                     l += s * panL[h];
                     r += s * panR[h];
@@ -179,7 +182,7 @@ namespace vs
     private:
         struct Mark
         {
-            juce::int64 pos = 0;
+            std::int64_t pos = 0;
             float period = 0.0f;
             float f0 = 0.0f;
             bool voiced = false;
@@ -196,10 +199,11 @@ namespace vs
         };
 
         static constexpr int ringSize = 1 << 16;
-        static constexpr juce::int64 mask = ringSize - 1;
+        static constexpr std::int64_t mask = ringSize - 1;
         static constexpr int maxMarks = 256;
         static constexpr int hannSize = 1024;
         static constexpr float maxFormantRatio = 1.1892f; // +3 semitones
+        static constexpr float pi = 3.141592653589793238f, twoPi = 6.283185307179586477f;
 
         void setActive (int idx, bool active)
         {
@@ -210,10 +214,10 @@ namespace vs
             v.nextTs = -1.0;
             v.corr = 0.0f;
             v.target = -1;
-            if (idx > 0) humanDelay[(size_t) idx - 1].reset();
+            if (idx > 0) humanDelay[(size_t) idx - 1].clear();
         }
 
-        float take (int idx, juce::int64 t)
+        float take (int idx, std::int64_t t)
         {
             auto& cell = voices[(size_t) idx].acc[(size_t) (t & mask)];
             const float v = cell;
@@ -223,21 +227,20 @@ namespace vs
 
         float hannAt (float p) const
         {
-            const float x = juce::jlimit (0.0f, 1.0f, p) * (float) hannSize;
+            const float x = std::clamp (p, 0.0f, 1.0f) * (float) hannSize;
             const int i = std::min ((int) x, hannSize - 1);
             const float f = x - (float) i;
-            return hann[(size_t) i] + f * (hann[(size_t) i + 1] - hann[(size_t) i]);
+            return lerp (hann[(size_t) i], hann[(size_t) i + 1], f);
         }
 
         float readIn (double pos) const
         {
-            auto i = (juce::int64) std::floor (pos);
-            float f = (float) (pos - (double) i);
-            const juce::int64 lo = w - ringSize + 2, hi = w - 2;
-            if (i < lo) { i = lo; f = 0.0f; }
-            if (i > hi) { i = hi; f = 0.0f; }
-            const float a = in[(size_t) (i & mask)], b = in[(size_t) ((i + 1) & mask)];
-            return a + f * (b - a);
+            // kept to what the ring still holds (whole samples at the ends)
+            const auto i = (std::int64_t) std::floor (pos);
+            const std::int64_t lo = w - ringSize + 2, hi = w - 2;
+            if (i < lo) pos = (double) lo;
+            if (i > hi) pos = (double) hi;
+            return readLinear (in.data(), mask, pos);
         }
 
         void detect()
@@ -247,7 +250,7 @@ namespace vs
                 scratch[(size_t) j] = in[(size_t) ((w - n + j) & mask)];
 
             cur = detector.analyse (scratch.data());
-            detectedMidi.store (cur.voiced ? 69.0f + 12.0f * std::log2 (cur.f0 / 440.0f) : -1.0f);
+            detectedMidi.store (cur.voiced ? music::hzToMidi (cur.f0, 440.0f) : -1.0f);
         }
 
         void pushMark (const Mark& m)
@@ -263,29 +266,29 @@ namespace vs
         {
             if (markCount == 0)
             {
-                if (w < (juce::int64) (maxP * 2.0f)) return;
-                pushMark ({ w - (juce::int64) maxP, defP, 0.0f, false });
+                if (w < (std::int64_t) (maxP * 2.0f)) return;
+                pushMark ({ w - (std::int64_t) maxP, defP, 0.0f, false });
             }
 
             for (;;)
             {
                 const Mark& last = marks[(size_t) ((markHead + maxMarks - 1) % maxMarks)];
                 const bool voiced = cur.voiced;
-                const float period = voiced ? juce::jlimit (minP, maxP, (float) fs / cur.f0) : defP;
+                const float period = voiced ? std::clamp ((float) fs / cur.f0, minP, maxP) : defP;
                 const int search = voiced ? (int) (period / 3.0f) : 0;
-                const juce::int64 cand = last.pos + (juce::int64) std::llround (period);
+                const std::int64_t cand = last.pos + (std::int64_t) std::llround (period);
                 if (cand + search >= w - 1) break;
 
-                juce::int64 pos = cand;
+                std::int64_t pos = cand;
                 if (voiced)
                 {
                     float best = -1.0e9f;
-                    for (juce::int64 t = cand - search; t <= cand + search; ++t)
+                    for (std::int64_t t = cand - search; t <= cand + search; ++t)
                     {
                         const float x = in[(size_t) (t & mask)];
                         if (x > best) { best = x; pos = t; }
                     }
-                    if (pos <= last.pos + (juce::int64) (period * 0.5f))
+                    if (pos <= last.pos + (std::int64_t) (period * 0.5f))
                         pos = cand;
                 }
 
@@ -318,7 +321,7 @@ namespace vs
                 return;
             }
 
-            const float note = 69.0f + 12.0f * std::log2 (m.f0 / 440.0f);
+            const float note = music::hzToMidi (m.f0, 440.0f);
             const auto sc = scales::get (settings.scale);
             const int nearest = scales::nearest (note, settings.key, sc);
 
@@ -337,7 +340,7 @@ namespace vs
                 const int hn = scales::harmonyNote (v.target, hv.interval, settings.key, settings.scale);
 
                 const float maxCents = settings.humanize * 12.0f;
-                v.detune = juce::jlimit (-maxCents, maxCents, v.detune * 0.995f + (rng.nextFloat() - 0.5f) * 3.0f);
+                v.detune = std::clamp (v.detune * 0.995f + ((float) rng.uniform() - 0.5f) * 3.0f, -maxCents, maxCents);
 
                 desired = (float) (hn - v.target) + tuneCorr + v.detune * 0.01f;
                 if (! settings.tuneOn) speed = 15.0f; // just smooth interval changes
@@ -353,10 +356,10 @@ namespace vs
                 correctionCents.store (v.corr * 100.0f);
         }
 
-        void synth (int idx, juce::int64 tOut)
+        void synth (int idx, std::int64_t tOut)
         {
             auto& v = voices[(size_t) idx];
-            const double horizon = (double) (tOut + (juce::int64) maxP);
+            const double horizon = (double) (tOut + (std::int64_t) maxP);
             if (v.nextTs < 0.0) v.nextTs = horizon;
 
             while (v.nextTs <= horizon)
@@ -369,12 +372,12 @@ namespace vs
 
                 const float fr = (idx == 0 || ! m->voiced) ? 1.0f : formantRatio;
                 const int half = std::max (8, (int) m->period);
-                const auto centre = (juce::int64) std::llround (v.nextTs);
+                const auto centre = (std::int64_t) std::llround (v.nextTs);
                 const float invLen = 1.0f / (float) (2 * half);
 
                 for (int k = -half; k < half; ++k)
                 {
-                    const juce::int64 t = centre + k;
+                    const std::int64_t t = centre + k;
                     if (t < tOut) continue;
                     const float win = hannAt ((float) (k + half) * invLen);
                     v.acc[(size_t) (t & mask)] += win * gain * readIn ((double) m->pos + (double) k * fr);
@@ -393,13 +396,13 @@ namespace vs
         int latency = 1300, hop = 256, hopCount = 0;
 
         std::vector<float> in, scratch;
-        juce::int64 w = 0;
+        std::int64_t w = 0;
         std::array<Mark, maxMarks> marks;
         int markCount = 0, markHead = 0;
         std::array<Voice, 3> voices;
         std::array<float, hannSize + 1> hann {};
-        std::array<juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear>, 2> humanDelay;
+        std::array<DelayLine, 2> humanDelay;
         float lfo[2] {};
-        juce::Random rng { 0x5a5a };
+        Xorshift32 rng { 0x5a5a };
     };
 }

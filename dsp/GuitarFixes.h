@@ -1,9 +1,12 @@
 #pragma once
 
-#include <juce_dsp/juce_dsp.h>
+#include "JuceInclude.h"
 #include <atomic>
 #include <vector>
 #include "Biquad.h"
+#include "Dynamics.h"
+#include "Fft.h"
+#include "Windows.h"
 #include "Util.h"
 
 // Strum's dynamic fixes for acoustic guitar: Squeak, Pick and Boom. Each one
@@ -15,54 +18,6 @@
 // Zero latency: nothing looks ahead.
 namespace vs
 {
-    // A bell cut whose depth changes over time. Coefficients are refreshed
-    // per sub-block (16 samples) when the cut moves by more than 0.05 dB.
-    class DynamicBell
-    {
-    public:
-        void prepare (double sampleRate, float freqHz, float bellQ)
-        {
-            fs = sampleRate; freq = freqHz; q = bellQ;
-            eq.reset();
-            eq.c = BiquadCoefs {};
-            applied = 0.0f;
-        }
-
-        void setFreq (float hz)
-        {
-            if (std::abs (hz - freq) < 0.01f) return;
-            freq = hz;
-            applied = -1.0f; // force a redesign
-        }
-
-        void process (float* const* ch, int numCh, int start, int len, float cutDb)
-        {
-            if (std::abs (cutDb - applied) > 0.05f)
-            {
-                applied = cutDb;
-                eq.c = cutDb < 0.01f ? BiquadCoefs {} : BiquadCoefs::peak (fs, freq, q, -cutDb);
-            }
-            for (int c = 0; c < numCh; ++c)
-                for (int i = start; i < start + len; ++i)
-                    ch[c][i] = eq.process (c, ch[c][i]);
-        }
-
-        void reset() { eq.reset(); eq.c = BiquadCoefs {}; applied = 0.0f; }
-
-    private:
-        double fs = 48000.0;
-        float freq = 1000.0f, q = 1.0f, applied = 0.0f;
-        Biquad eq;
-    };
-
-    // Attack/release smoothing of a cut amount (dB), per sub-block
-    inline void glideCut (float& cut, float target, float blockSec, float attackSec, float releaseSec)
-    {
-        const float tau = target > cut ? attackSec : releaseSec;
-        cut += (1.0f - std::exp (-blockSec / tau)) * (target - cut);
-        if (cut < 0.001f && target <= 0.0f) cut = 0.0f;
-    }
-
     //==============================================================================
     // Squeak: finger noise on wound strings during slides and chord changes.
     // A squeak is a short noisy burst, mostly 1.5-8 kHz, that arrives without
@@ -130,7 +85,7 @@ namespace vs
                     m /= (float) numCh;
                     const float h = hiB.process (0, hiA.process (0, m));
                     const float md = midB.process (0, midA.process (0, m));
-                    eh += (h * h > eh ? hiAtk : hiRel) * (h * h - eh);
+                    followEnvelope (eh, h * h, hiAtk, hiRel);
                     sM += smoothC * (md * md - sM);  sM2 += smoothC * (sM - sM2);
                 }
 
@@ -167,11 +122,11 @@ namespace vs
                     const float over = hDb - refDb;
                     if (midMove > (activeSec < 0.015f ? 0.6f : 1.0f)) { active = false; holdSec = 0.06f; } // a strum: let go
                     else if (over < 1.5f || activeSec > 0.4f) active = false;  // the burst has died away
-                    else target = std::min (maxCut, over * pull);
+                    else target = dynamics::cutDb (over, pull, 0.0f, maxCut);
                 }
                 if (! on) target = 0.0f;
 
-                glideCut (cutDb, target, dt, 0.001f, 0.03f);
+                dynamics::glideCut (cutDb, target, dt, 0.001f, 0.03f);
                 maxSeen = std::max (maxSeen, cutDb);
                 if (on || cutDb > 0.0f)
                     bell.process (ch, numCh, start, len, cutDb);
@@ -232,18 +187,18 @@ namespace vs
                     m /= (float) numCh;
                     const float b = bandB.process (0, bandA.process (0, m));
                     const float p = b * b;
-                    fast += (p > fast ? fastAtk : fastRel) * (p - fast);
-                    slow += (p > slow ? slowAtk : slowRel) * (p - slow);
+                    followEnvelope (fast, p, fastAtk, fastRel);
+                    followEnvelope (slow, p, slowAtk, slowRel);
                 }
                 if (! on && cutDb == 0.0f) continue;
 
                 const float dt = (float) len / (float) fs;
                 const float trans = powerToDb (fast) - powerToDb (slow);
                 float target = 0.0f;
-                if (on && powerToDb (fast) > -75.0f && trans > thr)
-                    target = std::min (maxCut, (trans - thr) * slope);
+                if (on && powerToDb (fast) > -75.0f)
+                    target = dynamics::cutDb (trans - thr, slope, 0.0f, maxCut);
 
-                glideCut (cutDb, target, dt, 0.0003f, 0.025f);
+                dynamics::glideCut (cutDb, target, dt, 0.0003f, 0.025f);
                 maxSeen = std::max (maxSeen, cutDb);
                 bell.process (ch, numCh, start, len, cutDb);
             }
@@ -286,12 +241,13 @@ namespace vs
             const int order = sampleRate > 100000.0 ? 16 : sampleRate > 50000.0 ? 15 : 14; // ~3 Hz bins
             size = 1 << order;
             hop = size / 2;
-            fft = std::make_unique<juce::dsp::FFT> (order);
-            window.resize ((size_t) size);
-            for (int i = 0; i < size; ++i)
-                window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size);
+            fft.setSize (size);
+            window = windows::hannPeriodicFloat (size);
             ring.assign ((size_t) size, 0.0f);
-            work.assign ((size_t) size * 2, 0.0f);
+            work.assign ((size_t) size, 0.0f);
+            re.assign ((size_t) size / 2 + 1, 0.0);
+            im.assign ((size_t) size / 2 + 1, 0.0);
+            framePower.assign ((size_t) size / 2 + 1, 0.0);
             power.assign ((size_t) size / 2 + 1, 0.0);
             prefix.assign ((size_t) size / 2 + 2, 0.0);
             write = filled = sinceFrame = frames = 0;
@@ -350,11 +306,11 @@ namespace vs
                     // its usual level, easing off as it drops 4 dB below.
                     longRelDb = longFirst ? relDb : longRelDb + longC * dt * (relDb - longRelDb);
                     longFirst = false;
-                    const float depth = std::min (maxCut, 3.0f * (longRelDb - thr));
+                    const float depth = dynamics::cutDb (longRelDb - thr, 3.0f, 0.0f, maxCut);
                     const float activity = juce::jlimit (0.0f, 1.0f, 1.0f + (relDb - longRelDb) / 4.0f);
                     if (on && depth > 0.0f) target = depth * activity;
                 }
-                glideCut (cutDb, target, dt, 0.015f, 0.2f);
+                dynamics::glideCut (cutDb, target, dt, 0.015f, 0.2f);
                 maxSeen = std::max (maxSeen, cutDb);
                 if (on || cutDb > 0.0f)
                     bell.process (ch, numCh, start, len, cutDb);
@@ -378,14 +334,13 @@ namespace vs
         {
             for (int i = 0; i < size; ++i)
                 work[(size_t) i] = ring[(size_t) ((write + i) % size)] * window[(size_t) i];
-            std::fill (work.begin() + size, work.end(), 0.0f);
-            fft->performFrequencyOnlyForwardTransform (work.data(), true);
+            fft.power (work.data(), framePower.data(), re.data(), im.data());
 
             // long-term average: a plain mean for the first frames, then ~3 s memory
             ++frames;
             const double k = frames < 18 ? 1.0 / frames : 0.06;
             for (int b = 0; b <= size / 2; ++b)
-                power[(size_t) b] += k * ((double) work[(size_t) b] * work[(size_t) b] - power[(size_t) b]);
+                power[(size_t) b] += k * (framePower[(size_t) b] - power[(size_t) b]);
             if (frames < 4) return; // need ~0.7 s before trusting it
 
             for (int b = 0; b <= size / 2; ++b) prefix[(size_t) b + 1] = prefix[(size_t) b] + power[(size_t) b];
@@ -394,7 +349,7 @@ namespace vs
             {
                 const int b1 = juce::jlimit (1, size / 2, (int) std::lround (f * std::pow (2.0, -octaves * 0.5) / binHz));
                 const int b2 = juce::jlimit (b1, size / 2, (int) std::lround (f * std::pow (2.0, octaves * 0.5) / binHz));
-                return 10.0 * std::log10 ((prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / (b2 - b1 + 1) + 1e-30);
+                return db10 ((prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / (b2 - b1 + 1), 1e-30);
             };
 
             double maxLevel = -400.0;
@@ -433,9 +388,9 @@ namespace vs
 
         double fs = 48000.0;
         int size = 16384, hop = 8192, write = 0, filled = 0, sinceFrame = 0, frames = 0;
-        std::unique_ptr<juce::dsp::FFT> fft;
+        RealFft fft;
         std::vector<float> window, ring, work;
-        std::vector<double> power, prefix;
+        std::vector<double> re, im, framePower, power, prefix;
         bool found = false;
         float foundHz = 0.0f, detHz = 0.0f, prominenceDb = 0.0f, relDb = -100.0f;
 

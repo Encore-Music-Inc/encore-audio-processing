@@ -15,14 +15,34 @@ get_filename_component(ENCORE_AUDIO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLU
 
 enable_testing()
 
-# The browser build's configuration (no JUCE: dsp/lite/JuceLite.h stands in), tested natively
-add_executable(LiteMasterTests LiteMasterTests.cpp)
-target_include_directories(LiteMasterTests PRIVATE ${ENCORE_AUDIO_ROOT})
-target_compile_definitions(LiteMasterTests PRIVATE VS_NO_JUCE=1 _USE_MATH_DEFINES)
-if (MSVC)
-    target_compile_options(LiteMasterTests PRIVATE /O2 /fp:fast)
-endif()
-add_test(NAME LiteMasterTests COMMAND LiteMasterTests)
+# The suites that need JUCE (juce_dsp); every other tests/*Tests.cpp is built without JUCE.
+set(ENCORE_JUCE_SUITES Pitch Verb Eq Master Strum)
+
+# The browser build's configuration (no JUCE: dsp/lite/JuceLite.h stands in), tested natively.
+# A new JUCE-free suite is a new tests/<Name>Tests.cpp file; nothing else to add.
+file(GLOB ENCORE_SUITE_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*Tests.cpp")
+set(ENCORE_LITE_SUITES "")
+foreach (file ${ENCORE_SUITE_FILES})
+    string(REGEX REPLACE "Tests\\.cpp$" "" suite "${file}")
+    if (NOT suite IN_LIST ENCORE_JUCE_SUITES)
+        list(APPEND ENCORE_LITE_SUITES ${suite})
+    endif()
+endforeach()
+
+foreach (suite ${ENCORE_LITE_SUITES})
+    add_executable(${suite}Tests ${suite}Tests.cpp)
+    target_include_directories(${suite}Tests PRIVATE ${ENCORE_AUDIO_ROOT})
+    # ENCORE_AUDIO_ROOT_DIR: where ReferenceTests finds data/reference.json
+    target_compile_definitions(${suite}Tests PRIVATE VS_NO_JUCE=1 _USE_MATH_DEFINES ENCORE_AUDIO_ROOT_DIR="${ENCORE_AUDIO_ROOT}")
+    if (APPLE)
+        # dsp/Fft.h runs on Accelerate's vDSP on Apple systems (the JUCE suites get it through juce_dsp)
+        target_link_libraries(${suite}Tests PRIVATE "-framework Accelerate")
+    endif()
+    if (MSVC)
+        target_compile_options(${suite}Tests PRIVATE /O2 /fp:fast)
+    endif()
+    add_test(NAME ${suite}Tests COMMAND ${suite}Tests)
+endforeach()
 
 # The desktop build's configuration (JUCE's juce_dsp)
 option(ENCORE_JUCE_TESTS "Build the tests that need JUCE (external/JUCE)" ON)
@@ -32,7 +52,7 @@ if (ENCORE_JUCE_TESTS)
     endif()
     add_subdirectory("${ENCORE_AUDIO_ROOT}/external/JUCE" "${CMAKE_BINARY_DIR}/JUCE")
 
-    foreach (suite Pitch Verb Eq Master Strum)
+    foreach (suite ${ENCORE_JUCE_SUITES})
         juce_add_console_app(${suite}Tests PRODUCT_NAME "${suite}Tests")
         target_sources(${suite}Tests PRIVATE ${suite}Tests.cpp)
         target_include_directories(${suite}Tests PRIVATE ${ENCORE_AUDIO_ROOT})
@@ -40,4 +60,12 @@ if (ENCORE_JUCE_TESTS)
         target_link_libraries(${suite}Tests PRIVATE juce::juce_dsp PUBLIC juce::juce_recommended_config_flags)
         add_test(NAME ${suite}Tests COMMAND ${suite}Tests)
     endforeach()
+
+    # The reference set (ReferenceTests.cpp) once more, built with JUCE as the desktop products build the headers
+    juce_add_console_app(ReferenceJuceTests PRODUCT_NAME "ReferenceJuceTests")
+    target_sources(ReferenceJuceTests PRIVATE ReferenceTests.cpp)
+    target_include_directories(ReferenceJuceTests PRIVATE ${ENCORE_AUDIO_ROOT})
+    target_compile_definitions(ReferenceJuceTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 ENCORE_AUDIO_ROOT_DIR="${ENCORE_AUDIO_ROOT}")
+    target_link_libraries(ReferenceJuceTests PRIVATE juce::juce_dsp PUBLIC juce::juce_recommended_config_flags)
+    add_test(NAME ReferenceJuceTests COMMAND ReferenceJuceTests)
 endif()

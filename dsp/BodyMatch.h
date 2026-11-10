@@ -1,11 +1,21 @@
 #pragma once
 
-#include <juce_dsp/juce_dsp.h>
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
+#include <cmath>
+#include <limits>
+#include <locale>
+#include <sstream>
+#include <string>
 #include <vector>
+#include "JuceInclude.h"
 #include "Biquad.h"
+#include "Convolution.h"
+#include "Fft.h"
 #include "Util.h"
+#include "Windows.h"
 
 // Strum's Body stage: make a pickup (DI) sound like a mic on the same guitar.
 //
@@ -15,7 +25,7 @@
 //   BodyFilter  turns a curve into a filter and runs it on the audio
 //
 // How the curve becomes a filter: a minimum-phase FIR, made with the cepstrum
-// method, run through JUCE's zero-latency convolution. Why that and not a
+// method, run through the zero-latency convolution (Convolution.h). Why that and not a
 // fitted EQ:
 //   - a learned curve can have any shape; an FIR follows it point for point,
 //     where an EQ fit always leaves fitting error and needs a band count chosen
@@ -46,29 +56,39 @@ namespace vs
             if (pos >= (float) (numPoints - 1)) return db[numPoints - 1];
             const int i = (int) pos;
             const float t = pos - (float) i;
-            return db[(size_t) i] + t * (db[(size_t) i + 1] - db[(size_t) i]);
+            return lerp (db[(size_t) i], db[(size_t) i + 1], t);
         }
 
         bool operator== (const BodyCurve& o) const { return db == o.db && levelDb == o.levelDb && valid == o.valid; }
 
-        // Saved in the plugin state (and in user presets) as plain text
-        juce::String toString() const
+        // Saved in the plugin state (and in user presets) as plain text:
+        // "1", the level, the seconds and the points, separated by spaces,
+        // with a point for decimals whatever the system's language.
+        std::string toString() const
         {
-            juce::String s ("1 " + juce::String (levelDb, 2) + " " + juce::String (seconds, 1));
-            for (float v : db) s << " " << juce::String (v, 2);
+            std::string s = "1 " + fixed (levelDb, 2) + " " + fixed (seconds, 1);
+            for (float v : db) s += " " + fixed (v, 2);
             return s;
         }
 
-        static BodyCurve fromString (const juce::String& text)
+        // Anything but that text (a different count, or not starting with "1")
+        // gives a curve that isn't valid. A word is read up to where it stops
+        // being a number, and reads as 0 if it doesn't start with one.
+        static BodyCurve fromString (const std::string& text)
         {
             BodyCurve c;
-            auto parts = juce::StringArray::fromTokens (text, " ", "");
-            parts.removeEmptyStrings();
-            if (parts.size() != 3 + numPoints || parts[0] != "1") return c;
-            c.levelDb = parts[1].getFloatValue();
-            c.seconds = parts[2].getFloatValue();
+            std::vector<std::string> parts;
+            for (size_t from = 0; from <= text.size();)
+            {
+                const size_t to = std::min (text.find (' ', from), text.size());
+                if (to > from) parts.push_back (text.substr (from, to - from));
+                from = to + 1;
+            }
+            if (parts.size() != (size_t) (3 + numPoints) || parts[0] != "1") return c;
+            c.levelDb = number (parts[1]);
+            c.seconds = number (parts[2]);
             for (int i = 0; i < numPoints; ++i)
-                c.db[(size_t) i] = juce::jlimit (-maxDb, maxDb, parts[3 + i].getFloatValue());
+                c.db[(size_t) i] = std::clamp (number (parts[(size_t) (3 + i)]), -maxDb, maxDb);
             c.valid = true;
             return c;
         }
@@ -95,6 +115,57 @@ namespace vs
             }
             c.valid = true;
             return c;
+        }
+
+    private:
+        static std::string fixed (double v, int places)
+        {
+            std::ostringstream o;
+            o.imbue (std::locale::classic());
+            o.setf (std::ios_base::fixed);
+            o.precision (places);
+            o << v;
+            return o.str();
+        }
+
+        // The number at the start of a word: an optional sign, digits with
+        // an optional point, an optional exponent, or "nan" or "inf"; 0 when
+        // there is none
+        static float number (const std::string& word)
+        {
+            size_t i = word.find_first_not_of (" \t\n\r\f\v");
+            if (i == std::string::npos) return 0.0f;
+            const size_t start = i;
+            if (word[i] == '+' || word[i] == '-') ++i;
+            const auto is = [&] (size_t at, const char* name)
+            {
+                for (size_t k = 0; name[k] != 0; ++k)
+                    if (at + k >= word.size() || std::tolower ((unsigned char) word[at + k]) != name[k]) return false;
+                return true;
+            };
+            if (is (i, "nan")) return std::numeric_limits<float>::quiet_NaN();
+            if (is (i, "inf")) return word[start] == '-' ? -std::numeric_limits<float>::infinity() : std::numeric_limits<float>::infinity();
+            const auto digit = [&] (size_t at) { return at < word.size() && word[at] >= '0' && word[at] <= '9'; };
+            // significant: a digit after the point, or one from the first
+            // non-zero digit on (so "-0" reads as 0, but "-0.00" as -0)
+            bool any = false, significant = false;
+            while (digit (i)) { significant = significant || word[i] != '0'; ++i; any = true; }
+            if (i < word.size() && word[i] == '.') { ++i; while (digit (i)) { ++i; any = significant = true; } }
+            if (! any || ! significant) return 0.0f;
+            if (i < word.size() && (word[i] == 'e' || word[i] == 'E'))
+            {
+                size_t e = i + 1;
+                if (e < word.size() && (word[e] == '+' || word[e] == '-')) ++e;
+                if (digit (e)) { while (digit (e)) ++e; i = e; }
+            }
+            std::istringstream in (word.substr (start, i - start));
+            in.imbue (std::locale::classic());
+            double v = 0.0;
+            in >> v;
+            if (v == 0.0 && word[start] == '-') return -0.0f; // too small to hold, below zero
+            if (std::abs (v) == std::numeric_limits<double>::max()) // too large to hold
+                return v > 0 ? std::numeric_limits<float>::infinity() : -std::numeric_limits<float>::infinity();
+            return (float) v;
         }
     };
 
@@ -123,13 +194,14 @@ namespace vs
             const int order = sampleRate > 100000.0 ? 14 : sampleRate > 50000.0 ? 13 : 12; // ~85 ms frames
             size = 1 << order;
             hop = size / 2;
-            fft = std::make_unique<juce::dsp::FFT> (order);
-            window.resize ((size_t) size);
-            for (int i = 0; i < size; ++i)
-                window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size);
+            fft.setSize (size);
+            window = windows::hannPeriodicFloat (size);
             ringDi.assign ((size_t) size, 0.0f);
             ringMic.assign ((size_t) size, 0.0f);
-            work.assign ((size_t) size * 2, 0.0f);
+            work.assign ((size_t) size, 0.0f);
+            re.assign ((size_t) size / 2 + 1, 0.0);
+            im.assign ((size_t) size / 2 + 1, 0.0);
+            framePower.assign ((size_t) size / 2 + 1, 0.0);
             sumDi.assign ((size_t) size / 2 + 1, 0.0);
             sumMic.assign ((size_t) size / 2 + 1, 0.0);
             learning = false;
@@ -207,8 +279,8 @@ namespace vs
                 const double f = BodyCurve::freq (i);
                 int b1 = (int) std::lround (f * std::pow (2.0, -1.0 / 6.0) / binHz);
                 int b2 = (int) std::lround (f * std::pow (2.0, 1.0 / 6.0) / binHz);
-                b1 = juce::jlimit (1, last, b1);
-                b2 = juce::jlimit (b1, last, b2);
+                b1 = std::clamp (b1, 1, last);
+                b2 = std::clamp (b2, b1, last);
                 for (int b = b1; b <= b2; ++b) { pd[(size_t) i] += sumDi[(size_t) b]; pm[(size_t) i] += sumMic[(size_t) b]; }
                 pd[(size_t) i] /= (b2 - b1 + 1);
                 pm[(size_t) i] /= (b2 - b1 + 1);
@@ -229,7 +301,7 @@ namespace vs
 
             std::array<float, BodyCurve::numPoints> ratio {};
             for (int i = 0; i < BodyCurve::numPoints; ++i)
-                if (ok[(size_t) i]) ratio[(size_t) i] = (float) (10.0 * std::log10 (pm[(size_t) i] / pd[(size_t) i]));
+                if (ok[(size_t) i]) ratio[(size_t) i] = (float) db10 (pm[(size_t) i] / pd[(size_t) i], 0.0);
             // untrusted points take the nearest trusted value
             for (int i = 0; i < BodyCurve::numPoints; ++i)
                 if (! ok[(size_t) i])
@@ -255,9 +327,9 @@ namespace vs
                 const float f = BodyCurve::freq (i);
                 float v = ratio[(size_t) i] - c.levelDb;
                 // fade to flat below 40 Hz and above 16 kHz (nothing useful there, only rumble and hiss to boost)
-                if (f < 40.0f) v *= juce::jlimit (0.0f, 1.0f, std::log2 (f / 20.0f));
-                if (f > 16000.0f) v *= juce::jlimit (0.0f, 1.0f, 1.0f - std::log2 (f / 16000.0f) / std::log2 (20480.0f / 16000.0f));
-                c.db[(size_t) i] = juce::jlimit (-BodyCurve::maxDb, BodyCurve::maxDb, v);
+                if (f < 40.0f) v *= std::clamp (std::log2 (f / 20.0f), 0.0f, 1.0f);
+                if (f > 16000.0f) v *= std::clamp (1.0f - std::log2 (f / 16000.0f) / std::log2 (20480.0f / 16000.0f), 0.0f, 1.0f);
+                c.db[(size_t) i] = std::clamp (v, -BodyCurve::maxDb, BodyCurve::maxDb);
             }
             c.seconds = activeSeconds;
             c.valid = true;
@@ -306,7 +378,7 @@ namespace vs
             {
                 double s = 0.0;
                 for (float v : ring) s += (double) v * v;
-                return 10.0f * (float) std::log10 (s / size + 1e-20);
+                return (float) db10 (s / size);
             };
             const float dDb = frameDb (ringDi), mDb = frameDb (ringMic);
             peakDi = std::max (peakDi, dDb);
@@ -322,17 +394,16 @@ namespace vs
         {
             for (int i = 0; i < size; ++i)
                 work[(size_t) i] = ring[(size_t) ((write + i) % size)] * window[(size_t) i];
-            std::fill (work.begin() + size, work.end(), 0.0f);
-            fft->performFrequencyOnlyForwardTransform (work.data(), true);
+            fft.power (work.data(), framePower.data(), re.data(), im.data());
             for (int b = 0; b <= size / 2; ++b)
-                sum[(size_t) b] += (double) work[(size_t) b] * work[(size_t) b];
+                sum[(size_t) b] += framePower[(size_t) b];
         }
 
         double fs = 48000.0;
         int size = 4096, hop = 2048, write = 0, filled = 0, sinceFrame = 0;
-        std::unique_ptr<juce::dsp::FFT> fft;
+        RealFft fft;
         std::vector<float> window, ringDi, ringMic, work;
-        std::vector<double> sumDi, sumMic;
+        std::vector<double> re, im, framePower, sumDi, sumMic;
         float activeSeconds = 0.0f, peakDi = -200.0f, peakMic = -200.0f;
         BodyCurve result;
         std::atomic<bool> learning { false }, startRequested { false }, stopRequested { false }, resultReady { false };
@@ -342,8 +413,12 @@ namespace vs
 
     //==============================================================================
     // Runs a curve on the audio. design() makes the minimum-phase FIR; the
-    // convolution is JUCE's zero-latency one, which crossfades when a new
+    // convolution (Convolution.h) has no latency and crossfades when a new
     // filter arrives, so Amount moves don't click.
+    //
+    // Threads: setCurve() on one thread other than the audio thread (it
+    // designs the filter and makes it ready there), prepare() off the audio
+    // thread, process() and reset() on the audio thread.
     class BodyFilter
     {
     public:
@@ -351,97 +426,72 @@ namespace vs
         static int lengthFor (double fs) { return fs > 100000.0 ? 16384 : fs > 50000.0 ? 8192 : 4096; }
 
         // Any thread but the audio thread (allocates). amount scales the curve in dB.
-        static juce::AudioBuffer<float> design (const BodyCurve& curve, float amount, double fs)
+        static std::vector<float> design (const BodyCurve& curve, float amount, double fs)
         {
-            using C = juce::dsp::Complex<float>;
             const int len = lengthFor (fs);
             const int n = len * 4; // generous cepstrum size keeps time-aliasing negligible
-            const int order = juce::roundToInt (std::log2 ((double) n));
-            juce::dsp::FFT fft (order);
-            std::vector<C> a ((size_t) n), b ((size_t) n);
+            const Fft fft (n);
+            std::vector<double> re ((size_t) n, 0.0), im ((size_t) n, 0.0);
 
             // log magnitude, symmetric
             for (int k = 0; k <= n / 2; ++k)
             {
                 const float hz = (float) (k * fs / n);
                 const float lm = amount * curve.at (hz) * (float) (std::log (10.0) / 20.0);
-                a[(size_t) k] = { lm, 0.0f };
-                if (k > 0 && k < n / 2) a[(size_t) (n - k)] = { lm, 0.0f };
+                re[(size_t) k] = lm;
+                if (k > 0 && k < n / 2) re[(size_t) (n - k)] = lm;
             }
-            fft.perform (a.data(), b.data(), true); // real cepstrum
+            fft.inverse (re.data(), im.data()); // real cepstrum
 
             // fold the cepstrum onto positive time: that's the minimum-phase version
-            std::fill (a.begin(), a.end(), C {});
-            a[0] = { b[0].real(), 0.0f };
-            for (int i = 1; i < n / 2; ++i) a[(size_t) i] = { 2.0f * b[(size_t) i].real(), 0.0f };
-            a[(size_t) n / 2] = { b[(size_t) n / 2].real(), 0.0f };
-            fft.perform (a.data(), b.data(), false);
+            for (int i = 1; i < n / 2; ++i) re[(size_t) i] *= 2.0;
+            std::fill (re.begin() + n / 2 + 1, re.end(), 0.0);
+            std::fill (im.begin(), im.end(), 0.0);
+            fft.forward (re.data(), im.data());
 
             for (int k = 0; k < n; ++k)
             {
-                const float e = std::exp (b[(size_t) k].real()), ph = b[(size_t) k].imag();
-                a[(size_t) k] = { e * std::cos (ph), e * std::sin (ph) };
+                const double e = std::exp (re[(size_t) k]), ph = im[(size_t) k];
+                re[(size_t) k] = e * std::cos (ph);
+                im[(size_t) k] = e * std::sin (ph);
             }
-            fft.perform (a.data(), b.data(), true);
+            fft.inverse (re.data(), im.data());
 
             // keep the start (where a minimum-phase response has its energy),
             // with a gentle fade over the last quarter
-            juce::AudioBuffer<float> ir (2, len);
+            constexpr float pi = 3.141592653589793238f;
+            std::vector<float> ir ((size_t) len);
             const int fadeFrom = len * 3 / 4;
             for (int i = 0; i < len; ++i)
             {
                 float w = 1.0f;
-                if (i >= fadeFrom) w = 0.5f + 0.5f * std::cos (juce::MathConstants<float>::pi * (float) (i - fadeFrom) / (float) (len - fadeFrom));
-                const float v = b[(size_t) i].real() * w;
-                ir.setSample (0, i, v);
-                ir.setSample (1, i, v);
+                if (i >= fadeFrom) w = 0.5f + 0.5f * std::cos (pi * (float) (i - fadeFrom) / (float) (len - fadeFrom));
+                ir[(size_t) i] = (float) re[(size_t) i] * w;
             }
             return ir;
         }
 
+        // Takes up the newest filter (from setCurve, designed for this sample rate)
         void prepare (const juce::dsp::ProcessSpec& spec)
         {
-            takePending();
-            conv.prepare (spec);
-            conv.reset();
+            conv.prepare (spec.sampleRate, (int) spec.maximumBlockSize);
         }
 
         void reset() { conv.reset(); }
 
-        // Message thread: design and queue a filter for the audio thread
+        // Design a filter for sample rate fs and hand it to the audio thread
         void setCurve (const BodyCurve& curve, float amount, double fs)
         {
-            auto ir = design (curve, amount, fs);
-            const juce::SpinLock::ScopedLockType sl (lock);
-            pending = std::move (ir);
-            pendingRate = fs;
-            hasPending = true;
+            conv.loadImpulseResponse ({ design (curve, amount, fs) });
         }
 
         // Audio thread, stereo in place
         void process (float* const* ch, int numSamples)
         {
-            takePending();
-            juce::dsp::AudioBlock<float> block (ch, 2, (size_t) numSamples);
-            conv.process (juce::dsp::ProcessContextReplacing<float> (block));
+            conv.process (ch, 2, numSamples);
         }
 
     private:
-        // Hand the newest filter to the convolution (wait-free: if the
-        // message thread holds the lock right now, try again next block)
-        void takePending()
-        {
-            const juce::SpinLock::ScopedTryLockType sl (lock);
-            if (! sl.isLocked() || ! hasPending) return;
-            conv.loadImpulseResponse (std::move (pending), pendingRate, juce::dsp::Convolution::Stereo::yes,
-                                      juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::no);
-            hasPending = false;
-        }
-
-        juce::dsp::Convolution conv; // default = zero latency
-        juce::SpinLock lock;
-        juce::AudioBuffer<float> pending;
-        double pendingRate = 48000.0;
-        bool hasPending = false;
+        Convolution conv;
     };
 }

@@ -326,12 +326,12 @@ namespace
             const auto ir = vs::BodyFilter::design (c, 1.0f, fs);
             int peak = 0;
             double total = 0.0, first = 0.0;
-            for (int i = 0; i < ir.getNumSamples(); ++i)
+            for (int i = 0; i < (int) ir.size(); ++i)
             {
-                const double v = ir.getSample (0, i);
+                const double v = ir[(size_t) i];
                 total += v * v;
                 if (i < 48) first += v * v; // first 1 ms
-                if (std::abs (v) > std::abs (ir.getSample (0, peak))) peak = i;
+                if (std::abs (v) > std::abs (ir[(size_t) peak])) peak = i;
             }
             expect ("Body filter is minimum phase (peak at start, no pre-ring)", peak < 8 && first / total > 0.8,
                     "peak at sample " + juce::String (peak) + ", " + num (100.0 * first / total, 1) + "% of energy in the first 1 ms");

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "JuceInclude.h"
+#include "Oversampler.h"
 #include "Util.h"
 
 namespace vs
@@ -14,7 +15,7 @@ namespace vs
     public:
         void prepare (double sampleRate, int maxBlockSize)
         {
-            os.initProcessing ((size_t) maxBlockSize);
+            os.initProcessing (maxBlockSize);
             os.reset();
             dcR = 1.0f - (float) (juce::MathConstants<double>::twoPi * 10.0 / sampleRate);
             for (auto& s : dcX) s = 0.0f;
@@ -34,14 +35,18 @@ namespace vs
 
         void process (juce::dsp::AudioBlock<float>& block)
         {
-            auto up = os.processSamplesUp (block);
+            const int nch = (int) std::min (block.getNumChannels(), (size_t) os.getNumChannels()), n = (int) block.getNumSamples();
+            float* ch[2] {};
+            for (int c = 0; c < nch; ++c) ch[c] = block.getChannelPointer ((size_t) c);
+            auto* const* up = os.processSamplesUp (ch, nch, n);
+            const int nUp = n * os.getFactor();
 
             if (active)
             {
-                for (size_t c = 0; c < up.getNumChannels(); ++c)
+                for (int c = 0; c < nch; ++c)
                 {
-                    auto* d = up.getChannelPointer (c);
-                    for (size_t i = 0; i < up.getNumSamples(); ++i)
+                    auto* d = up[c];
+                    for (int i = 0; i < nUp; ++i)
                     {
                         const float x = d[i];
                         const float sat = (std::tanh (k * (x + bias)) - tb) * norm;
@@ -50,7 +55,7 @@ namespace vs
                 }
             }
 
-            os.processSamplesDown (block);
+            os.processSamplesDown (ch, nch, n);
 
             if (active)
             {
@@ -69,7 +74,7 @@ namespace vs
         }
 
     private:
-        juce::dsp::Oversampling<float> os { 2, 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, true };
+        Oversampler<float> os { 2, 1 };
         static constexpr float bias = 0.12f;
         bool active = false;
         float k = 1.0f, tb = 0.0f, norm = 1.0f, mix = 0.0f;

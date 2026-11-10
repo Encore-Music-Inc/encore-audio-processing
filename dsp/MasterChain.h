@@ -4,6 +4,8 @@
 #include <array>
 #include <atomic>
 #include "Biquad.h"
+#include "Crossover.h"
+#include "Dynamics.h"
 #include "Loudness.h"
 #include "Saturator.h"
 #include "ReverbEngine.h"
@@ -106,14 +108,14 @@ namespace vs
         void prepare (double sampleRate, int maxBlock)
         {
             fs = sampleRate;
-            const juce::dsp::ProcessSpec spec { fs, (juce::uint32) maxBlock, 2 };
-            for (auto* f : { &lp1, &hp1, &lp2, &hp2, &ap2 }) { f->prepare (spec); f->reset(); }
-            lp1.setType (juce::dsp::LinkwitzRileyFilterType::lowpass);  lp1.setCutoffFrequency (150.0f);
-            hp1.setType (juce::dsp::LinkwitzRileyFilterType::highpass); hp1.setCutoffFrequency (150.0f);
-            lp2.setType (juce::dsp::LinkwitzRileyFilterType::lowpass);  lp2.setCutoffFrequency (3000.0f);
-            hp2.setType (juce::dsp::LinkwitzRileyFilterType::highpass); hp2.setCutoffFrequency (3000.0f);
-            ap2.setType (juce::dsp::LinkwitzRileyFilterType::allpass);  ap2.setCutoffFrequency (3000.0f);
-            sideHp.prepare (spec); sideHp.setType (juce::dsp::LinkwitzRileyFilterType::highpass); sideHp.setCutoffFrequency (120.0f);
+            using LR = LinkwitzRiley<float>::Type;
+            for (auto* f : { &lp1, &hp1, &lp2, &hp2, &ap2 }) { f->prepare (fs); f->reset(); }
+            lp1.setType (LR::lowPass);  lp1.setCutoffFrequency (150.0f);
+            hp1.setType (LR::highPass); hp1.setCutoffFrequency (150.0f);
+            lp2.setType (LR::lowPass);  lp2.setCutoffFrequency (3000.0f);
+            hp2.setType (LR::highPass); hp2.setCutoffFrequency (3000.0f);
+            ap2.setType (LR::allPass);  ap2.setCutoffFrequency (3000.0f);
+            sideHp.prepare (fs); sideHp.setType (LR::highPass); sideHp.setCutoffFrequency (120.0f);
 
             for (auto& b : bands) b.assign ((size_t) maxBlock, 0.0f);
             for (auto& b : bandsR) b.assign ((size_t) maxBlock, 0.0f);
@@ -257,8 +259,8 @@ namespace vs
             if (st.monoBassHz != lastMonoHz) { lastMonoHz = st.monoBassHz; sideHp.setCutoffFrequency (st.monoBassHz); }
             for (int i = 0; i < n; ++i)
             {
-                const float m = 0.5f * (l[i] + r[i]);
-                float s = 0.5f * (l[i] - r[i]);
+                const float m = midOf (l[i], r[i]);
+                float s = sideOf (l[i], r[i]);
                 s = sideHp.processSample (0, s) * width; // centred low end
                 l[i] = m + s; r[i] = m - s;
             }
@@ -355,7 +357,7 @@ namespace vs
                 // up to 1.5: ratio ~5.5:1 for the heaviest styles (Heavy)
                 const float a = juce::jlimit (0.0f, 1.5f, st.comp[band] * amount);
                 const float thr = learned.bandLevelDb[band] + 6.0f - a * 10.0f;
-                const float ratio = 1.0f + a * 3.0f;
+                const float ratio = 1.0f + a * 3.0f, slope = 1.0f - 1.0f / ratio;
                 const float speed = st.fast ? 0.5f : 1.0f;
                 const float atk = onePole (atkMs[band] * speed, fs), rel = onePole (relMs[band] * speed, fs);
                 float maxGr = 0.0f;
@@ -363,13 +365,9 @@ namespace vs
                 {
                     const float xl = bands[(size_t) band][(size_t) i], xr = bandsR[(size_t) band][(size_t) i];
                     const float sq = std::max (xl * xl, xr * xr);
-                    bandEnv[band] += (sq > bandEnv[band] ? atk : rel) * (sq - bandEnv[band]);
+                    followEnvelope (bandEnv[band], sq, atk, rel);
                     const float lvl = powerToDb (bandEnv[band]);
-                    const float over = lvl - thr;
-                    // 6 dB soft knee
-                    float gr = 0.0f;
-                    if (over > 3.0f) gr = over * (1.0f - 1.0f / ratio);
-                    else if (over > -3.0f) gr = (1.0f - 1.0f / ratio) * (over + 3.0f) * (over + 3.0f) / 12.0f;
+                    const float gr = dynamics::cutDb (lvl - thr, slope, 6.0f); // 6 dB soft knee
                     grDb[band] = gr;
                     maxGr = std::max (maxGr, gr);
                     const float g = dbToGain (-gr);
@@ -411,7 +409,7 @@ namespace vs
                 analysisSeconds += sec;
                 for (int i = 0; i < n; ++i)
                 {
-                    const float m = 0.5f * (l[i] + r[i]);
+                    const float m = midOf (l[i], r[i]);
                     for (int k = 0; k < numAnalysis; ++k)
                     {
                         const float b = analysis[k].process (0, m);
@@ -462,7 +460,7 @@ namespace vs
             // difference into the five tone bands.
             double bandDb[numAnalysis];
             for (int k = 0; k < numAnalysis; ++k)
-                bandDb[k] = 10.0 * std::log10 (analysisAcc[k] / std::max (1.0, analysisSeconds * fs) + 1e-20);
+                bandDb[k] = db10 (analysisAcc[k] / std::max (1.0, analysisSeconds * fs));
 
             auto reference = [] (float f)
             {
@@ -509,7 +507,7 @@ namespace vs
                 if (analysisFreq (k) >= lo[band] && analysisFreq (k) < hi[band]) s += analysisAcc[k];
             // 1/3-octave-ish bands overlap ~2x and cover the range: rough but stable
             const double meanSq = s / std::max (1.0, analysisSeconds * fs) * 0.5;
-            return juce::jlimit (-60.0f, 0.0f, (float) (10.0 * std::log10 (meanSq + 1e-20)) + 3.0f);
+            return juce::jlimit (-60.0f, 0.0f, (float) db10 (meanSq) + 3.0f);
         }
 
         double fs = 48000.0;
@@ -527,7 +525,7 @@ namespace vs
         Biquad user[3];
         float lastUser[3] { 999.0f, 999.0f, 999.0f };
 
-        juce::dsp::LinkwitzRileyFilter<float> lp1, hp1, lp2, hp2, ap2, sideHp;
+        LinkwitzRiley<float> lp1, hp1, lp2, hp2, ap2, sideHp;
         float lastMonoHz = -1.0f;
         std::array<std::vector<float>, 3> bands, bandsR;
         float bandEnv[3] {}, grDb[3] {};
