@@ -208,36 +208,42 @@ namespace
     void oversamplerTests()
     {
         // the same output as a plain FIR over the zero-stuffed signal (which is
-        // what the ring buffers and skipped zeros must reproduce)
-        vs::Oversampler<float> os (1, 1);
-        os.initProcessing (64);
-        const int n = 64, taps = vs::Oversampler<float>::taps;
-        std::vector<float> h ((size_t) taps);
+        // what the ring buffers and skipped zeros must reproduce), for the
+        // default filter and the limiter's longer one
+        for (const auto [numTaps, beta] : { std::pair { 63, 8.0 }, std::pair { 127, 10.0 } })
         {
-            // the taps, by sending a click through
-            vs::Oversampler<float> probe (1, 1);
-            probe.initProcessing (64);
-            std::vector<float> c ((size_t) 64, 0.0f); c[0] = 0.5f; // x2 inside: a unit impulse into the filter
-            const float* in[1] { c.data() };
-            auto* const* up = probe.processSamplesUp (in, 1, 64);
-            for (int k = 0; k < taps; ++k) h[(size_t) k] = up[0][k];
-        }
-        auto src = noise (n, 9);
-        std::vector<float> x (src.begin(), src.end());
-        const float* in[1] { x.data() };
-        auto* const* up = os.processSamplesUp (in, 1, n);
-        bool same = true;
-        for (int i = 0; i < 2 * n; ++i)
-        {
-            float acc = 0.0f;
-            for (int k = 0; k < taps; ++k)
+            vs::Oversampler<float> os (1, 1, numTaps, beta);
+            os.initProcessing (256);
+            const int n = 256, taps = os.getNumTaps();
+            std::vector<float> h ((size_t) taps);
             {
-                const int j = i - k;
-                acc += h[(size_t) k] * ((j >= 0 && (j & 1) == 0) ? x[(size_t) (j / 2)] * 2.0f : 0.0f);
+                // the taps, by sending a click through
+                vs::Oversampler<float> probe (1, 1, numTaps, beta);
+                probe.initProcessing (256);
+                std::vector<float> c ((size_t) 256, 0.0f); c[0] = 0.5f; // x2 inside: a unit impulse into the filter
+                const float* in[1] { c.data() };
+                auto* const* up = probe.processSamplesUp (in, 1, 256);
+                for (int k = 0; k < taps; ++k) h[(size_t) k] = up[0][k];
             }
-            same = same && std::memcmp (&acc, &up[0][i], sizeof (float)) == 0;
+            auto src = noise (n, 9);
+            std::vector<float> x (src.begin(), src.end());
+            const float* in[1] { x.data() };
+            auto* const* up = os.processSamplesUp (in, 1, n);
+            bool same = true;
+            for (int i = 0; i < 2 * n; ++i)
+            {
+                float acc = 0.0f;
+                for (int k = 0; k < taps; ++k)
+                {
+                    const int j = i - k;
+                    acc += h[(size_t) k] * ((j >= 0 && (j & 1) == 0) ? x[(size_t) (j / 2)] * 2.0f : 0.0f);
+                }
+                same = same && std::memcmp (&acc, &up[0][i], sizeof (float)) == 0;
+            }
+            char name[96];
+            std::snprintf (name, sizeof (name), "Oversampler up (%d taps): bit-for-bit a plain FIR over the zero-stuffed signal", taps);
+            expect (name, same);
         }
-        expect ("Oversampler up: bit-for-bit a plain FIR over the zero-stuffed signal", same);
 
         // passband and level: a 1 kHz sine at 48 kHz through 2x up and down comes out the same, delayed
         vs::Oversampler<float> os4 (2, 1);
@@ -259,6 +265,7 @@ namespace
         for (int i = 1000; i < len; ++i) e = std::max (e, (double) std::abs (l[(size_t) i] - ref[(size_t) (i - lat)]));
         expect ("Oversampler 2x up and down: 1 kHz unchanged, by the stated latency", lat == 31 && e < 1e-3, e);
         expect ("Oversampler 4x: latency 31 + 15.5 samples", vs::Oversampler<float> (1, 2).getLatencyInSamples() == 46.5f);
+        expect ("Oversampler 4x, 127 taps: latency 63 + 31.5 samples", vs::Oversampler<float> (1, 2, 127, 10.0).getLatencyInSamples() == 94.5f);
 
         // images: 2x up of a 15 kHz sine at 48 kHz, nothing left at 33 kHz
         vs::Oversampler<float> os2 (1, 1);

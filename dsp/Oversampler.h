@@ -8,8 +8,9 @@
 namespace vs
 {
     // Power-of-two oversampling: 2x, 4x, 8x or 16x in stages of 2x, each stage
-    // a 63-tap linear-phase half-band low-pass (Kaiser-windowed sinc, beta 8,
-    // cut-off at a quarter of the higher rate). Up: zero-stuffing, then the
+    // a linear-phase half-band low-pass (Kaiser-windowed sinc, cut-off at a
+    // quarter of the higher rate; 63 taps with beta 8 unless set longer, which
+    // keeps more of the top octave). Up: zero-stuffing, then the
     // filter (gain 2 restores the level). Down: the filter, then every other
     // sample. Used where a process would otherwise alias (saturation) and to
     // see the peaks between samples (true-peak limiting); the same filters run
@@ -26,12 +27,14 @@ namespace vs
     class Oversampler
     {
     public:
-        static constexpr int taps = 63;
-
-        Oversampler (int numChannels, int factorLog2) : channels (numChannels), stages (factorLog2)
+        // numTaps: odd, 7 or more.
+        Oversampler (int numChannels, int factorLog2, int numTaps = 63, double kaiserBeta = 8.0)
+            : channels (numChannels), stages (factorLog2), taps (numTaps),
+              upEvenTaps ((numTaps + 1) / 2), upOddTaps (numTaps / 2),
+              coeff ((size_t) numTaps), evenTaps ((size_t) upEvenTaps), oddTaps ((size_t) upOddTaps)
         {
             const int n = taps;
-            const double beta = 8.0;
+            const double beta = kaiserBeta;
             const double pi = windows::pi;
             for (int i = 0; i < n; ++i)
             {
@@ -45,6 +48,7 @@ namespace vs
         }
 
         int getFactor() const { return 1 << stages; }
+        int getNumTaps() const { return taps; }
         int getNumChannels() const { return channels; }
 
         // Allocates the buffers for blocks of up to maxBlock samples (at the
@@ -55,8 +59,8 @@ namespace vs
                 buf[s].assign ((size_t) channels, std::vector<T> ((size_t) maxBlock << (s + 1), T (0)));
             for (int s = 0; s < stages; ++s)
             {
-                up[s].assign ((size_t) channels, Ring<upLength> {});
-                down[s].assign ((size_t) channels, Ring<downLength> {});
+                up[s].assign ((size_t) channels, Ring (upEvenTaps));
+                down[s].assign ((size_t) channels, Ring (taps));
             }
             ptrs.assign ((size_t) channels, nullptr);
             reset();
@@ -137,35 +141,34 @@ namespace vs
         }
 
     private:
-        // Up: the zero-stuffed history holds one input every other tap, so
-        // (taps + 1) / 2 inputs cover all the taps.
-        static constexpr int upEvenTaps = (taps + 1) / 2, upOddTaps = taps / 2;
-        static constexpr int upLength = upEvenTaps, downLength = taps;
-
         // The last L values, newest first, readable as one run of L.
-        template <int L>
         struct Ring
         {
-            T v[2 * L] {};
+            explicit Ring (int length) : L (length), v ((size_t) (2 * length), T (0)) {}
+
+            int L;
+            std::vector<T> v;
             int p = 0;
 
-            void clear() { std::fill (v, v + 2 * L, T (0)); p = 0; }
+            void clear() { std::fill (v.begin(), v.end(), T (0)); p = 0; }
 
             const T* push (T x)
             {
                 p = p == 0 ? L - 1 : p - 1;
-                v[p] = x;
-                v[p + L] = x;
-                return v + p;
+                v[(size_t) p] = x;
+                v[(size_t) (p + L)] = x;
+                return v.data() + p;
             }
         };
 
-        int channels, stages;
-        T coeff[taps] {};
-        T evenTaps[upEvenTaps] {}, oddTaps[upOddTaps] {};
+        int channels, stages, taps;
+        // Up: the zero-stuffed history holds one input every other tap, so
+        // (taps + 1) / 2 inputs cover all the taps.
+        int upEvenTaps, upOddTaps;
+        std::vector<T> coeff, evenTaps, oddTaps;
         std::vector<std::vector<T>> buf[4];
-        std::vector<Ring<upLength>> up[4];
-        std::vector<Ring<downLength>> down[4];
+        std::vector<Ring> up[4];
+        std::vector<Ring> down[4];
         std::vector<T*> ptrs;
     };
 }

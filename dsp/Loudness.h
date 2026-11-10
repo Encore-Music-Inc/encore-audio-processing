@@ -255,7 +255,8 @@ namespace vs
         std::atomic<float> grDb { 0.0f };
 
     private:
-        Oversampler<float> os { 2, 2 };
+        // 127 taps, beta 10: keeps the top octave, so peaks there are seen
+        Oversampler<float> os { 2, 2, 127, 10.0 };
         juce::AudioBuffer<float> scratch;
         std::vector<float> delay[2], boxBuf;
         std::vector<std::pair<juce::int64, float>> minQ;
