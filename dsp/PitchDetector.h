@@ -1,7 +1,9 @@
 #pragma once
 
-#include <juce_dsp/juce_dsp.h>
+#include <algorithm>
+#include <cmath>
 #include <vector>
+#include "Fft.h"
 
 namespace vs
 {
@@ -27,9 +29,11 @@ namespace vs
             w = n - tauMax;
 
             const int m = n * 2;
-            fft = std::make_unique<juce::dsp::FFT> ((int) std::round (std::log2 ((double) m)));
-            a.assign ((size_t) m * 2, 0.0f);
-            b.assign ((size_t) m * 2, 0.0f);
+            fft.setSize (m);
+            a.assign ((size_t) m, 0.0);
+            b.assign ((size_t) m, 0.0);
+            aRe.assign ((size_t) m / 2 + 1, 0.0); aIm.assign ((size_t) m / 2 + 1, 0.0);
+            bRe.assign ((size_t) m / 2 + 1, 0.0); bIm.assign ((size_t) m / 2 + 1, 0.0);
             d.assign ((size_t) tauMax + 2, 0.0f);
             prefix.assign ((size_t) n + 1, 0.0);
         }
@@ -52,23 +56,23 @@ namespace vs
                 return r;
 
             const int m = n * 2;
-            std::fill (a.begin(), a.end(), 0.0f);
-            std::fill (b.begin(), b.end(), 0.0f);
+            std::fill (a.begin(), a.end(), 0.0);
+            std::fill (b.begin(), b.end(), 0.0);
             std::copy (x, x + w, a.begin());
             std::copy (x, x + n, b.begin());
 
-            fft->performRealOnlyForwardTransform (a.data(), true);
-            fft->performRealOnlyForwardTransform (b.data(), true);
+            fft.forward (a.data(), aRe.data(), aIm.data());
+            fft.forward (b.data(), bRe.data(), bIm.data());
 
             // cross-correlation: conj(A) * B
             for (int k = 0; k <= m / 2; ++k)
             {
-                const float ar = a[(size_t) (2 * k)], ai = a[(size_t) (2 * k + 1)];
-                const float br = b[(size_t) (2 * k)], bi = b[(size_t) (2 * k + 1)];
-                a[(size_t) (2 * k)]     = ar * br + ai * bi;
-                a[(size_t) (2 * k + 1)] = ar * bi - ai * br;
+                const double ar = aRe[(size_t) k], ai = aIm[(size_t) k];
+                const double br = bRe[(size_t) k], bi = bIm[(size_t) k];
+                aRe[(size_t) k] = ar * br + ai * bi;
+                aIm[(size_t) k] = ar * bi - ai * br;
             }
-            fft->performRealOnlyInverseTransform (a.data());
+            fft.inverse (aRe.data(), aIm.data(), a.data());
 
             // cumulative mean normalised difference
             d[0] = 1.0f;
@@ -126,8 +130,9 @@ namespace vs
 
         double fs = 44100.0;
         int n = 2048, w = 1024, tauMin = 2, tauMax = 512;
-        std::unique_ptr<juce::dsp::FFT> fft;
-        std::vector<float> a, b, d;
+        RealFft fft;
+        std::vector<double> a, b, aRe, aIm, bRe, bIm;
+        std::vector<float> d;
         std::vector<double> prefix;
     };
 }
