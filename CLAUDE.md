@@ -1,14 +1,21 @@
 # Notes for Claude (and whoever is driving it)
 
 This is ENCORE.'s shared audio processing code: header-only C++20 used by ENCORE.'s
-products.
+products. By area: building blocks (FFT, windows, filters, delays,
+oversampling, resampling, ramps, random numbers, statistics), measurement
+(loudness, true peak, the whole-file analysis, spectrum, waveforms), processing
+and mastering (EQ, dynamics, reverb, the mastering chain and whole-song
+mastering, dither, channel work), pitch (detection, correction, the tuner, voice
+tracking, drum tuning), rhythm (tempo, onsets, timing, the metronome), sound
+(the drum synthesizer and the clicks) and music vocabulary (note names, keys,
+the scale library). It returns numbers; the words people see are the products'.
 
 ## What uses it
 
 - ENCORE. VST (encore-vst): the plugins, built with JUCE (`juce_dsp`).
 - ENCORE. Basement Studio (encore-basement-studio): the desktop DAW, built with JUCE.
 - Green Room, the artist tools in the ENCORE. app (encoremusic.studio): through `master.wasm` (built from
-  `wasm/api_*.cpp` and the headers, without JUCE).
+  `wasm/api_*.cpp` and the headers, without JUCE) and the `data/*.json` lists.
 
 ## Decisions (already made, don't revisit)
 
@@ -24,6 +31,17 @@ products.
   means Spotify or Apple Music). Say "audio processing". Code folders and
   identifiers (`dsp/`) keep the name.
 - Anything third-party goes in `THIRD-PARTY-NOTICES.md`.
+- All of ENCORE.'s audio processing lives here. A product never keeps its own
+  copy of something this repository has, or a second version of it. When a
+  product needs processing that isn't here, it is built here first (with its
+  tests and, for the browser, its wasm functions), released, and then used.
+- Inside this repository there is one implementation of each thing: one FFT,
+  one true-peak detector, one gain curve, one delay line, one ramp, one fade
+  module, one dither, one mastering driver, one pitch detector, one metronome
+  engine, one drum engine, and so on. A new need adds an option or a preset to
+  the existing one, never a second copy.
+- Products return words and judgements (feedback text, grades, thresholds);
+  this repository returns numbers.
 - Docs (README, CLAUDE.md) describe this repository and what it directly uses
   or is used by, never a map of ENCORE.'s other repositories.
 - Docs say what the repository does and point to the file that sets a value
@@ -36,17 +54,85 @@ products.
 
 | Path | What |
 |---|---|
-| `dsp/` | the headers (`MasterChain.h`, `EqBand.h`, `ReverbEngine.h`, ...) |
-| `dsp/lite/JuceLite.h` | stand-in for the JUCE pieces the headers use, for builds without JUCE (`VS_NO_JUCE=1`). Don't delete it: the wasm build needs it |
-| `tools/tunings.py` | the one list of the tuner's instruments, tunings, temperaments and reference pitches; writes `dsp/Tunings.h` and `data/tunings.json` (edit the list and run it, never the two files; CI fails if they differ from what it writes) |
-| `wasm/api_*.cpp`, `wasm/build.sh` | the browser engine, one file per area with its own prefix (the mastering chain `mc_*`, the loudness meter `lm_*`, the tuner `tp_*`, ...), and its Emscripten build, which exports every `EMSCRIPTEN_KEEPALIVE` function |
+| `dsp/` | the headers, by area below |
+| `dsp/JuceInclude.h` | includes `juce_dsp`, or with `VS_NO_JUCE=1` the stand-in below |
+| `dsp/lite/JuceLite.h` | stand-in for the JUCE pieces the headers use, for builds without JUCE. Don't delete it: the wasm build needs it |
+| `tools/tunings.py` | the one list of the tuner's instruments, tunings, temperaments and reference pitches; writes `dsp/Tunings.h` and `data/tunings.json` |
+| `tools/scales.py` | the one list of the scale library; writes `dsp/ScaleLibrary.h` and `data/scales.json` |
+| `wasm/api_*.cpp`, `wasm/build.sh` | the browser engine, one file per area with its own prefix (below), and its Emscripten build, which exports every `EMSCRIPTEN_KEEPALIVE` function |
 | `tests/` | the offline test suites and their CMake build |
 | `external/JUCE` | JUCE, pinned to a release (the README's Pinned releases table): the JUCE version for all of ENCORE. (see below) |
 | `CHANGELOG.md` | every release's notes, newest first; the release job copies the version's section onto the GitHub release |
 | `.github/release-notes.sh` | prints a version's notes from `CHANGELOG.md`, and fails if they're missing (CI runs it on every build) |
 | `.github/pins/check.sh` | CI's check that every pin is a release (the README's Pinned releases table) |
 | `.github/sanitizers/` | the scheduled sanitizer run's exceptions (`ubsan.supp`, each with its reason; keep it short) and `report.sh` |
-| `.github/workflows/ci.yml` | tests on Linux, Windows and macOS and master.wasm on pull requests and main (skipped when only docs change, and for a pull request that only changes the version line and `CHANGELOG.md`); on a schedule: the tests with sanitizers; `v*` tags attach main's master.wasm and tunings.json to the Release, no rebuild; "CI passed" is the one check to require |
+| `.github/workflows/ci.yml` | tests on Linux, Windows and macOS, the `tools/*.py` check and master.wasm on pull requests and main (skipped when only docs change, and for a pull request that only changes the version line and `CHANGELOG.md`); on a schedule: the tests with sanitizers; `v*` tags attach main's master.wasm and `data/*.json` to the Release, no rebuild; "CI passed" is the one check to require |
+
+`tools/*.py`: edit the list in the script and run it (`python3 tools/<name>.py`),
+never the files it writes, and commit both. CI fails if they differ from what it
+writes. A new list is a new script that writes a header in `dsp/` and a file in
+`data/`.
+
+The headers, by area (each header's top comment says more):
+
+| Area | Header | What |
+|---|---|---|
+| Building blocks | `Fft.h` | the one FFT (complex and real input), on Accelerate's vDSP on Apple systems |
+| | `Windows.h` | window functions and the shared windowed-sinc table |
+| | `Biquad.h` | second-order filter coefficients (the RBJ cookbook designs) and their curves |
+| | `Crossover.h` | Linkwitz-Riley band splits that recombine flat |
+| | `DelayLine.h` | the delay line and reading between samples |
+| | `FracDelay.h` | fixed fractional delays per channel |
+| | `Oversampler.h` | power-of-two oversampling |
+| | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes) and integer decimation |
+| | `Ramp.h` | a value ramping to a new target, linearly or by equal ratios |
+| | `Dynamics.h` | the gain curve, the glide of a cut, and the dynamic EQ bell |
+| | `Lpc.h` | linear prediction (gap and click repair, onsets, FLAC) |
+| | `Random.h` | seeded random number generators, the same on every system |
+| | `Stats.h` | median, percentile, mean, deviation, least-squares line |
+| | `Util.h` | smoothers, envelope steps, decibels, mid and side, rounding |
+| Measurement | `Loudness.h` | the BS.1770 / EBU R128 loudness meter |
+| | `LoudnessReport.h` | a song's loudness report |
+| | `TruePeak.h` | the true-peak detector |
+| | `Analysis.h` | everything a release check measures on a finished song |
+| | `Spectrum.h` | the live analyser, the long-term spectrum, the encoder cliff, tonal balance |
+| | `ResonanceFinder.h` | narrow resonances in a long-term spectrum |
+| | `Waveform.h` | waveform overviews for drawing |
+| Processing and mastering | `EqBand.h` | one band of a parametric EQ |
+| | `VocalEq.h` | the vocal EQ (low cut and four bands) |
+| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor, de-esser, gate and fader rider |
+| | `Saturator.h` | preamp drive |
+| | `ReverbEngine.h`, `Space.h` | the reverb, and the vocal delay and reverb send |
+| | `Doubler.h`, `GuitarFixes.h`, `BodyMatch.h` | Strum's double, its Squeak, Pick and Boom fixes, and its Body match |
+| | `MasterChain.h` | the one-knob mastering chain |
+| | `Mastering.h` | the one way to master a whole song with the chain |
+| | `Dither.h` | the one float to integer conversion, with dither |
+| | `Channels.h` | channel maps, trims, fades, peak and normalizing for whole files |
+| | `DeviceSim.h` | how a mix sounds on everyday playback devices |
+| | `AbCompare.h` | the loudness-matched "hear the original" |
+| Pitch | `Yin.h` | the one pitch detector, with its follow, tuner and voice settings |
+| | `PitchDetector.h`, `PitchEngine.h` | pitch correction's detector and its real-time engine |
+| | `TunerPitch.h` | the tuner's pitch and what it means on the instrument |
+| | `Tunings.h` | the tuner's list (written by `tools/tunings.py`) |
+| | `VoiceTracker.h` | following a singing voice and measuring it; played notes |
+| | `DrumPitch.h` | drum tuning |
+| Rhythm | `Tempo.h` | tap tempo and the tempo finder |
+| | `Onsets.h` | note onsets in a live stream |
+| | `TimingCheck.h` | latency and playing in time with a click |
+| | `Metronome.h` | the beat grid, sequencer, click sounds and click engine |
+| Sound | `DrumSynth.h` | the drum synthesizer and its kits |
+| Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
+| | `ScaleLibrary.h` | the scale library (written by `tools/scales.py`) |
+| | `Scales.h` | pitch correction's keys, scales and harmony intervals |
+
+The browser engine, by file and prefix: `api_master.cpp` the mastering chain
+(`mc_*`), `api_mastering.cpp` whole-song mastering (`mt_*`), `api_loudness.cpp`
+the loudness meter (`lm_*`), `api_measure.cpp` measurement (`ms_*`),
+`api_processing.cpp` processing (`pr_*`), `api_pitch.cpp` pitch (`pi_*`),
+`api_tuner.cpp` the tuner (`tp_*`), `api_rhythm.cpp` rhythm (`rh_*`),
+`api_sound.cpp` sounds (`sd_*`), `api_music.cpp` music vocabulary (`mu_*`). The
+lists (scales, tunings) are `data/*.json` files, not functions. A new area is a
+new file with its own prefix.
 
 ## Consumers
 
@@ -58,7 +144,16 @@ products.
   tests run on is the JUCE that ships. Consumers fetch it by its path
   (`git -C external/encore-audio-processing submodule update --init --depth 1 external/JUCE`),
   never with `--recursive`. Move JUCE only to a JUCE release.
-- They pin the submodule to a release tag. Green Room pins `master.wasm` and `tunings.json` by their SHA-256.
+- Every header builds without JUCE (`VS_NO_JUCE=1`, through `dsp/JuceInclude.h`)
+  except `DeEsser.h`, `PitchEngine.h` and `BodyMatch.h`, which include `juce_dsp`
+  directly. Keep new headers buildable without JUCE.
+- On Apple systems `dsp/Fft.h` runs on Accelerate's vDSP, so a product that uses
+  the headers there links the Accelerate framework (JUCE's `juce_dsp` already
+  does; `tests/CMakeLists.txt` does it for the suites without JUCE).
+  `VS_FFT_PORTABLE` forces this repository's own FFT; the browser build always
+  uses it.
+- They pin the submodule to a release tag. Green Room pins `master.wasm` and the
+  `data/*.json` files by their SHA-256.
 
 ## Pins
 
@@ -89,12 +184,17 @@ products.
   bytes: do it on purpose, and run Green Room's Node suites with the new file.
 - StrumTests' whole-plugin checks only build with `ENCORE_STRUM_PLUGIN_TESTS=1`,
   in the plugin repo.
+- New processing comes with its tests (a new `tests/<Name>Tests.cpp` without
+  JUCE is picked up by itself) and, when the browser needs it, its functions in
+  `wasm/api_*.cpp`.
+- Reference test set: (added with the set)
 
 ## Versioning and releases
 
 - Semantic versioning, tags `vMAJOR.MINOR.PATCH`, starting at v1.0.0. MAJOR for
-  anything that breaks a consumer (headers, classes, functions, the `mc_*` wasm
-  exports, or a sound change a product must re-check); MINOR for additions;
+  anything that breaks a consumer (headers, classes, functions, the wasm
+  exports in `wasm/api_*.cpp`, fields in `data/*.json`, or a sound or
+  measurement change a product must re-check); MINOR for additions;
   PATCH for fixes. The README has the details.
 
 ## Release process
@@ -104,8 +204,8 @@ products.
 2. Changing it is its own small pull request ("Release vX.Y.Z"), so a person sees the
    number before it's built. It adds the release notes to `CHANGELOG.md` (see
    Release notes below); CI fails until they're there.
-3. Merging builds everything on `main`: the tests run and `master.wasm` and `tunings.json`
-   are uploaded as a workflow artifact.
+3. Merging builds everything on `main`: the tests run and `master.wasm` and the
+   `data/*.json` files are uploaded as a workflow artifact.
 4. After the `main` build of that commit has passed, a person publishes the release in
    GitHub. Never a Claude session. Releases, Draft a new release; tag `vX.Y.Z` (Create
    new tag) with target `main` at the "Release vX.Y.Z" commit; leave the title and the
@@ -114,7 +214,7 @@ products.
    publishing creates its tag on whatever its target is at that moment.
 5. The tag's CI run doesn't rebuild. It checks that the tag matches the version, finds
    the successful `main` build of that exact commit and attaches its `master.wasm`,
-   `tunings.json` and their `.sha256` files to the Release, and sets its title
+   `data/*.json` files and their `.sha256` files to the Release, and sets its title
    (`ENCORE. Audio Processing vX.Y.Z`) and notes (the version's section of
    `CHANGELOG.md`). If either check fails, nothing is attached.
    If that commit was docs-only (its build was skipped), run CI by hand on `main`
