@@ -103,6 +103,18 @@ namespace
         const auto bh = vs::windows::blackmanHarris (65);
         expect ("Blackman-Harris: symmetric, 1 in the middle, ~0 at the ends",
                 std::abs (bh[0] - bh[64]) < 1e-15 && std::abs (bh[32] - 1.0) < 1e-12 && bh[0] < 1e-4);
+        {
+            // the classic Blackman (alpha 0.16): 0 at the start, 1 in the middle,
+            // mirror-symmetric about it, and its mean is a0 = 0.42
+            const int n = 2048; const auto w = vs::windows::blackman (n);
+            double sum = 0.0, asym = 0.0;
+            for (int i = 0; i < n; ++i) sum += w[(size_t) i];
+            for (int i = 1; i < n / 2; ++i) asym = std::max (asym, std::abs (w[(size_t) i] - w[(size_t) (n - i)]));
+            expect ("Blackman (0.16): 0 at the start, 1 in the middle, mean 0.42, periodic",
+                    std::abs (w[0]) < 1e-15 && std::abs (w[(size_t) n / 2] - 1.0) < 1e-15 && std::abs (sum / n - 0.42) < 1e-12 && asym < 1e-14);
+            const auto w2 = vs::windows::blackman (8, 0.0);
+            expect ("Blackman (alpha 0) is the periodic Hann", std::abs (w2[2] - vs::windows::hannPeriodic (8)[2]) < 1e-15);
+        }
         expect ("Bessel I0 (0) = 1, I0 (1) = 1.2660658777520082", vs::windows::besselI0 (0.0) == 1.0 && std::abs (vs::windows::besselI0 (1.0) - 1.2660658777520082) < 1e-15);
         const auto k = vs::windows::kaiser (31, 8.0);
         expect ("Kaiser: 1 in the middle, 1/I0 (beta) at the ends", std::abs (k[15] - 1.0) < 1e-15 && std::abs (k[0] - 1.0 / vs::windows::besselI0 (8.0)) < 1e-15);
@@ -203,6 +215,29 @@ namespace
         one.process (1, y1.data(), 5000);
         for (int s = 0; s < 5000; s += 317) chunks.process (1, y2.data() + s, std::min (317, 5000 - s));
         expect ("BiquadChain: chunks carry the state across", y1 == y2);
+        {
+            // both channels at once, every section per sample: the same numbers
+            bool same = true;
+            for (int ns = 1; ns <= 5; ++ns)
+            {
+                std::vector<vs::BiquadCoefs> secs;
+                for (int k = 0; k < ns; ++k) secs.push_back (vs::BiquadCoefs::rbj (k % 2 ? vs::BiquadCoefs::Type::highPass : vs::BiquadCoefs::Type::peak, 44100.0, 300.0 * (k + 1), 0.8, 4.0));
+                vs::BiquadChain one (secs, 2), pair (secs, 2), mono (secs, 2);
+                const auto na = noise (3000, 11), nb = noise (3000, 12);
+                std::vector<float> a1 (na.begin(), na.end()), b1 (nb.begin(), nb.end());
+                auto a2 = a1, b2 = b1, a3 = a1;
+                for (int s0 = 0; s0 < 3000; s0 += 701)
+                {
+                    const int len = std::min (701, 3000 - s0);
+                    one.process (0, a1.data() + s0, len);
+                    one.process (1, b1.data() + s0, len);
+                    pair.processPair (a2.data() + s0, b2.data() + s0, len);
+                    mono.processPair (a3.data() + s0, (float*) nullptr, len);
+                }
+                same = same && a1 == a2 && b1 == b2 && a1 == a3;
+            }
+            expect ("BiquadChain: two channels at once give the same numbers", same);
+        }
     }
 
     void oversamplerTests()

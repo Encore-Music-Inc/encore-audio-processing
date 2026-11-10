@@ -4,7 +4,7 @@
 #include <cmath>
 #include <vector>
 #include "Biquad.h"
-#include "Oversampler.h"
+#include "TruePeak.h"
 
 namespace vs
 {
@@ -133,7 +133,8 @@ namespace vs
     // and is only ever turned down smoothly (which can't create new peaks);
     // a 4x-oversampled copy runs alongside purely to see the peaks that land
     // *between* samples, the ones a DAC or an MP3/AAC encoder turns into
-    // clipping. Look-ahead lets it turn down before a peak arrives.
+    // clipping (the detector is TruePeakDetector, the one TruePeakMeter reads
+    // with). Look-ahead lets it turn down before a peak arrives.
     class TruePeakLimiter
     {
     public:
@@ -192,7 +193,7 @@ namespace vs
                 offset += nUp;
             }
             os.reset();
-            return (int) std::round (found / 4.0);
+            return (int) std::round (found / (double) TruePeakDetector::factor);
         }
 
     public:
@@ -208,6 +209,7 @@ namespace vs
             if (scratch.getNumSamples() < n) scratch.setSize (2, n, false, false, true);
 
             // detection path: 4x upsampled copy, max |x| over each sample's 4 sub-samples
+            constexpr int f = TruePeakDetector::factor;
             for (int c = 0; c < 2; ++c)
                 scratch.copyFrom (c, 0, block.getChannelPointer ((size_t) std::min (c, nch - 1)), n);
             auto* const* up = os.processSamplesUp (scratch.getArrayOfWritePointers(), 2, n);
@@ -217,7 +219,7 @@ namespace vs
             {
                 float peak = 0.0f;
                 for (int c = 0; c < 2; ++c)
-                    for (int k = 0; k < 4; ++k) peak = std::max (peak, std::abs (up[c][i * 4 + k]));
+                    for (int k = 0; k < f; ++k) peak = std::max (peak, std::abs (up[c][i * f + k]));
                 const float need = peak > target ? target / peak : 1.0f;
 
                 // sliding minimum of the required gain
@@ -255,8 +257,7 @@ namespace vs
         std::atomic<float> grDb { 0.0f };
 
     private:
-        // 127 taps, beta 10: keeps the top octave, so peaks there are seen
-        Oversampler<float> os { 2, 2, 127, 10.0 };
+        Oversampler<float> os = TruePeakDetector::makeOversampler<float> (2);
         juce::AudioBuffer<float> scratch;
         std::vector<float> delay[2], boxBuf;
         std::vector<std::pair<juce::int64, float>> minQ;

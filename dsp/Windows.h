@@ -52,6 +52,17 @@ namespace vs
             return w;
         }
 
+        // Blackman, periodic: a0 - a1 cos (2 pi i / n) + a2 cos (4 pi i / n),
+        // a0 = (1 - alpha) / 2, a1 = 1 / 2, a2 = alpha / 2. alpha 0.16 is the
+        // classic Blackman, the window the Web Audio AnalyserNode uses.
+        inline std::vector<double> blackman (int n, double alpha = 0.16)
+        {
+            const double a0 = (1.0 - alpha) / 2.0, a1 = 0.5, a2 = alpha / 2.0;
+            std::vector<double> w ((size_t) n);
+            for (int i = 0; i < n; ++i) w[(size_t) i] = a0 - a1 * std::cos ((2 * pi * i) / n) + a2 * std::cos ((4 * pi * i) / n);
+            return w;
+        }
+
         // Four-term Blackman-Harris, symmetric (zero-ish at both ends, about
         // 92 dB side lobes): for long low-pass FIR designs.
         inline double blackmanHarrisAt (int i, int n)

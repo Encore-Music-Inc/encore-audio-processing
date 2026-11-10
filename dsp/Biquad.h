@@ -189,7 +189,54 @@ namespace vs
             }
         }
 
+        // Channels 0 and 1 at once (b may be null for channel 0 alone), every
+        // section per sample: the same numbers as process (0, a, n) and
+        // process (1, b, n), with the work of the sections and the two
+        // channels overlapping, which runs faster.
+        template <typename T>
+        void processPair (T* a, T* b, int n)
+        {
+            switch (sections.size())
+            {
+                case 1: pair<1> (a, b, n); break;
+                case 2: pair<2> (a, b, n); break;
+                case 3: pair<3> (a, b, n); break;
+                case 4: pair<4> (a, b, n); break;
+                default: process (0, a, n); if (b != nullptr) process (1, b, n); break;
+            }
+        }
+
     private:
+        template <int NS, typename T>
+        void pair (T* a, T* b, int n)
+        {
+            double za[2 * NS] {}, zb[2 * NS] {};
+            BiquadCoefs k[NS];
+            for (int s = 0; s < NS; ++s) k[s] = sections[(size_t) s];
+            std::copy (state[0].begin(), state[0].end(), za);
+            if (b != nullptr) std::copy (state[1].begin(), state[1].end(), zb);
+            for (int i = 0; i < n; ++i)
+            {
+                T va = a[i], vb = b != nullptr ? b[i] : T (0);
+                for (int s = 0; s < NS; ++s)
+                {
+                    const double x0 = (double) va, x1 = (double) vb;
+                    const double y0 = k[s].b0 * x0 + za[2 * s];
+                    const double y1 = k[s].b0 * x1 + zb[2 * s];
+                    za[2 * s] = k[s].b1 * x0 - k[s].a1 * y0 + za[2 * s + 1];
+                    zb[2 * s] = k[s].b1 * x1 - k[s].a1 * y1 + zb[2 * s + 1];
+                    za[2 * s + 1] = k[s].b2 * x0 - k[s].a2 * y0;
+                    zb[2 * s + 1] = k[s].b2 * x1 - k[s].a2 * y1;
+                    va = (T) y0;
+                    vb = (T) y1;
+                }
+                a[i] = va;
+                if (b != nullptr) b[i] = vb;
+            }
+            std::copy (za, za + 2 * NS, state[0].begin());
+            if (b != nullptr) std::copy (zb, zb + 2 * NS, state[1].begin());
+        }
+
         std::vector<BiquadCoefs> sections;
         std::vector<std::vector<double>> state;
     };
