@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include "Biquad.h"
+#include "Crossover.h"
 #include "Loudness.h"
 #include "Saturator.h"
 #include "ReverbEngine.h"
@@ -106,14 +107,14 @@ namespace vs
         void prepare (double sampleRate, int maxBlock)
         {
             fs = sampleRate;
-            const juce::dsp::ProcessSpec spec { fs, (juce::uint32) maxBlock, 2 };
-            for (auto* f : { &lp1, &hp1, &lp2, &hp2, &ap2 }) { f->prepare (spec); f->reset(); }
-            lp1.setType (juce::dsp::LinkwitzRileyFilterType::lowpass);  lp1.setCutoffFrequency (150.0f);
-            hp1.setType (juce::dsp::LinkwitzRileyFilterType::highpass); hp1.setCutoffFrequency (150.0f);
-            lp2.setType (juce::dsp::LinkwitzRileyFilterType::lowpass);  lp2.setCutoffFrequency (3000.0f);
-            hp2.setType (juce::dsp::LinkwitzRileyFilterType::highpass); hp2.setCutoffFrequency (3000.0f);
-            ap2.setType (juce::dsp::LinkwitzRileyFilterType::allpass);  ap2.setCutoffFrequency (3000.0f);
-            sideHp.prepare (spec); sideHp.setType (juce::dsp::LinkwitzRileyFilterType::highpass); sideHp.setCutoffFrequency (120.0f);
+            using LR = LinkwitzRiley<float>::Type;
+            for (auto* f : { &lp1, &hp1, &lp2, &hp2, &ap2 }) { f->prepare (fs); f->reset(); }
+            lp1.setType (LR::lowPass);  lp1.setCutoffFrequency (150.0f);
+            hp1.setType (LR::highPass); hp1.setCutoffFrequency (150.0f);
+            lp2.setType (LR::lowPass);  lp2.setCutoffFrequency (3000.0f);
+            hp2.setType (LR::highPass); hp2.setCutoffFrequency (3000.0f);
+            ap2.setType (LR::allPass);  ap2.setCutoffFrequency (3000.0f);
+            sideHp.prepare (fs); sideHp.setType (LR::highPass); sideHp.setCutoffFrequency (120.0f);
 
             for (auto& b : bands) b.assign ((size_t) maxBlock, 0.0f);
             for (auto& b : bandsR) b.assign ((size_t) maxBlock, 0.0f);
@@ -527,7 +528,7 @@ namespace vs
         Biquad user[3];
         float lastUser[3] { 999.0f, 999.0f, 999.0f };
 
-        juce::dsp::LinkwitzRileyFilter<float> lp1, hp1, lp2, hp2, ap2, sideHp;
+        LinkwitzRiley<float> lp1, hp1, lp2, hp2, ap2, sideHp;
         float lastMonoHz = -1.0f;
         std::array<std::vector<float>, 3> bands, bandsR;
         float bandEnv[3] {}, grDb[3] {};

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 #include "Biquad.h"
+#include "Oversampler.h"
 
 namespace vs
 {
@@ -138,7 +139,7 @@ namespace vs
     public:
         void prepare (double sampleRate, int maxBlock)
         {
-            os.initProcessing ((size_t) maxBlock);
+            os.initProcessing (maxBlock);
             os.reset();
             look = std::max (4, (int) std::round (0.0015 * sampleRate));
             detLatency = measureDetectorLatency (maxBlock);
@@ -184,11 +185,11 @@ namespace vs
                     float* p = probe.getWritePointer (c);
                     for (int i = 0; i < len; ++i) p[i] = (block == 0 && i == 0) ? 1.0f : 0.0f;
                 }
-                juce::dsp::AudioBlock<float> b (probe.getArrayOfWritePointers(), 2, (size_t) len);
-                auto up = os.processSamplesUp (b);
-                for (int i = 0; i < (int) up.getNumSamples(); ++i)
-                    if (std::abs (up.getSample (0, i)) > best) { best = std::abs (up.getSample (0, i)); found = offset + i; }
-                offset += (int) up.getNumSamples();
+                auto* const* up = os.processSamplesUp (probe.getArrayOfWritePointers(), 2, len);
+                const int nUp = len * os.getFactor();
+                for (int i = 0; i < nUp; ++i)
+                    if (std::abs (up[0][i]) > best) { best = std::abs (up[0][i]); found = offset + i; }
+                offset += nUp;
             }
             os.reset();
             return (int) std::round (found / 4.0);
@@ -209,15 +210,14 @@ namespace vs
             // detection path: 4x upsampled copy, max |x| over each sample's 4 sub-samples
             for (int c = 0; c < 2; ++c)
                 scratch.copyFrom (c, 0, block.getChannelPointer ((size_t) std::min (c, nch - 1)), n);
-            juce::dsp::AudioBlock<float> sb (scratch.getArrayOfWritePointers(), 2, (size_t) n);
-            auto up = os.processSamplesUp (sb);
+            auto* const* up = os.processSamplesUp (scratch.getArrayOfWritePointers(), 2, n);
 
             float minGain = 1.0f;
             for (int i = 0; i < n; ++i)
             {
                 float peak = 0.0f;
                 for (int c = 0; c < 2; ++c)
-                    for (int k = 0; k < 4; ++k) peak = std::max (peak, std::abs (up.getSample (c, i * 4 + k)));
+                    for (int k = 0; k < 4; ++k) peak = std::max (peak, std::abs (up[c][i * 4 + k]));
                 const float need = peak > target ? target / peak : 1.0f;
 
                 // sliding minimum of the required gain
@@ -255,7 +255,8 @@ namespace vs
         std::atomic<float> grDb { 0.0f };
 
     private:
-        juce::dsp::Oversampling<float> os { 2, 2, juce::dsp::Oversampling<float>::filterHalfBandFIREquiripple, true, true };
+        // 127 taps, beta 10: keeps the top octave, so peaks there are seen
+        Oversampler<float> os { 2, 2, 127, 10.0 };
         juce::AudioBuffer<float> scratch;
         std::vector<float> delay[2], boxBuf;
         std::vector<std::pair<juce::int64, float>> minQ;

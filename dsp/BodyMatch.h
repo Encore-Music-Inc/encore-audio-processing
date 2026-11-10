@@ -5,6 +5,7 @@
 #include <atomic>
 #include <vector>
 #include "Biquad.h"
+#include "Fft.h"
 #include "Util.h"
 
 // Strum's Body stage: make a pickup (DI) sound like a mic on the same guitar.
@@ -123,13 +124,16 @@ namespace vs
             const int order = sampleRate > 100000.0 ? 14 : sampleRate > 50000.0 ? 13 : 12; // ~85 ms frames
             size = 1 << order;
             hop = size / 2;
-            fft = std::make_unique<juce::dsp::FFT> (order);
+            fft.setSize (size);
             window.resize ((size_t) size);
             for (int i = 0; i < size; ++i)
                 window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size);
             ringDi.assign ((size_t) size, 0.0f);
             ringMic.assign ((size_t) size, 0.0f);
-            work.assign ((size_t) size * 2, 0.0f);
+            work.assign ((size_t) size, 0.0f);
+            re.assign ((size_t) size / 2 + 1, 0.0);
+            im.assign ((size_t) size / 2 + 1, 0.0);
+            framePower.assign ((size_t) size / 2 + 1, 0.0);
             sumDi.assign ((size_t) size / 2 + 1, 0.0);
             sumMic.assign ((size_t) size / 2 + 1, 0.0);
             learning = false;
@@ -322,17 +326,16 @@ namespace vs
         {
             for (int i = 0; i < size; ++i)
                 work[(size_t) i] = ring[(size_t) ((write + i) % size)] * window[(size_t) i];
-            std::fill (work.begin() + size, work.end(), 0.0f);
-            fft->performFrequencyOnlyForwardTransform (work.data(), true);
+            fft.power (work.data(), framePower.data(), re.data(), im.data());
             for (int b = 0; b <= size / 2; ++b)
-                sum[(size_t) b] += (double) work[(size_t) b] * work[(size_t) b];
+                sum[(size_t) b] += framePower[(size_t) b];
         }
 
         double fs = 48000.0;
         int size = 4096, hop = 2048, write = 0, filled = 0, sinceFrame = 0;
-        std::unique_ptr<juce::dsp::FFT> fft;
+        RealFft fft;
         std::vector<float> window, ringDi, ringMic, work;
-        std::vector<double> sumDi, sumMic;
+        std::vector<double> re, im, framePower, sumDi, sumMic;
         float activeSeconds = 0.0f, peakDi = -200.0f, peakMic = -200.0f;
         BodyCurve result;
         std::atomic<bool> learning { false }, startRequested { false }, stopRequested { false }, resultReady { false };
@@ -353,36 +356,34 @@ namespace vs
         // Any thread but the audio thread (allocates). amount scales the curve in dB.
         static juce::AudioBuffer<float> design (const BodyCurve& curve, float amount, double fs)
         {
-            using C = juce::dsp::Complex<float>;
             const int len = lengthFor (fs);
             const int n = len * 4; // generous cepstrum size keeps time-aliasing negligible
-            const int order = juce::roundToInt (std::log2 ((double) n));
-            juce::dsp::FFT fft (order);
-            std::vector<C> a ((size_t) n), b ((size_t) n);
+            const Fft fft (n);
+            std::vector<double> re ((size_t) n, 0.0), im ((size_t) n, 0.0);
 
             // log magnitude, symmetric
             for (int k = 0; k <= n / 2; ++k)
             {
                 const float hz = (float) (k * fs / n);
                 const float lm = amount * curve.at (hz) * (float) (std::log (10.0) / 20.0);
-                a[(size_t) k] = { lm, 0.0f };
-                if (k > 0 && k < n / 2) a[(size_t) (n - k)] = { lm, 0.0f };
+                re[(size_t) k] = lm;
+                if (k > 0 && k < n / 2) re[(size_t) (n - k)] = lm;
             }
-            fft.perform (a.data(), b.data(), true); // real cepstrum
+            fft.inverse (re.data(), im.data()); // real cepstrum
 
             // fold the cepstrum onto positive time: that's the minimum-phase version
-            std::fill (a.begin(), a.end(), C {});
-            a[0] = { b[0].real(), 0.0f };
-            for (int i = 1; i < n / 2; ++i) a[(size_t) i] = { 2.0f * b[(size_t) i].real(), 0.0f };
-            a[(size_t) n / 2] = { b[(size_t) n / 2].real(), 0.0f };
-            fft.perform (a.data(), b.data(), false);
+            for (int i = 1; i < n / 2; ++i) re[(size_t) i] *= 2.0;
+            std::fill (re.begin() + n / 2 + 1, re.end(), 0.0);
+            std::fill (im.begin(), im.end(), 0.0);
+            fft.forward (re.data(), im.data());
 
             for (int k = 0; k < n; ++k)
             {
-                const float e = std::exp (b[(size_t) k].real()), ph = b[(size_t) k].imag();
-                a[(size_t) k] = { e * std::cos (ph), e * std::sin (ph) };
+                const double e = std::exp (re[(size_t) k]), ph = im[(size_t) k];
+                re[(size_t) k] = e * std::cos (ph);
+                im[(size_t) k] = e * std::sin (ph);
             }
-            fft.perform (a.data(), b.data(), true);
+            fft.inverse (re.data(), im.data());
 
             // keep the start (where a minimum-phase response has its energy),
             // with a gentle fade over the last quarter
@@ -392,7 +393,7 @@ namespace vs
             {
                 float w = 1.0f;
                 if (i >= fadeFrom) w = 0.5f + 0.5f * std::cos (juce::MathConstants<float>::pi * (float) (i - fadeFrom) / (float) (len - fadeFrom));
-                const float v = b[(size_t) i].real() * w;
+                const float v = (float) re[(size_t) i] * w;
                 ir.setSample (0, i, v);
                 ir.setSample (1, i, v);
             }
