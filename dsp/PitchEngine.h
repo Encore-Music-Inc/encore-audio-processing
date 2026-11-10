@@ -6,6 +6,7 @@
 #include <vector>
 #include "DelayLine.h"
 #include "Music.h"
+#include "Random.h"
 #include "PitchDetector.h"
 #include "Scales.h"
 #include "Util.h"
@@ -65,12 +66,7 @@ namespace vs
             const auto h = windows::hannPeriodicFloat (hannSize, hannSize + 1);
             std::copy (h.begin(), h.end(), hann.begin());
 
-            const juce::dsp::ProcessSpec mono { fs, 512, 1 };
-            for (auto& d : humanDelay)
-            {
-                d.setMaximumDelayInSamples ((int) (0.05 * fs));
-                d.prepare (mono);
-            }
+            for (auto& d : humanDelay) d.prepare ((int) (0.05 * fs));
             reset();
         }
 
@@ -88,7 +84,7 @@ namespace vs
                 v.detune = 0.0f;
                 v.active = false;
             }
-            for (auto& d : humanDelay) d.reset();
+            for (auto& d : humanDelay) d.clear();
             w = 0;
             hopCount = 0;
             markCount = markHead = 0;
@@ -168,8 +164,10 @@ namespace vs
                     lfo[h] += lfoInc[h];
                     if (lfo[h] > juce::MathConstants<float>::twoPi) lfo[h] -= juce::MathConstants<float>::twoPi;
                     const float delayMs = 2.0f + settings.humanize * (16.0f + 3.0f * std::sin (lfo[h]));
-                    humanDelay[(size_t) h].pushSample (0, s);
-                    s = humanDelay[(size_t) h].popSample (0, delayMs * 0.001f * (float) fs);
+                    auto& d = humanDelay[(size_t) h];
+                    d.put (s); // this sample is at delay 0
+                    s = d.read ((double) (delayMs * 0.001f * (float) fs));
+                    d.advance();
 
                     l += s * panL[h];
                     r += s * panR[h];
@@ -213,7 +211,7 @@ namespace vs
             v.nextTs = -1.0;
             v.corr = 0.0f;
             v.target = -1;
-            if (idx > 0) humanDelay[(size_t) idx - 1].reset();
+            if (idx > 0) humanDelay[(size_t) idx - 1].clear();
         }
 
         float take (int idx, juce::int64 t)
@@ -339,7 +337,7 @@ namespace vs
                 const int hn = scales::harmonyNote (v.target, hv.interval, settings.key, settings.scale);
 
                 const float maxCents = settings.humanize * 12.0f;
-                v.detune = juce::jlimit (-maxCents, maxCents, v.detune * 0.995f + (rng.nextFloat() - 0.5f) * 3.0f);
+                v.detune = juce::jlimit (-maxCents, maxCents, v.detune * 0.995f + ((float) rng.uniform() - 0.5f) * 3.0f);
 
                 desired = (float) (hn - v.target) + tuneCorr + v.detune * 0.01f;
                 if (! settings.tuneOn) speed = 15.0f; // just smooth interval changes
@@ -400,8 +398,8 @@ namespace vs
         int markCount = 0, markHead = 0;
         std::array<Voice, 3> voices;
         std::array<float, hannSize + 1> hann {};
-        std::array<juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear>, 2> humanDelay;
+        std::array<DelayLine, 2> humanDelay;
         float lfo[2] {};
-        juce::Random rng { 0x5a5a };
+        Xorshift32 rng { 0x5a5a };
     };
 }
