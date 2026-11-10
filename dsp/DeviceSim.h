@@ -119,7 +119,7 @@ namespace vs
         {
             if (mono && r != nullptr)
             {
-                for (int i = 0; i < n; ++i) l[i] = 0.5f * (l[i] + r[i]);
+                for (int i = 0; i < n; ++i) l[i] = midOf (l[i], r[i]);
                 chain.process (0, l, n);
                 std::copy (l, l + n, r);
                 return;

@@ -40,6 +40,24 @@ namespace vs
             float shimmer = 0.0f;   // 0..1, octave-up feedback
         };
 
+        // The Space setting, the vocal reverb: a bright room, with no low cut
+        // of its own (its send is filtered first) and 25 ms pre-delay. Its
+        // decay is that of a 31.5 ms loop keeping 0.784 (size 0) to 0.966
+        // (size 1) of its level each pass: 0.9 s to 6.3 s.
+        static Settings space (float size01)
+        {
+            Settings s;
+            const float size = juce::jlimit (0.0f, 1.0f, size01);
+            s.mode = room;
+            s.size = size;
+            s.decaySec = 0.0946f / -std::log10 (0.7f + 0.28f * (0.3f + 0.65f * size));
+            s.toneHz = 20000.0f;
+            s.lowCutHz = 20.0f;
+            s.predelayMs = 25.0f;
+            s.width = 1.0f;
+            return s;
+        }
+
         void prepare (double sampleRate, int maxBlock)
         {
             fs = sampleRate;
@@ -116,7 +134,7 @@ namespace vs
                 inLp[1] += inLpC * (xr - inLp[1]);
                 xl = inLp[0]; xr = inLp[1];
 
-                pre.write (0.5f * (xl + xr));
+                pre.write (midOf (xl, xr));
                 preL.write (xl); // stereo pre-delay for the FDN's two inputs
                 preR.write (xr);
                 const float pm = pre.read (preSamples);

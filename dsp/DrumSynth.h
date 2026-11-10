@@ -25,6 +25,7 @@
 #include "Biquad.h"
 #include "Music.h"
 #include "Random.h"
+#include "Channels.h"
 
 namespace vs::drumsynth
 {
@@ -120,9 +121,10 @@ namespace vs::drumsynth
         Buffer x = onTime (in);
         float peak = 0;
         for (float v : x) peak = peakOf (peak, v);
-        const int len = (int) x.size(), fade = std::min (len, 512);
         const double g = level / (peak != 0 && ! std::isnan (peak) ? (double) peak : 1.0);
-        for (int i = 0; i < len; ++i) x[(size_t) i] = (float) (x[(size_t) i] * (g * (i > len - fade ? (double) (len - i) / fade : 1.0)));
+        for (auto& v : x) v = (float) (v * g);
+        float* ch[1] { x.data() };
+        channels::fadeSamples (ch, 1, (int) x.size(), 0, std::min ((int) x.size(), 512), channels::FadeCurve::linear, channels::FadePoint::end);
         return x;
     }
 

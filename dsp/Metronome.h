@@ -23,6 +23,7 @@
 #include "Biquad.h"
 #include "Random.h"
 #include "Util.h"
+#include "Channels.h"
 
 namespace vs::metronome
 {
@@ -608,6 +609,14 @@ namespace vs::metronome
         return x;
     }
 
+    // A straight fade to silence over the last len samples (the last one at
+    // 1 / len; a fade longer than the sound is cut short)
+    inline void endFade (Buffer& x, int len)
+    {
+        float* ch[1] { x.data() };
+        channels::fadeSamples (ch, 1, (int) x.size(), 0, len, channels::FadeCurve::linear, channels::FadePoint::end);
+    }
+
     // A sine with a short release at the end
     inline Buffer beep (double sr, double hz, double seconds)
     {
@@ -615,7 +624,8 @@ namespace vs::metronome
         Buffer x ((size_t) n);
         const int rel = (int) std::floor (sr * 0.012);
         for (int i = 0; i < n; ++i)
-            x[(size_t) i] = (float) (std::sin ((2 * pi * hz * i) / sr + pi / 4) * (i > n - rel ? (double) (n - i) / rel : 1.0));
+            x[(size_t) i] = (float) std::sin ((2 * pi * hz * i) / sr + pi / 4);
+        endFade (x, rel);
         return x;
     }
 
@@ -624,9 +634,9 @@ namespace vs::metronome
     {
         float peak = 0;
         for (float v : x) peak = peakOf (peak, v);
-        const int len = (int) x.size(), fade = std::min (len, 256);
         const double g = level / (peak != 0 && ! std::isnan (peak) ? (double) peak : 1.0);
-        for (int i = 0; i < len; ++i) x[(size_t) i] = (float) (x[(size_t) i] * (g * (i > len - fade ? (double) (len - i) / fade : 1.0)));
+        for (auto& v : x) v = (float) (v * g);
+        endFade (x, std::min ((int) x.size(), 256));
         return x;
     }
 

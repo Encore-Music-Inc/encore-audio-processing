@@ -211,7 +211,7 @@ namespace vs
                 i = std::max (i, s - at);
                 if (i >= n) break;
                 const std::int64_t end = std::min<std::int64_t> (n, s + N - at);
-                for (; i < end; ++i) frame[(size_t) (at + i - s)] = 0.5 * ((double) l[i] + (double) r[i]);
+                for (; i < end; ++i) frame[(size_t) (at + i - s)] = midOf ((double) l[i], (double) r[i]);
                 if (at + end - s == N) { analyseFrame(); ++next; }
                 else break;
             }

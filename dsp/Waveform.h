@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <vector>
 #include "Biquad.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -64,7 +65,7 @@ namespace vs
                 if (opt.bands)
                 {
                     mid.resize ((size_t) n); lo.resize ((size_t) n); hi.resize ((size_t) n);
-                    for (int i = 0; i < n; ++i) mid[(size_t) i] = 0.5 * ((double) l[i] + (double) r[i]);
+                    for (int i = 0; i < n; ++i) mid[(size_t) i] = midOf ((double) l[i], (double) r[i]);
                     std::copy (mid.begin(), mid.begin() + n, lo.begin());
                     std::copy (mid.begin(), mid.begin() + n, hi.begin());
                     lows.process (0, lo.data(), n);

@@ -91,6 +91,14 @@ namespace juce
 
     namespace dsp
     {
+        // What a processor is prepared for
+        struct ProcessSpec
+        {
+            double sampleRate;
+            unsigned int maximumBlockSize;
+            unsigned int numChannels;
+        };
+
         template <typename T>
         class AudioBlock
         {

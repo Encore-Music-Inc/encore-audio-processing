@@ -259,8 +259,8 @@ namespace vs
             if (st.monoBassHz != lastMonoHz) { lastMonoHz = st.monoBassHz; sideHp.setCutoffFrequency (st.monoBassHz); }
             for (int i = 0; i < n; ++i)
             {
-                const float m = 0.5f * (l[i] + r[i]);
-                float s = 0.5f * (l[i] - r[i]);
+                const float m = midOf (l[i], r[i]);
+                float s = sideOf (l[i], r[i]);
                 s = sideHp.processSample (0, s) * width; // centred low end
                 l[i] = m + s; r[i] = m - s;
             }
@@ -409,7 +409,7 @@ namespace vs
                 analysisSeconds += sec;
                 for (int i = 0; i < n; ++i)
                 {
-                    const float m = 0.5f * (l[i] + r[i]);
+                    const float m = midOf (l[i], r[i]);
                     for (int k = 0; k < numAnalysis; ++k)
                     {
                         const float b = analysis[k].process (0, m);

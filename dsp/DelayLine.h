@@ -37,7 +37,8 @@ namespace vs
 
     // A delay line: a power-of-two ring of floats and its write position.
     // write() stores a sample and moves on; read (d) is then the sound d
-    // samples back (1 = the newest), between samples by straight lines.
+    // samples back (1 = the newest), between samples by straight lines, and
+    // readHermite (d) by cubic curves.
     // A sample can also be put() first, read around (it is at delay 0), and
     // advance() moves on after.
     class DelayLine
@@ -59,7 +60,11 @@ namespace vs
         void put (float x) { buf[(size_t) w] = x; }
         void advance() { w = (w + 1) & mask; }
 
-        float read (float delay) const { return readLinear (buf.data(), mask, (float) w - delay); }
+        // The position is worked out in the delay's own type: a float delay in
+        // float, a double one (for long delays, where float would round the
+        // fraction) in double.
+        template <typename P>
+        float read (P delay) const { return readLinear (buf.data(), mask, (P) w - delay); }
         float readHermite (double delay) const { return vs::readHermite (buf.data(), mask, (double) w - delay); }
 
         int size() const { return mask + 1; }
