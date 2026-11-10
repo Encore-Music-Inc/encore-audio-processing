@@ -257,27 +257,23 @@ namespace vs::music
         return note >= 35 && note <= 81 ? gmDrums[(size_t) (note - 35)].name : nullptr;
     }
 
-    // A drum kit's rows, top to bottom, as a drum grid shows them (ten lanes)
-    inline constexpr std::array<DrumNote, 10> drumLanes { {
-        { 36, "Kick" }, { 38, "Snare" }, { 39, "Clap" }, { 42, "Closed hat" }, { 46, "Open hat" },
-        { 41, "Low tom" }, { 45, "Mid tom" }, { 48, "High tom" }, { 49, "Crash" }, { 51, "Ride" },
-    } };
-
-    // What a drum note is called in the ten-lane kit: its lane's name, else
-    // its General MIDI name, else "Note <n>"
-    inline std::string laneName (int note)
+    // Every drum note has one name: its General MIDI name, the same in every
+    // product, in every layout and on every pad. Outside 35 to 81: "Note <n>".
+    inline std::string drumName (int note)
     {
-        for (auto& l : drumLanes) if (l.note == note) return l.name;
         if (auto* n = gmDrumName (note)) return n;
         return "Note " + std::to_string (note);
     }
 
+    // A drum kit's rows, top to bottom, as a drum grid shows them (ten lanes)
+    inline constexpr std::array<int, 10> drumLanes { 36, 38, 39, 42, 46, 41, 45, 48, 49, 51 };
+
     // A pad kit's nine pads, slot 1 to 9: 1-2-3 the bottom row, 4-5-6 the
     // middle, 7-8-9 the top, the way a numpad is laid out
-    struct Pad { int slot; const char* name; int note; };
+    // (each pad is named by its note, drumName)
+    struct Pad { int slot; int note; };
     inline constexpr std::array<Pad, 9> drumPads { {
-        { 1, "Kick", 36 }, { 2, "Snare", 38 }, { 3, "Closed hat", 42 }, { 4, "Clap", 39 }, { 5, "Rim", 37 },
-        { 6, "Open hat", 46 }, { 7, "High tom", 48 }, { 8, "Low tom", 45 }, { 9, "Crash", 49 },
+        { 1, 36 }, { 2, 38 }, { 3, 42 }, { 4, 39 }, { 5, 37 }, { 6, 46 }, { 7, 48 }, { 8, 45 }, { 9, 49 },
     } };
 
     // The pad slot (1..9) a General MIDI note no pad has plays instead, so a

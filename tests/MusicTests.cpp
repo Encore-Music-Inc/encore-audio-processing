@@ -125,8 +125,9 @@ namespace
         bool ordered = true;
         for (size_t i = 0; i < gmDrums.size(); ++i) ordered = ordered && gmDrums[i].note == 35 + (int) i;
         expect ("the table is every note 35 to 81 in order", ordered);
-        expect ("ten lanes: kick on top, ride at the bottom", drumLanes.size() == 10 && drumLanes.front().note == 36 && drumLanes.back().note == 51);
-        expect ("lane names, then General MIDI names, then \"Note n\"", laneName (45) == "Mid tom" && laneName (54) == "Tambourine" && laneName (90) == "Note 90");
+        expect ("ten lanes: kick on top, ride at the bottom", drumLanes.size() == 10 && drumLanes.front() == 36 && drumLanes.back() == 51);
+        expect ("one name per drum note, its General MIDI name, else \"Note n\"", drumName (45) == "Low tom" && drumName (48) == "High-mid tom"
+                                                                          && drumName (37) == "Side stick" && drumName (90) == "Note 90");
         bool pads = drumPads.size() == 9;
         for (size_t i = 0; i < drumPads.size(); ++i) pads = pads && drumPads[i].slot == (int) i + 1;
         expect ("nine pads, slots 1 to 9", pads);
