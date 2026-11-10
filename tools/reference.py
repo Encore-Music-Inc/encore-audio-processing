@@ -62,6 +62,24 @@ TOLERANCES = {
                   "why": "A sound's sum of |x|: synthesized with sin and exp, which maths libraries round differently in the last place."},
     "sound-peak": {"abs": 0, "rel": 1e-5,
                    "why": "A sound's peak: as sound-sum."},
+    "seconds": {"abs": 1e-6, "rel": 0,
+                "why": "A time in seconds worked out from sample positions: rounding in the division only."},
+    "ratio": {"abs": 1e-5, "rel": 0,
+              "why": "A correlation or share between -1 and 1: sums of products in double, ordered differently by compilers."},
+    "level": {"abs": 1e-6, "rel": 0,
+              "why": "A linear level (DC offset, RMS, a difference, a waveform column): float or double sums, rounding only."},
+    "spectrum": {"abs": 1e-4, "rel": 1e-5,
+                 "why": "Spectrum values and their sums: a float FFT (Accelerate on Apple systems), windowing and smoothing; rounding differs by system."},
+    "spectrum-db": {"abs": 0.001, "rel": 0,
+                    "why": "Levels in dB read from averaged spectra (tonal balance, a learned body curve): the spectrum allowance through log10."},
+    "music-math": {"abs": 0, "rel": 1e-12,
+                   "why": "Hz and MIDI conversions in double: log2 and pow from the maths library, last-place differences only."},
+    "proc-sum": {"abs": 0, "rel": 1e-3,
+                 "why": "A processed signal's sum of |x|: filters, envelopes, oversampling and pitch shifting in float, which compilers order and fuse differently, over seconds of audio; 1e-3 is 0.009 dB, far below any audible or setting change."},
+    "proc-peak": {"abs": 0, "rel": 1e-3,
+                  "why": "A processed signal's peak: as proc-sum."},
+    "proc-lufs": {"abs": 0.005, "rel": 0,
+                  "why": "A processed signal's integrated loudness, LUFS: as proc-sum."},
 }
 
 # which tolerance each result of an op uses (by its name's last part)
@@ -81,7 +99,64 @@ FIELDS = {
 }
 
 
+EXACT_WORDS = {"count", "length", "channels", "maxAt", "first", "last", "outcome", "latency", "runs", "longest", "spots",
+               "empty", "identical", "silentL", "silentR", "silent", "hasSpectrum", "hasPadded16", "padded16", "clipHasLevel",
+               "dithering", "onGrid", "resampledLength", "hash", "tpOverCount", "tpOverZeroCount", "clipRuns", "clipEvents",
+               "clipLongest", "oversFloat", "signature", "valid", "others"}
+
+
+def rule(op, name):
+    """The tolerance of the newer ops' results, by what each result is."""
+    parts = name.split(".")
+    last = parts[-1]
+    stem = last.rstrip("0123456789")
+    if last in EXACT_WORDS or stem in ("pad", "midi", "trim"):
+        return "exact"
+    if op in ("processor", "fades", "channels", "resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab"):
+        if last in ("sum", "peak", "lufs"):
+            return {"sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}[last]
+        if op == "processor" and parts[0] == "curve":
+            return "spectrum-db"
+        if stem in ("magnitude", "gainDb", "matchDb", "reachedLufs", "measuredLufs", "peakOf"):
+            return "db" if stem != "peakOf" else "exact"
+    if op == "processor" or op == "follow":
+        return {"f0": "hz", "confidence": "clarity"}.get(parts[0], "proc-sum")
+    if op == "quantize":
+        return "exact"
+    if op == "file-analysis":
+        if parts[0] in ("timeline",):
+            return "lufs"
+        if parts[0] in ("tpOvers", "tpOverZero", "clipTimes", "lowOut") or last.endswith("At") or last.endswith("Sec") or last == "duration":
+            return "seconds"
+        if last in ("lufs", "shortTermMax"):
+            return "lufs"
+        if last == "lra":
+            return "lu"
+        if last in ("corr", "lowCorr"):
+            return "ratio"
+        if last in ("dcL", "dcR", "maxDiff"):
+            return "level"
+        if last == "cliffHz":
+            return "hz"
+        return "db"
+    if op in ("spectrum", "welch"):
+        return "spectrum"
+    if op == "tonal-balance":
+        return "spectrum-db"
+    if op in ("waveform", "block-peaks"):
+        return "exact" if parts[0] == "shape" else "level"
+    if op == "clip-runs":
+        return "seconds"
+    if op == "music":
+        return "music-math" if stem in ("hzToMidi", "midiToHz") else "exact"
+    if op == "scale-library":
+        return "exact"
+    raise SystemExit(f"tools/reference.py: no tolerance for {op} result {name}")
+
+
 def tolerance(op, name):
+    if op not in FIELDS:
+        return rule(op, name)
     field = FIELDS[op]
     last = name.split(".")[-1]
     if last in field:
@@ -251,6 +326,114 @@ for rate in (44100, 48000):
 case("sounds/kits", "drum-kits")
 
 
+# ---- measurement the browser also runs: file analysis (Last Call), spectra, waveforms, the clipping check
+
+SONG = MIX
+CLIPPED = signal(44100, 4, 2, voiced(110, 0.7, REED, decay=15, every=0.5), noise(111, 0.3, 0.3, lowpass=1),
+                 dict(type="clip", l=0.95))
+# A steady tone peaks between the same samples every cycle, so where its true peak is would be a tie;
+# a short burst on top gives each of these one clear loudest peak.
+BURST = dict(type="samples", values=[0.3, 0.6, 0.6, 0.3], **{"from": 3})
+SPARSE = signal(48000, 6, 1, tone(440, 0.3, **{"from": 1, "to": 5}), tone(0, 0.01, phase=0.25), dict(BURST, l=1))  # silence each end, DC
+OUT_OF_PHASE = signal(48000, 5, 2, tone(60, 0.4, 0), tone(60, 0, 0.4, phase=0.5), voiced(440, 0.1, SUNG), dict(BURST, l=0.8, r=0.8))
+CLIFF = signal(44100, 6, 2, [tone(250, 0.012, mult=k) for k in range(1, 61)], noise(121, 0.001, 0.001))  # nothing above 15 kHz
+TWIN = signal(48000, 3, 2, voiced(220, 0.3, PLUCKED, decay=14, every=0.75))                         # both channels the same
+
+for name, sig, bits in (("song-24bit", SONG, 24), ("clipped-16bit", CLIPPED, 16), ("sparse-mono", SPARSE, 0),
+                        ("out-of-phase-lows", OUT_OF_PHASE, 24), ("cliff", CLIFF, 16), ("twin-channels", TWIN, 0),
+                        ("silence", signal(48000, 2, 2), 24)):
+    case(f"analysis/file/{name}", "file-analysis", sig, bitDepth=bits, block=8192)
+
+TONES = signal(48000, 1, 1, tone(1000, 0.4), tone(5000, 0.1), noise(131, 0.01))
+case("analysis/spectrum/hann-update", "spectrum", TONES, block=1024, mode="update", size=4096, history=8192, window=0,
+     bins=[0, 85, 427, 2047], levelAt=[100, 1000, 5000])
+case("analysis/spectrum/periodic-analyse", "spectrum", TONES, block=2048, mode="analyse", size=4096, history=4096, window=1, bins=[85, 427])
+case("analysis/spectrum/blackman-smoothed", "spectrum", TONES, block=512, mode="update", size=2048, history=4096, window=2,
+     smoothing=0.5, bins=[43, 213])
+case("analysis/spectrum/web-audio", "spectrum", TONES, block=1024, mode="analyse", webAudio=1, size=2048, smoothing=0.8, bins=[43, 213, 1023])
+case("analysis/welch/song", "welch", SONG, size=4096, maxSegments=16, bins=[1, 10, 100, 1000])
+case("analysis/welch/at", "welch", SONG, size=2048, starts=[0, 44100, 88200, 300000], bins=[1, 10, 100])
+case("analysis/tonal-balance/song", "tonal-balance", SONG)
+case("analysis/waveform/song", "waveform", SONG, block=4096, columns=16, rms=1, bands=1)
+case("analysis/waveform/mono-stride", "waveform", SPARSE, block=4096, columns=12, stride=4)
+case("analysis/block-peaks/song", "block-peaks", SONG, block=4096, blockSize=441, points=200, width=64)
+case("analysis/clip-runs/clipped", "clip-runs", CLIPPED, bitDepth=16)
+case("analysis/clip-runs/song", "clip-runs", SONG, bitDepth=24)
+
+# ---- processing the browser also runs
+
+VOX = signal(48000, 3, 1, voiced(201, 0.3, SUNG, vibHz=5, vibDepth=0.01, attack=0.05),
+             noise(141, 0.35, highpass=1, decay=11, every=0.6, **{"from": 0.3}),   # esses
+             noise(142, 0.004, lowpass=2))                                         # breath
+HIGH = signal(96000, 1, 1, tone(1000, 0.3), tone(30000, 0.2), noise(151, 0.02))
+case("processing/resample/48k-to-44k", "resample", VOX, block=4096, to=44100)
+case("processing/resample/44k-to-48k", "resample", SONG, block=4096, to=48000)
+case("processing/resample/96k-to-48k", "resample", HIGH, block=1000, to=48000)
+case("processing/fracdelay/song", "fracdelay", SONG, block=4096, delays=[0.5, 2.25])
+case("processing/decimate/by-2", "decimate", HIGH, block=4096, factor=2)
+case("processing/decimate/by-4", "decimate", HIGH, block=999, factor=4)
+for bits, mode in ((16, 0), (16, 1), (16, 2), (24, 0)):
+    case(f"processing/quantize/{bits}bit-{['auto', 'always', 'never'][mode]}", "quantize", SONG, block=4096, bits=bits, mode=mode, seed=7)
+for curve in range(3):
+    case(f"processing/fades/seconds-curve{curve}", "fades", VOX, kind="seconds", curve=curve, **{"in": 0.5, "out": 1.2})
+for point in range(3):
+    case(f"processing/fades/samples-point{point}", "fades", VOX, kind="samples", curve=point, point=point, **{"in": 4800, "out": 9600})
+case("processing/fades/crossfade", "fades", SONG, kind="crossfade", curve=1, point=1, length=2000)
+case("processing/channels/song", "channels", SONG, trim=[0.5, 2.0, 1.25, 0, 7.5, 9])
+case("processing/channels/vox", "channels", VOX, trim=[0, 1])
+case("processing/devices/song", "devices", SONG, block=4096, freqs=[100, 1000, 10000])
+case("processing/vocal-eq/vox", "vocal-eq", VOX, block=512, lowCutHz=90, lowDb=-2, bodyDb=1.5, presenceDb=3, airDb=2,
+     freqs=[60, 200, 3000, 12000])
+case("processing/ab/vox", "ab", VOX, block=512)
+case("processing/ab/song-latency", "ab", SONG, block=1024, latency=64)
+
+# ---- music: note names, keys, spelling (the scale library is data/scales.json in the browser, so natively only)
+
+case("music/words", "music", parse=["F#", "Bb", "Cbb", "Gx", "H", "F# minor", "Bbm", "C#/Db major", "e"],
+     hz=[27.5, 100, 440, 1000, 4186], midi=[21, 60, 69, 108])
+case("music/scale-library", "scale-library", native=True)
+
+# ---- processors the browser build has no functions for: natively only ("native"; wasm/reference.mjs
+# skips them and says how many)
+
+CLICKY = signal(48000, 2.5, 2, tone(1500, 0.5, decay=8, every=0.6), noise(161, 0.3, 0.2, decay=9, every=1.1, **{"from": 0.3}))
+GUITAR = signal(48000, 6, 1, voiced(110, 0.35, PLUCKED, decay=14, every=0.5),
+                noise(171, 0.2, highpass=1, decay=7, every=0.5),                     # pick attacks
+                noise(172, 0.05, highpass=2, decay=11, every=1.5, **{"from": 0.25}))  # string squeaks
+
+
+def native(id, input, kind, **params):
+    case(id, "processor", input, kind=kind, native=True, **params)
+
+
+for style in range(3):
+    native(f"native/compressor/{['smooth', 'punchy', 'slam'][style]}", SONG, "compressor", style=style, amount=0.6, block=512)
+native("native/gate/clicks", CLICKY, "gate", threshold=-35, block=512)
+native("native/rider/vox", VOX, "rider", target=-20, range=6, speed=0.5, block=512)
+native("native/dynamic-bell/vox", VOX, "dynamic-bell", freq=3500, q=2, cut=6, block=256)
+for t, (freq, gain, q) in enumerate(((1000, 4, 1.0), (120, 3, 0.7), (6000, -3, 0.7), (80, 0, 0.7), (12000, 0, 0.7), (2000, 0, 2))):
+    native(f"native/eq-band/{['bell', 'low-shelf', 'high-shelf', 'low-cut', 'high-cut', 'notch'][t]}", SONG, "eq-band",
+           type=t, freq=freq, gain=gain, q=q, block=512)
+native("native/eq-band/low-cut-48dB", SONG, "eq-band", type=3, freq=100, slope=2, block=512)
+native("native/dynamic-band/vox", VOX, "dynamic-band", freq=6000, range=9, threshold=-40, block=512)
+native("native/carve/song", SONG, "carve", depth=6, block=512)
+native("native/saturator/song", SONG, "saturator", amount=0.5, block=512)
+native("native/doubler/guitar", GUITAR, "doubler", amount=0.7, block=512)
+for mode in range(6):
+    native(f"native/reverb/{['room', 'chamber', 'plate', 'hall', 'huge', 'spring'][mode]}", CLICKY, "reverb", mode=mode, block=512)
+native("native/reverb/space-setting", CLICKY, "reverb", space=1, size=0.3, block=512)
+native("native/space/vox", VOX, "space", amount=0.6, size=0.4, delay=0.3, delaySeconds=0.25, feedback=0.3, block=512)
+for kind in ("squeak", "pick", "boom"):
+    native(f"native/guitar-fixes/{kind}", GUITAR, kind, amount=0.8, block=512)
+for i, name in enumerate(STYLES):
+    native(f"native/master-chain/{name}", SONG, "master-chain", style=i, block=1024)
+case("native/follow/vox", "follow", VOX, hop=4800, native=True)
+native("native/de-esser/vox", VOX, "de-esser", amount=1.0, freq=6500, block=512)
+native("native/pitch-engine/correction", VOX, "pitch-engine", key=0, scale=0, speedMs=20, block=512)
+native("native/pitch-engine/harmony", VOX, "pitch-engine", key=0, scale=0, speedMs=20, harmony=1, interval=3, block=512)
+native("native/body/guitar", GUITAR, "body", block=512)
+
+
 # ---- writing
 
 
@@ -294,6 +477,13 @@ def write(results):
         f.write("\n".join(lines) + "\n")
 
 
+def compute(exe, cases_path, work):
+    out_path = os.path.join(work, "results.json")
+    subprocess.run([exe, "--compute", cases_path, out_path], check=True)
+    with open(out_path) as f:
+        return json.load(f)
+
+
 def main():
     ids = [c["id"] for c in cases]
     if len(set(ids)) != len(ids):
@@ -301,12 +491,9 @@ def main():
     with tempfile.TemporaryDirectory() as work:
         exe = build(work)
         cases_path = os.path.join(work, "cases.json")
-        out_path = os.path.join(work, "results.json")
         with open(cases_path, "w") as f:
             json.dump({"cases": cases}, f)
-        subprocess.run([exe, "--compute", cases_path, out_path], check=True)
-        with open(out_path) as f:
-            results = json.load(f)
+        results = compute(exe, cases_path, work)
     write(results)
     print(f"wrote {os.path.relpath(OUT, ROOT)}: {len(cases)} cases, {sum(len(r['results']) for r in results)} results")
 

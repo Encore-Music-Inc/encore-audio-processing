@@ -4,7 +4,8 @@
 // expected result within its tolerance, as tests/ReferenceTests.cpp does
 // natively. Fails when a result is off, when an input is not the one the file
 // names (its hash), when the file has a result this run did not produce, or
-// when this run produced one the file does not have.
+// when this run produced one the file does not have. Cases marked "native"
+// (processors the browser build has no functions for) are skipped, and counted.
 //
 //   node wasm/reference.mjs [master.wasm] [reference.json]
 //
@@ -34,7 +35,7 @@ const cstr = (p) => { const u = new Uint8Array(X.memory.buffer); let e = p; whil
 // ---- inputs (the fields in dsp/ReferenceSignals.h's order)
 
 const FIELDS = ['type', 'from', 'to', 'l', 'r', 'hz', 'mult', 'phase', 'vibHz', 'vibDepth', 'attack', 'decay', 'every', 'seed', 'lowpass', 'highpass'];
-const TYPES = { tone: 0, noise: 1, samples: 2 };
+const TYPES = { tone: 0, noise: 1, samples: 2, clip: 3 };
 
 function makeInput(input) {
   const rate = input.rate ?? 48000;
@@ -101,6 +102,383 @@ function takeSound(p) {
   const x = f32(p, n).slice();
   X.free(p);
   return x;
+}
+
+// ---- helpers for the newer cases (as tests/ReferenceTests.cpp's)
+
+// Copies channels into malloc'd buffers; returns their pointers and a pointer to the array of them
+function alloc(channels) {
+  const ptrs = channels.map((x) => { const p = X.malloc(x.length * 4 + 4); f32(p, x.length).set(x); return p; });
+  const table = X.malloc(4 * Math.max(1, ptrs.length));
+  i32(table, ptrs.length).set(ptrs);
+  return { ptrs, table, read: (n) => ptrs.map((p) => f32(p, n).slice()), free: () => { ptrs.forEach((p) => X.free(p)); X.free(table); } };
+}
+
+const channelsOf = (sig) => (sig.channels > 1 ? [sig.l, sig.r] : [sig.l]);
+
+function fingerprintAudio(out, name, ch, fs) {
+  const p = name ? name + '.' : '';
+  const len = ch.length ? ch[0].length : 0;
+  out.push([p + 'length', len]);
+  if (len === 0) return;
+  let sum = 0, peak = 0;
+  for (const c of ch) for (let i = 0; i < c.length; i++) { const a = Math.abs(c[i]); sum += a; if (a > peak) peak = a; }
+  out.push([p + 'sum', sum], [p + 'peak', peak]);
+  const m = X.lm_create(fs, 4096);
+  blocks(len, 4096, (s, k) => {
+    f32(X.lm_left(m), k).set(ch[0].subarray(s, s + k));
+    if (ch.length > 1) f32(X.lm_right(m), k).set(ch[1].subarray(s, s + k));
+    X.lm_process(m, k, ch.length > 1 ? 1 : 0);
+  });
+  out.push([p + 'lufs', X.lm_integrated(m)]);
+  X.lm_destroy(m);
+}
+
+function arrayStats(out, name, x, picks = []) {
+  let sum = 0, best = -1e300, at = -1;
+  for (let i = 0; i < x.length; i++) {
+    const v = x[i];
+    if (!Number.isFinite(v)) continue;
+    sum += v;
+    if (v > best) { best = v; at = i; }
+  }
+  out.push([name + '.count', x.length], [name + '.sum', sum], [name + '.max', best], [name + '.maxAt', at]);
+  for (const b of picks) if (Math.trunc(b) < x.length) out.push([`${name}.at${Math.trunc(b)}`, x[Math.trunc(b)]]);
+}
+
+const ANALYSIS = ['empty', 'duration', 'samplePeakDb', 'samplePeakAt', 'peakLDb', 'peakRDb', 'dcL', 'dcR', 'oversFloat', 'corr',
+  'monoLossDb', 'sideToMidDb', 'identical', 'maxDiff', 'silentL', 'silentR', 'silent', 'lufs', 'shortTermMax',
+  'shortTermMaxAt', 'lra', 'balanceDb', 'truePeakDb', 'truePeakAt', 'tpOverCount', 'tpOverZeroCount', 'clipRuns',
+  'clipEvents', 'clipLongest', 'clipHasLevel', 'clipLevelDb', 'lowCorr', 'lowMonoLossDb', 'lowShareDb', 'leadSec',
+  'tailSec', 'firstSampleDb', 'lastSampleDb', 'headRmsDb', 'endRmsDb', 'endDecayDb', 'hasSpectrum', 'cliffHz',
+  'cliffDrop', 'hasPadded16', 'padded16'];
+
+// text written by a mu_* function into a buffer
+const textBuf = X.malloc(256), intBuf = X.malloc(64);
+const mtext = (fn) => { fn(textBuf, 256); return cstr(textBuf); };
+const noteText = (letter, acc) => mtext((b, cap) => X.mu_note_text(letter, acc, b, cap));
+const spelledAt = (p) => { const v = i32(p, 2); return noteText(v[0], v[1]); };
+
+function runMore(c, sig, out) {
+  const fs = sig ? sig.rate : (c.rate ?? 48000);
+  const block = c.block ?? 4096;
+  const n = sig ? sig.l.length : 0;
+  const stereo = sig !== null && sig.channels > 1;
+  const nums = (k) => c[k] ?? [];
+
+  switch (c.op) {
+    // ---- measurement
+    case 'file-analysis': {
+      const a = X.ms_an_create(fs, sig.channels, n, c.bitDepth ?? 0, c.isFloat ?? 0, block);
+      do {
+        blocks(n, block, (s, k) => {
+          f32(X.ms_an_left(a), k).set(sig.l.subarray(s, s + k));
+          f32(X.ms_an_right(a), k).set((stereo ? sig.r : sig.l).subarray(s, s + k));
+          X.ms_an_process(a, k);
+        });
+      } while (X.ms_an_next_pass(a));
+      X.ms_an_finish(a);
+      ANALYSIS.forEach((name, k) => out.push([name, X.ms_an_value(a, k)]));
+      for (let b = 0; b < 5; b++) ['corr', 'monoLossDb', 'shareDb'].forEach((f, k) => out.push([`band${b}.${f}`, X.ms_an_value(a, 100 + 3 * b + k)]));
+      ['timeline', 'tpOvers', 'tpOverZero', 'clipTimes', 'lowOut'].forEach((name, l) => {
+        const size = X.ms_an_list_size(a, l);
+        out.push([name + '.count', size]);
+        const v = f64(X.ms_an_list(a, l), size);
+        for (let i = 0; i < size; i++) out.push([`${name}.${i}`, v[i]]);
+      });
+      X.ms_an_destroy(a);
+      return true;
+    }
+    case 'spectrum': {
+      let o;
+      if (c.webAudio) o = [c.size ?? 2048, c.size ?? 2048, 2, c.size ?? 2048, 0.5, 0.15, 0.04, c.smoothing ?? 0.8];
+      else o = [c.size ?? 4096, c.history ?? 8192, c.window ?? 0, c.scale ?? 1024, c.attack ?? 0.5, c.release ?? 0.15, c.powerSmoothing ?? 0.04, c.smoothing ?? 0];
+      const a = X.ms_sp_create(...o, block);
+      const update = c.mode === 'update';
+      blocks(n, block, (s, k) => { f32(X.ms_sp_input(a), k).set(sig.l.subarray(s, s + k)); X.ms_sp_push(a, k); if (update) X.ms_sp_update(a); else X.ms_sp_analyse(a); });
+      const bins = X.ms_sp_bins(a), picks = nums('bins');
+      arrayStats(out, 'magnitude', f32(X.ms_sp_magnitude(a), bins), picks);
+      if (update) {
+        arrayStats(out, 'levels', f32(X.ms_sp_levels(a), bins), picks);
+        arrayStats(out, 'power', f32(X.ms_sp_power(a), bins), picks);
+        for (const hz of nums('levelAt')) out.push([`levelAt${Math.trunc(hz)}`, X.ms_sp_level_at(a, hz, fs, 3, 1000)]);
+      } else arrayStats(out, 'decibels', f32(X.ms_sp_decibels(a), bins), picks);
+      X.ms_sp_destroy(a);
+      return true;
+    }
+    case 'welch': {
+      const buf = alloc(channelsOf(sig));
+      const size = c.size ?? 4096, res = X.malloc(8 * (size / 2 + 1));
+      const r = stereo ? buf.ptrs[1] : 0;
+      const starts = nums('starts');
+      if (starts.length === 0) X.ms_welch(buf.ptrs[0], r, n, fs, size, c.maxSegments ?? 64, res);
+      else {
+        const sp = X.malloc(8 * starts.length);
+        f64(sp, starts.length).set(starts);
+        X.ms_welch_at(buf.ptrs[0], r, fs, size, sp, starts.length, res);
+        X.free(sp);
+      }
+      arrayStats(out, 'power', f64(res, size / 2 + 1), nums('bins'));
+      X.free(res); buf.free();
+      return true;
+    }
+    case 'tonal-balance': {
+      const buf = alloc([sig.l]), res = X.malloc(8 * 24);
+      X.ms_tonal_balance(buf.ptrs[0], n, fs, res);
+      const v = f64(res, 24);
+      for (let b = 0; b < 10; b++) out.push([`level${b}`, v[b]], [`rel${b}`, v[10 + b]]);
+      out.push(['lows', v[20]], ['mud', v[21]], ['harsh', v[22]], ['top', v[23]]);
+      X.free(res); buf.free();
+      return true;
+    }
+    case 'waveform': {
+      const columns = c.columns ?? 16;
+      const w = X.ms_wf_create(fs, n, columns, c.stride ?? 1, c.rms ?? 0, c.bands ?? 0, block);
+      blocks(n, block, (s, k) => {
+        f32(X.ms_wf_left(w), k).set(sig.l.subarray(s, s + k));
+        if (stereo) f32(X.ms_wf_right(w), k).set(sig.r.subarray(s, s + k));
+        X.ms_wf_process(w, k, stereo ? 1 : 0);
+      });
+      const picks = [0, Math.trunc(columns / 2), columns - 1];
+      const stat = (name, which, len) => arrayStats(out, name, f32(X.ms_wf_get(w, which), len).slice(), picks);
+      stat('peak', 0, columns); stat('peakL', 1, columns); stat('peakR', 2, columns);
+      if (c.rms) stat('rms', 3, columns);
+      if (c.bands) stat('bands', 4, 3 * columns);
+      X.ms_wf_destroy(w);
+      return true;
+    }
+    case 'block-peaks': {
+      const b = X.ms_wf_blocks_create(c.blockSize ?? 100, block);
+      blocks(n, block, (s, k) => { f32(X.ms_wf_blocks_input(b), k).set(sig.l.subarray(s, s + k)); X.ms_wf_blocks_process(b, k); });
+      const count = X.ms_wf_blocks_count(b);
+      const peaksP = X.ms_wf_blocks_peaks(b);
+      arrayStats(out, 'peaks', f64(peaksP, count).slice());
+      const points = c.points ?? 200, shapeP = X.malloc(points + 4);
+      const got = X.ms_wf_shape(peaksP, count, points, shapeP);
+      arrayStats(out, 'shape', new Uint8Array(X.memory.buffer, shapeP, got).slice(), [0, Math.trunc(got / 2), Math.max(0, got - 1)]);
+      X.free(shapeP); X.ms_wf_blocks_destroy(b);
+      const width = c.width ?? 64, buf = alloc(channelsOf(sig)), px = X.malloc(4 * width);
+      X.ms_wf_pixel_peaks(buf.ptrs[0], stereo ? buf.ptrs[1] : 0, n, width, px);
+      arrayStats(out, 'pixels', f32(px, width).slice());
+      X.free(px); buf.free();
+      return true;
+    }
+    case 'clip-runs': {
+      const buf = alloc(channelsOf(sig)), res = X.malloc(8 * 64);
+      const spots = X.ms_clip_runs(buf.ptrs[0], stereo ? buf.ptrs[1] : 0, n, fs, c.bitDepth ?? 0, c.isFloat ?? 0, res, 61);
+      const v = f64(res, 64);
+      out.push(['runs', v[0]], ['longest', v[1]], ['spots', v[2]]);
+      for (let k = 0; k < spots; k++) out.push([`spot${k}`, v[3 + k]]);
+      X.free(res); buf.free();
+      return true;
+    }
+
+    // ---- processing
+    case 'resample': {
+      const to = c.to ?? 48000, ch = sig.channels;
+      const r = X.pr_resampler_create(fs, to, ch, block);
+      const res = Array.from({ length: ch }, () => []);
+      const take = (got) => { for (let ci = 0; ci < ch; ci++) res[ci].push(f32(X.pr_resampler_output(r, ci), got).slice()); };
+      const src = channelsOf(sig);
+      blocks(n, block, (s, k) => { src.forEach((x, ci) => f32(X.pr_resampler_input(r, ci), k).set(x.subarray(s, s + k))); take(X.pr_resampler_push(r, k)); });
+      take(X.pr_resampler_flush(r));
+      X.pr_resampler_destroy(r);
+      out.push(['resampledLength', X.pr_resampled_length(n, fs, to)]);
+      fingerprintAudio(out, '', res.map((parts) => { const all = new Float32Array(parts.reduce((a, p) => a + p.length, 0)); let o = 0; for (const p of parts) { all.set(p, o); o += p.length; } return all; }), to);
+      return true;
+    }
+    case 'fracdelay': {
+      const delays = nums('delays'), ch = channelsOf(sig).map((x) => x.slice());
+      const dp = X.malloc(8 * delays.length);
+      f64(dp, delays.length).set(delays);
+      const d = X.pr_fracdelay_create(dp, ch.length, block);
+      ch.forEach((x, ci) => blocks(n, block, (s, k) => {
+        const p = X.pr_fracdelay_buffer(d, ci);
+        f32(p, k).set(x.subarray(s, s + k));
+        X.pr_fracdelay_process(d, ci, k);
+        x.set(f32(p, k), s);
+      }));
+      out.push(['latency', X.pr_fracdelay_latency(d)]);
+      X.pr_fracdelay_destroy(d); X.free(dp);
+      fingerprintAudio(out, '', ch, fs);
+      return true;
+    }
+    case 'decimate': {
+      const factor = c.factor ?? 2, d = X.pr_decimator_create(fs, factor, block), res = [];
+      blocks(n, block, (s, k) => { f32(X.pr_decimator_input(d), k).set(sig.l.subarray(s, s + k)); const got = X.pr_decimator_push(d, k); res.push(...f32(X.pr_decimator_output(d), got)); });
+      X.pr_decimator_destroy(d);
+      fingerprintAudio(out, '', [Float32Array.from(res)], fs / factor);
+      return true;
+    }
+    case 'quantize': {
+      const bits = c.bits ?? 16, src = channelsOf(sig);
+      const q = X.pr_quantizer_create(bits, c.mode ?? 0, c.seed ?? 1, src.length, block);
+      const ints = src.map(() => new Int32Array(n));
+      blocks(n, block, (s, k) => {
+        src.forEach((x, ci) => f32(X.pr_quantizer_input(q, ci), k).set(x.subarray(s, s + k)));
+        X.pr_quantizer_process(q, k);
+        ints.forEach((o, ci) => o.set(i32(X.pr_quantizer_ints(q, ci), k), s));
+      });
+      let sum = 0, peak = 0, h = 0x811c9dc5;
+      for (const o of ints) {
+        const bytes = new Uint8Array(o.buffer);
+        for (let i = 0; i < o.length; i++) { const a = Math.abs(o[i]); sum += a; if (a > peak) peak = a; }
+        for (let i = 0; i < bytes.length; i++) { h ^= bytes[i]; h = Math.imul(h, 16777619) >>> 0; }
+      }
+      const buf = alloc(src);
+      out.push(['dithering', X.pr_quantizer_dithering(q)], ['onGrid', X.pr_on_grid(buf.table, src.length, n, bits)],
+               ['sum', sum], ['peak', peak], ['hash', h.toString(16).padStart(8, '0')]);
+      buf.free(); X.pr_quantizer_destroy(q);
+      return true;
+    }
+    case 'fades': {
+      let buf;
+      const curve = c.curve ?? 0;
+      if (c.kind === 'seconds' || c.kind === 'samples') {
+        buf = alloc(channelsOf(sig));
+        if (c.kind === 'seconds') X.pr_fades(buf.table, sig.channels, n, fs, c.in ?? 0, c.out ?? 0, curve);
+        else X.pr_fade_samples(buf.table, sig.channels, n, c.in ?? 0, c.out ?? 0, curve, c.point ?? 0);
+        fingerprintAudio(out, '', buf.read(n), fs);
+      } else {
+        const len = c.length ?? 1000, src = channelsOf(sig);
+        buf = alloc(src.map((x) => x.subarray(0, len)));
+        const from = alloc(src.map((x) => x.subarray(len, 2 * len)));
+        X.pr_crossfade(buf.table, from.table, src.length, len, curve, c.point ?? 0);
+        fingerprintAudio(out, '', buf.read(len), fs);
+        from.free();
+      }
+      buf.free();
+      return true;
+    }
+    case 'channels': {
+      const src = alloc(channelsOf(sig));
+      ['keep', 'left', 'right', 'mono', 'stereo'].forEach((name, m) => {
+        const nOut = X.pr_mapped_channels(m, sig.channels);
+        const o = alloc(Array.from({ length: nOut }, () => new Float32Array(n)));
+        X.pr_map_channels(m, src.table, sig.channels, n, o.table);
+        out.push([name + '.channels', nOut]);
+        fingerprintAudio(out, name, o.read(n), fs);
+        o.free();
+      });
+      out.push(['peakOf', X.pr_peak(src.table, sig.channels, n)]);
+      src.free();
+      const t = nums('trim');
+      for (let k = 0; k + 1 < t.length; k += 2) {
+        X.pr_trim_range(n, fs, t[k], t[k + 1], intBuf);
+        const r = i32(intBuf, 2);
+        out.push([`trim${k / 2}.first`, r[0]], [`trim${k / 2}.last`, r[1]]);
+      }
+      for (const mode of [1, 2]) {
+        const x = alloc(channelsOf(sig)), res = X.malloc(32);
+        X.pr_normalize(x.table, sig.channels, n, fs, mode, res);
+        const v = f64(res, 4), p = mode === 1 ? 'normalizePeak' : 'normalizeLufs';
+        out.push([p + '.gainDb', v[0]], [p + '.outcome', v[1]], [p + '.measuredLufs', v[2]], [p + '.reachedLufs', v[3]]);
+        fingerprintAudio(out, p, x.read(n), fs);
+        x.free(); X.free(res);
+      }
+      return true;
+    }
+    case 'devices': {
+      for (let d = 0; d < X.pr_device_count(); d++) {
+        const id = cstr(X.pr_device_id(d)), h = X.pr_device_create(fs, d, block);
+        const ch = channelsOf(sig).map((x) => x.slice());
+        blocks(n, block, (s, k) => {
+          f32(X.pr_device_left(h), k).set(ch[0].subarray(s, s + k));
+          if (stereo) f32(X.pr_device_right(h), k).set(ch[1].subarray(s, s + k));
+          X.pr_device_process(h, k, stereo ? 1 : 0);
+          ch[0].set(f32(X.pr_device_left(h), k), s);
+          if (stereo) ch[1].set(f32(X.pr_device_right(h), k), s);
+        });
+        fingerprintAudio(out, id, ch, fs);
+        for (const f of nums('freqs')) out.push([`${id}.magnitude${Math.trunc(f)}`, X.pr_device_magnitude(h, f)]);
+        X.pr_device_destroy(h);
+      }
+      return true;
+    }
+    case 'vocal-eq': {
+      const h = X.pr_vocal_eq_create(fs, block);
+      X.pr_vocal_eq_settings(h, c.lowCutHz ?? 20, c.lowDb ?? 0, c.bodyDb ?? 0, c.presenceDb ?? 0, c.airDb ?? 0);
+      const ch = channelsOf(sig).map((x) => x.slice());
+      blocks(n, block, (s, k) => {
+        f32(X.pr_vocal_eq_left(h), k).set(ch[0].subarray(s, s + k));
+        if (stereo) f32(X.pr_vocal_eq_right(h), k).set(ch[1].subarray(s, s + k));
+        X.pr_vocal_eq_process(h, k, stereo ? 1 : 0);
+        ch[0].set(f32(X.pr_vocal_eq_left(h), k), s);
+        if (stereo) ch[1].set(f32(X.pr_vocal_eq_right(h), k), s);
+      });
+      fingerprintAudio(out, '', ch, fs);
+      for (const f of nums('freqs')) out.push([`magnitude${Math.trunc(f)}`, X.pr_vocal_eq_magnitude(h, f)]);
+      X.pr_vocal_eq_destroy(h);
+      return true;
+    }
+    case 'ab': {
+      const h = X.pr_ab_create(fs, block, c.latency ?? 0);
+      X.pr_ab_hear_original(h, 1);
+      const res = [new Float32Array(n), new Float32Array(n)], half = Math.trunc(n / 2);
+      const r = stereo ? sig.r : sig.l;
+      blocks(n, block, (s, k) => {
+        if (s >= half) X.pr_ab_hear_original(h, 0);
+        f32(X.pr_ab_original_left(h), k).set(sig.l.subarray(s, s + k));
+        f32(X.pr_ab_original_right(h), k).set(r.subarray(s, s + k));
+        X.pr_ab_take_original(h, k);
+        const pl = f32(X.pr_ab_left(h), k), pr = f32(X.pr_ab_right(h), k);
+        for (let i = 0; i < k; i++) { pl[i] = sig.l[s + i] * 0.5; pr[i] = r[s + i] * 0.5; }
+        X.pr_ab_mix(h, k);
+        res[0].set(f32(X.pr_ab_left(h), k), s);
+        res[1].set(f32(X.pr_ab_right(h), k), s);
+      });
+      out.push(['matchDb', X.pr_ab_match_db(h)]);
+      X.pr_ab_destroy(h);
+      fingerprintAudio(out, '', res, fs);
+      return true;
+    }
+
+    // ---- music
+    case 'music': {
+      for (let m = 0; m < 128; m++) out.push([`name${m}`, mtext((b, cap) => X.mu_note_name(m, 1, b, cap))]);
+      out.push(['name-1', mtext((b, cap) => X.mu_note_name(-1, 1, b, cap))]);
+      for (let letter = 0; letter < 7; letter++)
+        for (let acc = -1; acc <= 1; acc++)
+          for (let minor = 0; minor < 2; minor++) {
+            const id = noteText(letter, acc) + (minor ? 'm' : '');
+            out.push([id + '.name', mtext((b, cap) => X.mu_key_name(letter, acc, minor, b, cap))]);
+            out.push([id + '.signature', X.mu_signature(letter, acc, minor)]);
+            X.mu_scale_notes(letter, acc, minor, intBuf);
+            const v = i32(intBuf, 14).slice();
+            const scale = [];
+            for (let i = 0; i < 7; i++) scale.push(noteText(v[2 * i], v[2 * i + 1]));
+            out.push([id + '.scale', scale.join(' ')]);
+            out.push([id + '.midi61', mtext((b, cap) => X.mu_note_name_in_key(61, 1, letter, acc, minor, b, cap))]);
+          }
+      for (let pc = 0; pc < 12; pc++) {
+        const p = `pc${pc}`;
+        X.mu_plain_note(pc, intBuf); out.push([p + '.plain', spelledAt(intBuf)]);
+        const count = X.mu_spellings(pc, intBuf);
+        const v = i32(intBuf, 2 * count).slice(), all = [];
+        for (let i = 0; i < count; i++) all.push(noteText(v[2 * i], v[2 * i + 1]));
+        out.push([p + '.spellings', all.join(' ')]);
+        X.mu_spell_note(pc, 0, 0, 0, 1, intBuf); out.push([p + '.sharp', spelledAt(intBuf)]);
+        X.mu_spell_note(pc, 0, 0, 0, -1, intBuf); out.push([p + '.flat', spelledAt(intBuf)]);
+        X.mu_in_key(pc, 3, 1, intBuf); out.push([p + '.inF#', spelledAt(intBuf)]);
+        X.mu_in_key(pc, 1, -1, intBuf); out.push([p + '.inDb', spelledAt(intBuf)]);
+      }
+      for (const t of nums('parse')) {
+        const tp = text(t);
+        out.push(['note:' + t, X.mu_parse_note(tp, intBuf) ? spelledAt(intBuf) : '-']);
+        if (X.mu_parse_key(tp, intBuf)) { const k = i32(intBuf, 3).slice(); out.push(['key:' + t, mtext((b, cap) => X.mu_key_name(k[0], k[1], k[2], b, cap))]); }
+        else out.push(['key:' + t, '-']);
+        X.free(tp);
+      }
+      for (const hz of nums('hz')) out.push([`hzToMidi${Math.trunc(hz)}`, X.mu_hz_to_midi(hz, 440)]);
+      for (const m of nums('midi')) out.push([`midiToHz${Math.trunc(m)}`, X.mu_midi_to_hz(m, 442)]);
+      for (let d = 27; d <= 87; d++) {
+        out.push([`drum${d}`, mtext((b, cap) => X.mu_gm_drum_name(d, b, cap))]);
+        out.push([`pad${d}`, X.mu_pad_for_note(d)]);
+      }
+      return true;
+    }
+  }
+  return false;
 }
 
 function run(c, sig) {
@@ -258,7 +636,7 @@ function run(c, sig) {
       break;
     }
     default:
-      out.push([`unknown op ${c.op}`, '']);
+      if (!runMore(c, sig, out)) out.push([`unknown op ${c.op}`, '']);
   }
   return out;
 }
@@ -274,7 +652,10 @@ const report = (ok, name, detail) => {
 };
 
 if (!file.cases?.length) { console.log(`FAIL ${filePath} has no cases`); process.exit(1); }
+let nativeOnly = 0;
 for (const c of file.cases) {
+  // processors with no functions in the browser build: tests/ReferenceTests.cpp checks them
+  if (c.native) { nativeOnly++; continue; }
   const before = failures, checksBefore = checks;
   let sig = null;
   if (c.input) {
@@ -282,7 +663,8 @@ for (const c of file.cases) {
     const h = hash(sig);
     report(h === c.inputHash, `${c.id} input`, `made ${h}, the file names ${c.inputHash}`);
   }
-  const got = new Map(run(c, sig));
+  const produced = run(c, sig), got = new Map(produced);
+  if (got.size !== produced.length) report(false, `${c.id}`, 'a result name is produced twice');
   for (const [name, [expected, tol]] of Object.entries(c.results)) {
     const t = file.tolerances[tol];
     if (!got.has(name)) { report(false, `${c.id} ${name}`, 'not produced by this build'); continue; }
@@ -302,5 +684,6 @@ for (const c of file.cases) {
 }
 console.log('\nLargest difference from the file, by tolerance:');
 for (const [t, w] of Object.entries(worst).sort()) console.log(`  ${t.padEnd(16)} ${w.diff.toPrecision(3)} (allowed ${w.allow.toPrecision(3)})${w.diff > 0 ? '  ' + w.at : ''}`);
+console.log(`\n${nativeOnly} cases are for the native builds only (no browser functions): tests/ReferenceTests.cpp checks them`);
 console.log(`\n${failures === 0 ? 'ALL PASSED' : 'SOME FAILED'} (${checks} checks, ${failures} failed)`);
 process.exit(failures === 0 ? 0 : 1);

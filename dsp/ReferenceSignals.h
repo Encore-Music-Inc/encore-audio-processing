@@ -12,7 +12,8 @@
 // A signal is described by parts, each a record of `fields` numbers (and, for
 // samples, its values after it):
 //
-//   0 type      0 tone, 1 noise, 2 samples
+//   0 type      0 tone, 1 noise, 2 samples, 3 clip (after every other part: the
+//               mix held to within l of full scale either way, a flat-topped peak)
 //   1 from      start, seconds
 //   2 to        end, seconds (negative: the end of the signal)
 //   3 l, 4 r    level in each channel (1 = full scale)
@@ -41,7 +42,7 @@
 namespace vs::reference
 {
     inline constexpr int fields = 17;
-    enum PartType { tone = 0, noise = 1, samples = 2 };
+    enum PartType { tone = 0, noise = 1, samples = 2, clip = 3 };
 
     // sin (2 pi phase / 2^32) in Q30, by a degree-13 odd polynomial on a quarter turn (error under 1e-7)
     inline std::int64_t sineQ30 (std::uint32_t phase)
@@ -82,6 +83,7 @@ namespace vs::reference
         std::vector<std::int64_t> acc[2];
         for (int c = 0; c < channels; ++c) acc[c].assign ((size_t) std::max<std::int64_t> (0, frames), 0);
         auto seconds = [&] (double s) { return (std::int64_t) std::llround (s * (double) fs); };
+        std::int64_t clipAt = -1;
 
         for (int at = 0; at + fields <= size;)
         {
@@ -90,6 +92,7 @@ namespace vs::reference
             const int count = type == samples ? (int) p[16] : 0;
             at += fields + count;
             if (at > size) break;
+            if (type == clip) { clipAt = fixed (p[3], 30); continue; }
             const std::int64_t from = std::max<std::int64_t> (0, seconds (p[1]));
             const std::int64_t to = p[2] < 0 ? frames : std::min (frames, seconds (p[2]));
             const std::int64_t gain[2] { fixed (p[3], 24), fixed (p[4], 24) };
@@ -151,6 +154,10 @@ namespace vs::reference
                 for (int c = 0; c < channels; ++c) acc[c][(size_t) f] += (x * gain[c]) >> 24;
             }
         }
+
+        if (clipAt >= 0)
+            for (int c = 0; c < channels; ++c)
+                for (auto& v : acc[c]) v = std::clamp (v, -clipAt, clipAt);
 
         Signal out;
         out.channels = channels;
