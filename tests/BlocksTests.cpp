@@ -315,6 +315,19 @@ namespace
                 auto* const* up = probe.processSamplesUp (in, 1, 256);
                 for (int k = 0; k < taps; ++k) h[(size_t) k] = up[0][k];
             }
+            {
+                // half-band: every tap an even distance from the centre (but the centre) is exactly 0
+                bool zeros = true, others = true;
+                for (int k = 0; k < taps; ++k)
+                {
+                    const int m = k - (taps - 1) / 2;
+                    if (m != 0 && m % 2 == 0) zeros = zeros && h[(size_t) k] == 0.0f;
+                    else others = others && h[(size_t) k] != 0.0f;
+                }
+                char zname[96];
+                std::snprintf (zname, sizeof (zname), "Oversampler (%d taps): the half-band's zero taps are exactly 0", taps);
+                expect (zname, zeros && others);
+            }
             auto src = noise (n, 9);
             std::vector<float> x (src.begin(), src.end());
             const float* in[1] { x.data() };
