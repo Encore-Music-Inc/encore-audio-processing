@@ -156,7 +156,8 @@ namespace vs
 
             const bool deep = opts.bitDepth > 16 && ! opts.isFloat;
             gridStride = std::max<std::int64_t> (1, n / 400000);
-            gridChecked = 0; gridOff = 0;
+            gridChecked = 0; gridOff = 0; gridNext = 0;
+            decNext = 0; decTaken = 0;
             gridDone[0] = gridDone[1] = ! deep;
             if (! stereo) gridDone[1] = true;
 
@@ -239,7 +240,7 @@ namespace vs
             m.timeline = rep.timeline;
             m.balanceDb = rep.balanceDb;
 
-            if (! tailDone) { tpm.finish ([this] (std::int64_t pos, float v) { noteTruePeak (pos, v); }); tailDone = true; }
+            if (! tailDone) { tpm.finishOver (overReport, [this] (std::int64_t pos, float v) { noteTruePeak (pos, v); }); tailDone = true; }
             m.truePeakDb = db20 (tpm.truePeak());
             m.truePeakAt = (double) tpm.truePeakPosition() / fs;
             m.tpOverCount = (int) secOver.size();
@@ -370,6 +371,9 @@ namespace vs
             std::vector<std::array<double, 3>> secs;
         };
 
+        // the meter reports what's above this; noteTruePeak keeps what's over -1 dBTP (0.8913)
+        static constexpr float overReport = 0.89f;
+
         void noteTruePeak (std::int64_t pos, float v)
         {
             if ((double) v > 0.8913)
@@ -408,7 +412,9 @@ namespace vs
                 if (g >= decFrom && g < decTo) decE += e;
 
                 // 24-bit file holding 16-bit audio: every value on the 16-bit grid
-                if (g % gridStride == 0)
+                if (g == gridNext)
+                {
+                    gridNext += gridStride;
                     for (int c = 0; c < 2; ++c)
                     {
                         if (gridDone[c]) continue;
@@ -419,11 +425,12 @@ namespace vs
                             if (std::abs (v - std::floor (v + 0.5)) > 1e-4) { ++gridOff; gridDone[c] = true; }
                         }
                     }
+                }
             }
 
             meter.process (l, stereo ? r : nullptr, count);
             const float* ch[2] { l, r };
-            tpm.process (ch, count, [this] (std::int64_t pos, float v) { noteTruePeak (pos, v); });
+            tpm.processOver (ch, count, overReport, [this] (std::int64_t pos, float v) { noteTruePeak (pos, v); });
             cliff.process (l, r, count);
             bands (l, r, count);
         }
@@ -437,17 +444,15 @@ namespace vs
             // decimated copy: the 1 kHz low-pass twice, then every D-th sample
             if ((int) bufL.size() < count) { bufL.resize ((size_t) count); bufR.resize ((size_t) count); }
             std::copy (l, l + count, bufL.begin());
-            decim.process (0, bufL.data(), count);
-            if (stereo) { std::copy (r, r + count, bufR.begin()); decim.process (1, bufR.data(), count); }
+            if (stereo) std::copy (r, r + count, bufR.begin());
+            decim.processPair (bufL.data(), stereo ? bufR.data() : nullptr, count);
             decL.clear(); decR.clear();
-            for (int i = 0; i < count; ++i)
+            // the decimated samples are those at multiples of D, the first decCount of them
+            for (; decNext < at + count && decTaken < decCount; decNext += D, ++decTaken)
             {
-                const std::int64_t g = at + i;
-                if (g % D == 0 && g / D < decCount)
-                {
-                    decL.push_back (bufL[(size_t) i]);
-                    decR.push_back (stereo ? bufR[(size_t) i] : bufL[(size_t) i]);
-                }
+                const size_t i = (size_t) (decNext - at);
+                decL.push_back (bufL[i]);
+                decR.push_back (stereo ? bufR[i] : bufL[i]);
             }
             if (decL.empty()) return;
             for (int b = 0; b < analysis::numBands; ++b)
@@ -459,14 +464,13 @@ namespace vs
         {
             if ((int) tmpA.size() < count) { tmpA.resize ((size_t) count); tmpB.resize ((size_t) count); }
             std::copy (x1, x1 + count, tmpA.begin());
-            b.chain.process (0, tmpA.data(), count);
             const float* pb = tmpA.data();
             if (stereo)
             {
                 std::copy (x2, x2 + count, tmpB.begin());
-                b.chain.process (1, tmpB.data(), count);
                 pb = tmpB.data();
             }
+            b.chain.processPair (tmpA.data(), stereo ? tmpB.data() : nullptr, count);
             for (int i = 0; i < count; ++i)
             {
                 const double p = tmpA[(size_t) i], q = pb[i];
@@ -557,7 +561,7 @@ namespace vs
 
         CliffFinder cliff;
 
-        std::int64_t gridStride = 1, gridChecked = 0, gridOff = 0;
+        std::int64_t gridStride = 1, gridChecked = 0, gridOff = 0, gridNext = 0, decNext = 0, decTaken = 0;
         bool gridDone[2] { true, true };
     };
 }
