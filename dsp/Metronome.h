@@ -33,6 +33,9 @@ namespace vs::metronome
     // counts as no peak), as a browser's Math.max does
     using channels::runningPeak;
 
+    // Rounds half up, as a browser's Math.round does (2.5 to 3, -2.5 to -2)
+    using vs::roundHalfUp;
+
     // 0 and NaN count as missing
     inline double orDefault (double v, double fallback) { return v != 0 && ! std::isnan (v) ? v : fallback; }
 

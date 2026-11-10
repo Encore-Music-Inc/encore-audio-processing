@@ -1,7 +1,8 @@
 // The browser's measurements (ms_*): plain C functions around the true-peak
 // meter (dsp/TruePeak.h), the loudness report (dsp/LoudnessReport.h), the
-// whole-file analysis (dsp/Analysis.h), the spectrum analyser
-// (dsp/Spectrum.h) and the waveform overviews (dsp/Waveform.h). Built with the
+// whole-file analysis and its clipping check (dsp/Analysis.h), the spectrum
+// analyser, the averaged spectrum and the tonal balance (dsp/Spectrum.h) and
+// the waveform overviews (dsp/Waveform.h). Built with the
 // other wasm/api_*.cpp files into master.wasm by wasm/build.sh.
 //
 // The meters own their input buffers: fill ms_*_left and ms_*_right with up
@@ -358,5 +359,67 @@ extern "C"
         const float* ch[2] { l, r };
         const auto s = vs::waveform::pixelPeaks (ch, r != nullptr ? 2 : 1, (std::int64_t) n, width);
         std::copy (s.begin(), s.end(), out);
+    }
+
+    // ---- the averaged spectrum (Welch), the tonal balance, the clipping check (whole buffers) ----
+
+    // Welch's averaged power spectrum of one or two channels (r 0 for one) of
+    // n samples: frames of `size` (a power of two), up to maxSegments spread
+    // evenly. Writes size / 2 + 1 bin powers into out.
+    EMSCRIPTEN_KEEPALIVE void ms_welch (const float* l, const float* r, double n, double sampleRate, int size, int maxSegments, double* out)
+    {
+        const float* ch[2] { l, r };
+        const auto s = vs::welch (ch, r != nullptr ? 2 : 1, (std::int64_t) n, sampleRate, size, maxSegments);
+        std::copy (s.power.begin(), s.power.end(), out);
+    }
+
+    // The same over frames starting at the numStarts positions in starts.
+    EMSCRIPTEN_KEEPALIVE void ms_welch_at (const float* l, const float* r, double sampleRate, int size, const double* starts, int numStarts, double* out)
+    {
+        const float* ch[2] { l, r };
+        std::vector<std::int64_t> at ((size_t) numStarts);
+        for (int k = 0; k < numStarts; ++k) at[(size_t) k] = (std::int64_t) starts[k];
+        const auto s = vs::welchAt (ch, r != nullptr ? 2 : 1, sampleRate, size, at);
+        std::copy (s.power.begin(), s.power.end(), out);
+    }
+
+    // A mix's tonal balance from its mid signal: out gets the ten band levels
+    // (dB), the ten levels against a finished mix (dB), then lows, mud,
+    // harshness and top (24 values).
+    EMSCRIPTEN_KEEPALIVE void ms_tonal_balance (const float* mid, double n, double sampleRate, double* out)
+    {
+        const auto t = vs::tonalBalance (mid, (std::int64_t) n, sampleRate);
+        for (int b = 0; b < vs::TonalBalance::numBands; ++b) { out[b] = t.levelDb[b]; out[10 + b] = t.relDb[b]; }
+        out[20] = t.lows; out[21] = t.mud; out[22] = t.harsh; out[23] = t.top;
+    }
+
+    // The clipping check (flat runs at each channel's own peak) on whole
+    // channels in memory (r 0 for one): out gets the runs, the longest run's
+    // length, the spots' count, then up to maxSpots spot start times
+    // (seconds). Returns the number of spots. (ms_an_* runs the same check
+    // on a song fed block by block.)
+    EMSCRIPTEN_KEEPALIVE int ms_clip_runs (const float* l, const float* r, double n, double sampleRate, int bitDepth, int isFloat, double* out, int maxSpots)
+    {
+        const float* ch[2] { l, r };
+        const double tol = vs::FlatRuns::tolerance (bitDepth, isFloat != 0);
+        std::vector<vs::FlatRuns::Event> all;
+        int runs = 0, longest = 0;
+        for (int c = 0; c < (r != nullptr ? 2 : 1); ++c)
+        {
+            float peak = 0.0f;
+            for (std::int64_t i = 0; i < (std::int64_t) n; ++i) peak = std::max (peak, std::abs (ch[c][i]));
+            if (peak < 0.5f) continue; // only a channel peaking at 0.5 or more is checked
+            vs::FlatRuns fr;
+            fr.prepare (peak, tol, sampleRate);
+            fr.process (ch[c], (int) n);
+            fr.finish();
+            runs += fr.runs();
+            longest = std::max (longest, fr.longest());
+            all.insert (all.end(), fr.events().begin(), fr.events().end());
+        }
+        const auto spots = vs::FlatRuns::merge (all);
+        out[0] = runs; out[1] = longest; out[2] = (double) spots.size();
+        for (int k = 0; k < (int) spots.size() && k < maxSpots; ++k) out[3 + k] = spots[(size_t) k].start;
+        return (int) spots.size();
     }
 }

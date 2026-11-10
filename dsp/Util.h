@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 
 namespace vs
@@ -10,6 +11,15 @@ namespace vs
     {
         const auto samples = (double) timeMs * 0.001 * sampleRate;
         return samples <= 1.0 ? 1.0f : (float) (1.0 - std::exp (-1.0 / samples));
+    }
+
+    // The same coefficient from a cutoff in Hz (kept to 10 Hz .. 0.45 fs):
+    // 1 - exp (-2 pi hz / fs), worked out in float.
+    inline float onePoleHz (float hz, double sampleRate)
+    {
+        constexpr float twoPi = (float) (2 * 3.141592653589793238L);
+        const float fsF = (float) sampleRate;
+        return 1.0f - std::exp (-twoPi * std::min (std::max (hz, 10.0f), 0.45f * fsF) / fsF);
     }
 
     // An envelope follower's step: env moves toward x by `up` of the

@@ -27,6 +27,8 @@ namespace vs
 
             for (auto* b : { &sendL, &sendR, &echoL, &echoR, &wetL, &wetR }) b->assign ((size_t) block, 0.0f);
 
+            // (as times: at 44.1 and 48 kHz the send's 8 kHz is under a
+            // sample, so onePole leaves it open)
             fbLpC = onePole (1000.0f / (juce::MathConstants<float>::twoPi * 5000.0f), fs);
             fbHpC = onePole (1000.0f / (juce::MathConstants<float>::twoPi * 250.0f), fs);
             sendLpC = onePole (1000.0f / (juce::MathConstants<float>::twoPi * 8000.0f), fs);

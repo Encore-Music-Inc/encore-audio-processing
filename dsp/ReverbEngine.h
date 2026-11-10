@@ -226,10 +226,7 @@ namespace vs
             outGain = std::min (outGain, 0.9f);
         }
 
-        float onePoleHz (float hz) const
-        {
-            return 1.0f - std::exp (-juce::MathConstants<float>::twoPi * juce::jlimit (10.0f, 0.45f * (float) fs, hz) / (float) fs);
-        }
+        float onePoleHz (float hz) const { return vs::onePoleHz (hz, fs); }
 
         void buildEarlyReflections (int m, float scale)
         {
