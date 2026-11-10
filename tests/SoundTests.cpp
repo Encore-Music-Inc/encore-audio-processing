@@ -174,6 +174,17 @@ namespace
             ok = ok && early >= 0.3f * peak (s.beat) - 1e-6f;
         }
         expect ("9 sound sets, one name each, each sound at its level, loud at once", names.size() == 9 && std::size (m::soundSets) == 9 && ok);
+        // at low sample rates too, where a hat's filters would sit above Nyquist
+        bool low = true;
+        for (double sr : { 16000.0, 22050.0 })
+            for (auto& set : m::soundSets)
+            {
+                const auto s = m::makeSounds (set.id, sr);
+                for (const auto* b : { &s.accent, &s.beat, &s.sub, &s.poly, &s.alt })
+                    for (float v : *b) low = low && std::isfinite (v);
+                low = low && std::abs (peak (s.accent) - 1.0f) < 1e-6f && std::abs (peak (s.beat) - 0.8f) < 1e-6f;
+            }
+        expect ("every set at 16 and 22.05 kHz: finite, at its levels", low);
         expect ("an unknown set is the classic click", m::makeSounds ("nope", 48000).beat == m::makeSounds ("classic", 48000).beat);
         expect ("only Kick and hat has an alt sound", ! m::makeSounds ("groove", 48000).alt.empty() && m::makeSounds ("classic", 48000).alt.empty());
 

@@ -536,10 +536,12 @@ namespace vs::metronome
         return x;
     }
 
-    // A biquad (RBJ cookbook) over the whole buffer, in place
+    // A biquad (RBJ cookbook) over the whole buffer, in place. The frequency is
+    // kept at or under 0.45 of the sample rate, so a filter set above it (the
+    // hats' 12 kHz at 22.05 kHz) stays stable.
     inline void biquad (Buffer& x, double sr, BiquadCoefs::Type type, double hz, double q)
     {
-        filterDirectFormI (BiquadCoefs::rbjRaw (type, sr, hz, q), x.data(), (int) x.size());
+        filterDirectFormI (BiquadCoefs::rbjRaw (type, sr, std::min (hz, sr * 0.45), q), x.data(), (int) x.size());
     }
 
     // Starts a sound where it first gets loud: filters ease into a hit, and a
