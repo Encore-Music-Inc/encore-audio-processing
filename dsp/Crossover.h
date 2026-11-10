@@ -2,13 +2,14 @@
 
 #include <cmath>
 #include <cstring>
+#include "Svf.h"
 
 namespace vs
 {
     // 4th-order Linkwitz-Riley filter for band splits: two cascaded
     // 2nd-order Butterworth sections, each a topology-preserving
-    // state-variable filter. The low-pass and high-pass at the same cut-off
-    // sum to an all-pass, so bands split with them recombine flat; the
+    // state-variable filter (Svf.h). The low-pass and high-pass at the same
+    // cut-off sum to an all-pass, so bands split with them recombine flat; the
     // all-pass type is that sum, for keeping a band that skips a split in
     // phase with the ones that went through it. Up to two channels; the
     // same filters run on the desktop and in the browser.
@@ -36,11 +37,8 @@ namespace vs
         // one Butterworth 2nd-order section; returns its low-pass or high-pass output
         T section (int ch, int k, T x, bool lowPass)
         {
-            T* s = st[ch & 1][k];
-            const T hp = (x - (T) (2 * R + g) * s[0] - s[1]) * h;
-            const T bp = g * hp + s[0]; s[0] = g * hp + bp;
-            const T lpv = g * bp + s[1]; s[1] = g * bp + lpv;
-            return lowPass ? lpv : hp;
+            const auto o = svfStep (x, st[ch & 1][k], g, (T) (2 * R + g), h);
+            return lowPass ? o.lowPass : o.highPass;
         }
 
         void update()
