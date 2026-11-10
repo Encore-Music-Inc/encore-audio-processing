@@ -197,7 +197,7 @@ namespace vs
             if (mode == Normalize::off) return r;
             const float peak = peakOf (ch, numCh, n);
             if (peak < 1e-9) { r.outcome = NormalizeResult::silent; return r; }
-            const double peakRoom = -1 - 20 * std::log10 ((double) peak);
+            const double peakRoom = -1 - db20 ((double) peak, 0.0);
             double gainDb = peakRoom;
             r.outcome = NormalizeResult::applied;
             if (mode == Normalize::lufs)
@@ -213,7 +213,7 @@ namespace vs
                 }
             }
             r.gainDb = gainDb;
-            const double g = std::pow (10.0, gainDb / 20);
+            const double g = gainFromDb (gainDb);
             if (std::abs (gainDb) > 1e-6)
                 for (int c = 0; c < numCh; ++c)
                     for (int i = 0; i < n; ++i) ch[c][i] = (float) (ch[c][i] * g);

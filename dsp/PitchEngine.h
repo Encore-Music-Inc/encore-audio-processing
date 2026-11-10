@@ -4,10 +4,12 @@
 #include <array>
 #include <atomic>
 #include <vector>
+#include "DelayLine.h"
 #include "Music.h"
 #include "PitchDetector.h"
 #include "Scales.h"
 #include "Util.h"
+#include "Windows.h"
 
 namespace vs
 {
@@ -60,8 +62,8 @@ namespace vs
             in.assign (ringSize, 0.0f);
             for (auto& v : voices)
                 v.acc.assign (ringSize, 0.0f);
-            for (int i = 0; i <= hannSize; ++i)
-                hann[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) hannSize);
+            const auto h = windows::hannPeriodicFloat (hannSize, hannSize + 1);
+            std::copy (h.begin(), h.end(), hann.begin());
 
             const juce::dsp::ProcessSpec mono { fs, 512, 1 };
             for (auto& d : humanDelay)
@@ -232,13 +234,12 @@ namespace vs
 
         float readIn (double pos) const
         {
-            auto i = (juce::int64) std::floor (pos);
-            float f = (float) (pos - (double) i);
+            // kept to what the ring still holds (whole samples at the ends)
+            const auto i = (juce::int64) std::floor (pos);
             const juce::int64 lo = w - ringSize + 2, hi = w - 2;
-            if (i < lo) { i = lo; f = 0.0f; }
-            if (i > hi) { i = hi; f = 0.0f; }
-            const float a = in[(size_t) (i & mask)], b = in[(size_t) ((i + 1) & mask)];
-            return a + f * (b - a);
+            if (i < lo) pos = (double) lo;
+            if (i > hi) pos = (double) hi;
+            return readLinear (in.data(), mask, pos);
         }
 
         void detect()

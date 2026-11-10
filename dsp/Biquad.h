@@ -4,6 +4,7 @@
 #include <complex>
 #include <vector>
 #include "JuceInclude.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -20,7 +21,7 @@ namespace vs
             const double w = juce::MathConstants<double>::twoPi * freq / fs;
             const std::complex<double> z1 = std::polar (1.0, -w), z2 = z1 * z1;
             const auto h = (b0 + b1 * z1 + b2 * z2) / (1.0 + a1 * z1 + a2 * z2);
-            return 20.0 * std::log10 (std::max (std::abs (h), 1.0e-12));
+            return db20 (std::max (std::abs (h), 1.0e-12), 0.0);
         }
 
         static BiquadCoefs make (double b0, double b1, double b2, double a0, double a1, double a2)

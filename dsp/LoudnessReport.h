@@ -6,6 +6,7 @@
 #include <vector>
 #include "Loudness.h"
 #include "TruePeak.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -43,11 +44,9 @@ namespace vs
 
     namespace loudness
     {
-        inline double db10 (double x) { return 10.0 * std::log10 (x + 1e-20); }
-        inline double db20 (double x) { return 20.0 * std::log10 (x + 1e-12); }
-
-        // Rounds half toward +infinity (half up), as the browser does.
-        inline double roundHalfUp (double x) { return std::floor (x + 0.5); }
+        using vs::db10;
+        using vs::db20;
+        using vs::roundHalfUp;
 
         // The loudness figures that come from a meter's recorded block
         // energies (blockLength samples per block) and its integrated

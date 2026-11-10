@@ -20,6 +20,17 @@ namespace vs
             return w;
         }
 
+        // Periodic Hann worked out in float, for i = 0..count - 1 (count
+        // defaults to n; n + 1 adds the closing zero, for a table read between
+        // its points). The live processors window their FFT frames with it.
+        inline std::vector<float> hannPeriodicFloat (int n, int count = -1)
+        {
+            constexpr float twoPi = (float) (2 * 3.141592653589793238L);
+            std::vector<float> w ((size_t) (count < 0 ? n : count));
+            for (size_t i = 0; i < w.size(); ++i) w[i] = 0.5f - 0.5f * std::cos (twoPi * (float) i / (float) n);
+            return w;
+        }
+
         // Symmetric Hann, 0.5 - 0.5 cos (2 pi i / (n - 1)): zero at both ends.
         inline std::vector<double> hannSymmetric (int n)
         {

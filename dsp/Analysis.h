@@ -422,7 +422,7 @@ namespace vs
                         if (v != 0.0)
                         {
                             ++gridChecked;
-                            if (std::abs (v - std::floor (v + 0.5)) > 1e-4) { ++gridOff; gridDone[c] = true; }
+                            if (std::abs (v - roundHalfUp (v)) > 1e-4) { ++gridOff; gridDone[c] = true; }
                         }
                     }
                 }

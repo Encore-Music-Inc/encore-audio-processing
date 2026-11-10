@@ -7,6 +7,7 @@
 #include <vector>
 #include "Fft.h"
 #include "Windows.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -109,7 +110,7 @@ namespace vs
             analyse();
             for (size_t b = 0; b < mag.size(); ++b)
             {
-                const float d = 20.0f * std::log10 (mag[b] + 1e-9f);
+                const float d = ampToDb (mag[b]);
                 db[b] += (d > db[b] ? opt.attack : opt.release) * (d - db[b]);
                 pow[b] += opt.powerSmoothing * (mag[b] * mag[b] - pow[b]);
             }
@@ -136,7 +137,7 @@ namespace vs
         // 20 log10 of each magnitude as it is (-inf for 0), after analyse() or update()
         const std::vector<float>& decibels()
         {
-            for (size_t b = 0; b < mag.size(); ++b) dbNow[b] = 20.0f * std::log10 (mag[b]);
+            for (size_t b = 0; b < mag.size(); ++b) dbNow[b] = ampToDb (mag[b], 0.0f);
             return dbNow;
         }
 
@@ -270,8 +271,6 @@ namespace vs
         }
 
     private:
-        static double db10 (double x) { return 10.0 * std::log10 (x + 1e-20); }
-
         void analyseFrame()
         {
             std::vector<double> re ((size_t) N), im ((size_t) N, 0.0);

@@ -5,6 +5,7 @@
 #include <string_view>
 #include <vector>
 #include "Biquad.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -130,7 +131,7 @@ namespace vs
         // The chain's gain at freq, dB (the curve to draw)
         double magnitudeDb (double freq) const
         {
-            return 20.0 * std::log10 (std::max (1.0e-12, sectionsResponse (chain.getSections(), freq, fs)));
+            return db20 (std::max (1.0e-12, sectionsResponse (chain.getSections(), freq, fs)), 0.0);
         }
 
     private:

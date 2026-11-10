@@ -3,6 +3,7 @@
 #include "JuceInclude.h"
 #include <array>
 #include <vector>
+#include "DelayLine.h"
 #include "Util.h"
 
 namespace vs
@@ -43,15 +44,15 @@ namespace vs
         {
             fs = sampleRate;
             const int maxDelay = (int) (0.45 * fs) + 16; // longest line (Huge, size 1) + mod
-            for (auto& l : lines) l.init (maxDelay);
-            for (auto& d : diffL) d.init ((int) (0.05 * fs));
-            for (auto& d : diffR) d.init ((int) (0.05 * fs));
-            pre.init ((int) (0.26 * fs) + 4);
-            preL.init ((int) (0.26 * fs) + 4);
-            preR.init ((int) (0.26 * fs) + 4);
-            er.init ((int) (0.12 * fs) + 4);
-            for (auto& s : springs) s.delay.init ((int) (0.12 * fs));
-            shimBuf.assign (shimSize, 0.0f);
+            for (auto& l : lines) l.prepare (maxDelay);
+            for (auto& d : diffL) d.prepare ((int) (0.05 * fs));
+            for (auto& d : diffR) d.prepare ((int) (0.05 * fs));
+            pre.prepare ((int) (0.26 * fs) + 4);
+            preL.prepare ((int) (0.26 * fs) + 4);
+            preR.prepare ((int) (0.26 * fs) + 4);
+            er.prepare ((int) (0.12 * fs) + 4);
+            for (auto& s : springs) s.delay.prepare ((int) (0.12 * fs));
+            shimLine.prepare (shimSize - 4);
             juce::ignoreUnused (maxBlock);
             reset();
             applySettings (settings, true);
@@ -65,8 +66,7 @@ namespace vs
             pre.clear(); preL.clear(); preR.clear();
             er.clear();
             for (auto& s : springs) { s.delay.clear(); for (auto& a : s.ap) a = 0.0f; s.lp = s.hp = 0.0f; }
-            std::fill (shimBuf.begin(), shimBuf.end(), 0.0f);
-            shimWrite = 0; shimPhase = 0.0f;
+            shimLine.clear(); shimPhase = 0.0f;
             for (auto& v : damp) v = 0.0f;
             for (auto& p : lfoPhase) p = 0.0f;
             duckEnv = 0.0f; duckGain = 1.0f;
@@ -95,7 +95,7 @@ namespace vs
 
                 // Ducking follows the dry input level
                 const float lvl = std::max (std::abs (xl), std::abs (xr));
-                duckEnv = lvl > duckEnv ? duckEnv + duckAtk * (lvl - duckEnv) : duckEnv + duckRel * (lvl - duckEnv);
+                followEnvelope (duckEnv, lvl, duckAtk, duckRel);
                 const float duckAmt = settings.duck * juce::jlimit (0.0f, 1.0f, (ampToDb (duckEnv) + 45.0f) / 30.0f);
                 const float duckTarget = 1.0f - 0.85f * duckAmt;
                 duckGain += 0.002f * (duckTarget - duckGain);
@@ -136,7 +136,7 @@ namespace vs
                 wl = hl2; wr = hr2;
 
                 // Width (mid/side)
-                const float mid = 0.5f * (wl + wr), side = 0.5f * (wl - wr) * settings.width;
+                const float mid = midOf (wl, wr), side = sideOf (wl, wr) * settings.width;
                 const float g = duckGain * fade * outGain;
                 outL[i] = (mid + side) * g;
                 outR[i] = (mid - side) * g;
@@ -144,32 +144,7 @@ namespace vs
         }
 
     private:
-        //======================================================================
-        struct Delay
-        {
-            std::vector<float> buf;
-            int mask = 0, w = 0;
-
-            void init (int maxSamples)
-            {
-                int size = 1;
-                while (size < maxSamples + 4) size <<= 1;
-                buf.assign ((size_t) size, 0.0f);
-                mask = size - 1;
-                w = 0;
-            }
-            void clear() { std::fill (buf.begin(), buf.end(), 0.0f); w = 0; }
-            void write (float x) { buf[(size_t) w] = x; w = (w + 1) & mask; }
-            // delay >= 1 sample (1 = newest), fractional, linear interpolation
-            float read (float delay) const
-            {
-                const float pos = (float) w - delay;
-                const int i = (int) std::floor (pos);
-                const float f = pos - (float) i;
-                const float a = buf[(size_t) (i & mask)], b = buf[(size_t) ((i + 1) & mask)];
-                return a + f * (b - a);
-            }
-        };
+        using Delay = DelayLine;
 
         //======================================================================
         void applySettings (const Settings& s, bool rebuildMode)
@@ -335,7 +310,7 @@ namespace vs
         // +12 semitone shifter, plenty clean for a washy shimmer tail.
         float shimmerShift (float x)
         {
-            shimBuf[(size_t) shimWrite] = x;
+            shimLine.put (x);
             const float win = 0.06f * (float) fs;
             shimPhase += 1.0f / win; // (ratio - 1) / window, ratio = 2
             if (shimPhase >= 1.0f) shimPhase -= 1.0f;
@@ -345,15 +320,10 @@ namespace vs
             {
                 float p = shimPhase + 0.5f * (float) k;
                 if (p >= 1.0f) p -= 1.0f;
-                const float delay = (1.0f - p) * win + 2.0f;
-                const float pos = (float) shimWrite - delay;
-                const int i0 = (int) std::floor (pos);
-                const float f = pos - (float) i0;
-                const float a = shimBuf[(size_t) (i0 & (shimSize - 1))], b = shimBuf[(size_t) ((i0 + 1) & (shimSize - 1))];
                 const float gain = std::sin (juce::MathConstants<float>::pi * p); // fades in/out at the jumps
-                out += (a + f * (b - a)) * gain * gain;
+                out += shimLine.read ((1.0f - p) * win + 2.0f) * gain * gain;
             }
-            shimWrite = (shimWrite + 1) & (shimSize - 1);
+            shimLine.advance();
             return out;
         }
 
@@ -414,8 +384,7 @@ namespace vs
         std::array<Spring, 2> springs;
         float springLpC = 0.5f, springHpC = 0.01f;
 
-        std::vector<float> shimBuf;
-        int shimWrite = 0;
+        Delay shimLine;
         float shimPhase = 0.0f, shimGain = 0.0f;
 
         float preSamples = 1.0f, inLp[2] {}, inLpC = 0.9f;

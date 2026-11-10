@@ -1,8 +1,8 @@
 #pragma once
 
-#include <juce_dsp/juce_dsp.h>
-#include <vector>
+#include "JuceInclude.h"
 #include "Biquad.h"
+#include "DelayLine.h"
 #include "Util.h"
 
 namespace vs
@@ -20,9 +20,7 @@ namespace vs
         void prepare (double sampleRate)
         {
             fs = sampleRate;
-            size = juce::nextPowerOfTwo ((int) (0.06 * fs) + 4);
-            buf.assign ((size_t) size, 0.0f);
-            write = 0;
+            line.prepare ((int) (0.06 * fs));
             phaseA = 0.0; phaseB = 0.37;
             hp1.c = BiquadCoefs::highPass (fs, 150.0, 0.7071);
             hp2.c = hp1.c;
@@ -38,15 +36,15 @@ namespace vs
             if (! width.isSmoothing() && width.getTargetValue() <= 0.0f)
             {
                 // still keep the delay line fed, so turning it on is seamless
-                for (int i = 0; i < n; ++i) { buf[(size_t) write] = 0.5f * (l[i] + r[i]); write = (write + 1) & (size - 1); }
+                for (int i = 0; i < n; ++i) line.write (midOf (l[i], r[i]));
                 return;
             }
 
             const double incA = 0.31 / fs, incB = 0.47 / fs;
             for (int i = 0; i < n; ++i)
             {
-                const float mid = 0.5f * (l[i] + r[i]), side = 0.5f * (l[i] - r[i]);
-                buf[(size_t) write] = mid;
+                const float mid = midOf (l[i], r[i]), side = sideOf (l[i], r[i]);
+                line.put (mid);
 
                 // delays in samples: A 14 ms +-1.1 ms, B 23 ms +-1.3 ms (about 4 and 7 cents of drift)
                 const double dA = fs * (0.014 + 0.0011 * std::sin (juce::MathConstants<double>::twoPi * phaseA));
@@ -54,9 +52,9 @@ namespace vs
                 phaseA += incA; if (phaseA >= 1.0) phaseA -= 1.0;
                 phaseB += incB; if (phaseB >= 1.0) phaseB -= 1.0;
 
-                const float copy = 0.62f * read (dA) - 0.62f * read (dB);
+                const float copy = 0.62f * line.readHermite (dA) - 0.62f * line.readHermite (dB);
                 const float s = hp2.process (0, hp1.process (0, copy));
-                write = (write + 1) & (size - 1);
+                line.advance();
 
                 // The copies add up to ~0.77 of the guitar's power on each side;
                 // the trim splits the difference between "mono stays the
@@ -70,21 +68,8 @@ namespace vs
         }
 
     private:
-        // 4-point cubic (Hermite) read, delay in samples behind the write head
-        float read (double delay) const
-        {
-            const double pos = (double) write - delay;
-            const int i0 = (int) std::floor (pos);
-            const float t = (float) (pos - i0);
-            auto at = [this] (int i) { return buf[(size_t) (i & (size - 1))]; };
-            const float xm1 = at (i0 - 1), x0 = at (i0), x1 = at (i0 + 1), x2 = at (i0 + 2);
-            const float c1 = 0.5f * (x1 - xm1), c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2, c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
-            return ((c3 * t + c2) * t + c1) * t + x0;
-        }
-
         double fs = 48000.0, phaseA = 0.0, phaseB = 0.0;
-        int size = 4096, write = 0;
-        std::vector<float> buf;
+        DelayLine line;
         Biquad hp1, hp2;
         juce::SmoothedValue<float> width;
     };

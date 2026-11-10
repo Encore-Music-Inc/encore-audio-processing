@@ -7,6 +7,7 @@
 #include "Biquad.h"
 #include "Fft.h"
 #include "Util.h"
+#include "Windows.h"
 
 // Strum's Body stage: make a pickup (DI) sound like a mic on the same guitar.
 //
@@ -125,9 +126,7 @@ namespace vs
             size = 1 << order;
             hop = size / 2;
             fft.setSize (size);
-            window.resize ((size_t) size);
-            for (int i = 0; i < size; ++i)
-                window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) size);
+            window = windows::hannPeriodicFloat (size);
             ringDi.assign ((size_t) size, 0.0f);
             ringMic.assign ((size_t) size, 0.0f);
             work.assign ((size_t) size, 0.0f);
@@ -233,7 +232,7 @@ namespace vs
 
             std::array<float, BodyCurve::numPoints> ratio {};
             for (int i = 0; i < BodyCurve::numPoints; ++i)
-                if (ok[(size_t) i]) ratio[(size_t) i] = (float) (10.0 * std::log10 (pm[(size_t) i] / pd[(size_t) i]));
+                if (ok[(size_t) i]) ratio[(size_t) i] = (float) db10 (pm[(size_t) i] / pd[(size_t) i], 0.0);
             // untrusted points take the nearest trusted value
             for (int i = 0; i < BodyCurve::numPoints; ++i)
                 if (! ok[(size_t) i])

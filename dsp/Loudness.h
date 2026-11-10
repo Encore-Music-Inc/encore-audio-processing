@@ -5,6 +5,7 @@
 #include <vector>
 #include "Biquad.h"
 #include "TruePeak.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -151,7 +152,7 @@ namespace vs
             boxBuf.assign ((size_t) look, 1.0f);
             minQ.assign ((size_t) window + 4, { 0, 1.0f });
             scratch.setSize (2, maxBlock);
-            relCoef = (float) (1.0 - std::exp (-1.0 / (0.08 * sampleRate)));
+            relCoef = onePole (80.0f, sampleRate);
             fs = sampleRate;
             reset();
         }
@@ -201,7 +202,7 @@ namespace vs
         // 0.3 dB of margin: a 4x detector can under-read the very top octave, and
         // the ceiling should hold even when measured more strictly than BS.1770
         void setCeilingDb (float db) { ceiling = std::pow (10.0f, db / 20.0f); target = ceiling * 0.966f; }
-        void setReleaseMs (float ms, double) { relCoef = (float) (1.0 - std::exp (-1.0 / (ms * 0.001 * fs))); }
+        void setReleaseMs (float ms, double) { relCoef = onePole (ms, fs); }
 
         void process (juce::dsp::AudioBlock<float>& block)
         {
@@ -251,7 +252,7 @@ namespace vs
                 dIdx = (dIdx + 1) % delayLen;
                 ++t;
             }
-            grDb.store (20.0f * std::log10 (std::max (minGain, 1e-6f)));
+            grDb.store (ampToDb (std::max (minGain, 1e-6f), 0.0f));
         }
 
         std::atomic<float> grDb { 0.0f };

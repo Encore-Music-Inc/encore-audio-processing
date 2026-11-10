@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include "Dynamics.h"
 #include "Util.h"
 
 namespace vs
@@ -58,8 +59,8 @@ namespace vs
                 rms += rmsCoef * (sq - rms);
                 const float levelDb = style == smooth ? powerToDb (rms) + 3.0f : ampToDb (peak);
 
-                const float target = computeGain (levelDb) - levelDb; // <= 0
-                grDb += (target < grDb ? atk : rel) * (target - grDb);
+                const float target = dynamics::compressedDb (levelDb, thresholdDb, ratio, kneeDb) - levelDb; // <= 0
+                followEnvelope (grDb, target, rel, atk); // the cut deepens at the attack rate
                 maxGr = std::max (maxGr, -grDb);
 
                 const float g = dbToGain (grDb + makeupDb);
@@ -73,18 +74,7 @@ namespace vs
         std::atomic<float> meterDb { 0.0f };
 
     private:
-        float computeGain (float x) const
-        {
-            constexpr float knee = 6.0f;
-            const float d = x - thresholdDb;
-            if (2.0f * d < -knee) return x;
-            if (2.0f * std::abs (d) <= knee)
-            {
-                const float t = d + knee * 0.5f;
-                return x + (1.0f / ratio - 1.0f) * t * t / (2.0f * knee);
-            }
-            return thresholdDb + d / ratio;
-        }
+        static constexpr float kneeDb = 6.0f;
 
         double fs = 44100.0;
         float amount = 0.35f;

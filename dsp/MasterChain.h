@@ -5,6 +5,7 @@
 #include <atomic>
 #include "Biquad.h"
 #include "Crossover.h"
+#include "Dynamics.h"
 #include "Loudness.h"
 #include "Saturator.h"
 #include "ReverbEngine.h"
@@ -356,7 +357,7 @@ namespace vs
                 // up to 1.5: ratio ~5.5:1 for the heaviest styles (Heavy)
                 const float a = juce::jlimit (0.0f, 1.5f, st.comp[band] * amount);
                 const float thr = learned.bandLevelDb[band] + 6.0f - a * 10.0f;
-                const float ratio = 1.0f + a * 3.0f;
+                const float ratio = 1.0f + a * 3.0f, slope = 1.0f - 1.0f / ratio;
                 const float speed = st.fast ? 0.5f : 1.0f;
                 const float atk = onePole (atkMs[band] * speed, fs), rel = onePole (relMs[band] * speed, fs);
                 float maxGr = 0.0f;
@@ -364,13 +365,9 @@ namespace vs
                 {
                     const float xl = bands[(size_t) band][(size_t) i], xr = bandsR[(size_t) band][(size_t) i];
                     const float sq = std::max (xl * xl, xr * xr);
-                    bandEnv[band] += (sq > bandEnv[band] ? atk : rel) * (sq - bandEnv[band]);
+                    followEnvelope (bandEnv[band], sq, atk, rel);
                     const float lvl = powerToDb (bandEnv[band]);
-                    const float over = lvl - thr;
-                    // 6 dB soft knee
-                    float gr = 0.0f;
-                    if (over > 3.0f) gr = over * (1.0f - 1.0f / ratio);
-                    else if (over > -3.0f) gr = (1.0f - 1.0f / ratio) * (over + 3.0f) * (over + 3.0f) / 12.0f;
+                    const float gr = dynamics::cutDb (lvl - thr, slope, 6.0f); // 6 dB soft knee
                     grDb[band] = gr;
                     maxGr = std::max (maxGr, gr);
                     const float g = dbToGain (-gr);
@@ -463,7 +460,7 @@ namespace vs
             // difference into the five tone bands.
             double bandDb[numAnalysis];
             for (int k = 0; k < numAnalysis; ++k)
-                bandDb[k] = 10.0 * std::log10 (analysisAcc[k] / std::max (1.0, analysisSeconds * fs) + 1e-20);
+                bandDb[k] = db10 (analysisAcc[k] / std::max (1.0, analysisSeconds * fs));
 
             auto reference = [] (float f)
             {
@@ -510,7 +507,7 @@ namespace vs
                 if (analysisFreq (k) >= lo[band] && analysisFreq (k) < hi[band]) s += analysisAcc[k];
             // 1/3-octave-ish bands overlap ~2x and cover the range: rough but stable
             const double meanSq = s / std::max (1.0, analysisSeconds * fs) * 0.5;
-            return juce::jlimit (-60.0f, 0.0f, (float) (10.0 * std::log10 (meanSq + 1e-20)) + 3.0f);
+            return juce::jlimit (-60.0f, 0.0f, (float) db10 (meanSq) + 3.0f);
         }
 
         double fs = 48000.0;

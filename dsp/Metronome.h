@@ -22,6 +22,7 @@
 #include <vector>
 #include "Biquad.h"
 #include "Random.h"
+#include "Util.h"
 
 namespace vs::metronome
 {
@@ -32,13 +33,6 @@ namespace vs::metronome
     inline float peakOf (float peak, float v)
     {
         return std::isnan (peak) || std::isnan (v) ? std::numeric_limits<float>::quiet_NaN() : std::max (peak, std::abs (v));
-    }
-
-    // Rounds half up, as a browser's Math.round does (2.5 to 3, -2.5 to -2)
-    inline double roundHalfUp (double x)
-    {
-        const double f = std::floor (x);
-        return x - f >= 0.5 ? f + 1.0 : f;
     }
 
     // 0 and NaN count as missing

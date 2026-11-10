@@ -160,7 +160,7 @@ namespace vs
         }
 
         // The current match gain, dB (what "hear the original" adds to the original)
-        float matchGainDb() const { return 20.0f * std::log10 (std::max (1e-9f, matchGain.getCurrent())); }
+        float matchGainDb() const { return ampToDb (std::max (1e-9f, matchGain.getCurrent()), 0.0f); }
         float originalShortTerm() const { return originalMeter.shortTerm.load(); }
         float processedShortTerm() const { return processedMeter.shortTerm.load(); }
 

@@ -2,6 +2,8 @@
 
 #include <array>
 #include "Biquad.h"
+#include "Dynamics.h"
+#include "Util.h"
 
 namespace vs
 {
@@ -136,8 +138,8 @@ namespace vs
             avgC = 1.0f - std::exp (-1.0f / (0.01f * (float) fs));
             envB = envF = 1.0e-9f;
             cutDb = 0.0f;
-            eq.reset(); det.reset();
-            lastAppliedDb = 999.0f;
+            bell.prepare (fs, settings.freq, settings.q, -dynamics::noLimit);
+            bell.restart(); det.reset();
             setSettings (settings);
         }
 
@@ -145,6 +147,7 @@ namespace vs
         {
             settings = s;
             det.c = BiquadCoefs::bandPass (fs, s.freq, std::max (1.0f, s.q));
+            bell.setShape (s.freq, s.q);
         }
 
         float currentCutDb() const { return cutDb; }
@@ -152,7 +155,7 @@ namespace vs
         void process (float* const* ch, int numCh, int start, int len)
         {
             if (! settings.on) { cutDb = 0.0f; wasOn = false; return; }
-            if (! wasOn) { eq.reset(); det.reset(); lastAppliedDb = 999.0f; wasOn = true; }
+            if (! wasOn) { bell.restart(); det.reset(); wasOn = true; }
 
             for (int i = start; i < start + len; ++i)
             {
@@ -165,31 +168,22 @@ namespace vs
             }
 
             const float relDb = 10.0f * std::log10 ((envB + 1e-12f) / (envF + 1e-12f));
-            const float fullDb = 10.0f * std::log10 (envF + 1e-12f);
-            const float over = relDb - settings.thresholdDb;
-            const float target = (over > 0.0f && fullDb > -70.0f) ? std::min (settings.rangeDb, over * 1.5f) : 0.0f;
+            const float fullDb = powerToDb (envF);
+            const float target = fullDb > -70.0f ? dynamics::cutDb (relDb - settings.thresholdDb, 1.5f, 0.0f, settings.rangeDb) : 0.0f;
 
             // clamp down fast (3 ms), let go slowly (120 ms)
-            const float blockSec = (float) len / (float) fs;
-            const float tau = target > cutDb ? 0.003f : 0.12f;
-            cutDb += (1.0f - std::exp (-blockSec / tau)) * (target - cutDb);
+            dynamics::glideCut (cutDb, target, (float) len / (float) fs, 0.003f, 0.12f, false);
 
-            if (std::abs (cutDb - lastAppliedDb) > 0.05f)
-            {
-                lastAppliedDb = cutDb;
-                eq.c = BiquadCoefs::peak (fs, settings.freq, settings.q, -cutDb);
-            }
-
-            for (int c = 0; c < numCh; ++c)
-                for (int i = start; i < start + len; ++i)
-                    ch[c][i] = eq.process (c, ch[c][i]);
+            // the bell is designed even for the shallowest cut (never switched to flat)
+            bell.process (ch, numCh, start, len, cutDb);
         }
 
     private:
         double fs = 48000.0;
         Settings settings;
-        Biquad det, eq;
-        float avgC = 0.01f, envB = 0.0f, envF = 0.0f, cutDb = 0.0f, lastAppliedDb = 999.0f;
+        Biquad det;
+        DynamicBell bell;
+        float avgC = 0.01f, envB = 0.0f, envF = 0.0f, cutDb = 0.0f;
         bool wasOn = false;
     };
 
@@ -218,11 +212,9 @@ namespace vs
             {
                 det[k].c = BiquadCoefs::bandPass (fs, bandFreq (k), 3.0);
                 det[k].reset();
-                cut[k].reset();
-                cut[k].c = BiquadCoefs {};
+                cut[k].prepare (fs, bandFreq (k), 2.8, -dynamics::noLimit, 0.8f); // the bell is 0.8 of the band's gain
                 env[k] = 1.0e-9f;
                 gainDb[k] = 0.0f;
-                applied[k] = 0.0f;
             }
             setSettings (settings);
         }
@@ -262,12 +254,12 @@ namespace vs
                 }
                 for (int k = 0; k < numBands; ++k)
                 {
-                    bandDb[k] = 10.0f * std::log10 (env[k] + 1e-12f);
+                    bandDb[k] = powerToDb (env[k]);
                     maxDb = std::max (maxDb, bandDb[k]);
                 }
             }
 
-            const float scDb = 10.0f * std::log10 (totalPow / (float) std::max (1, len) + 1e-12f);
+            const float scDb = powerToDb (totalPow / (float) std::max (1, len));
             const float activity = active ? juce::jlimit (0.0f, 1.0f, (scDb + 50.0f) / 20.0f) : 0.0f;
             const float blockSec = (float) len / (float) fs;
 
@@ -287,42 +279,34 @@ namespace vs
                     const float weight = w * w * w;
                     target = -settings.depthDb * weight * activity * edgeLo * edgeHi;
                 }
-                const float tau = (target < gainDb[k] ? atk : rel) * 0.001f;
-                gainDb[k] += (1.0f - std::exp (-blockSec / tau)) * (target - gainDb[k]);
-
-                if (std::abs (gainDb[k] - applied[k]) > 0.05f)
-                {
-                    applied[k] = gainDb[k];
-                    cut[k].c = BiquadCoefs::peak (fs, bandFreq (k), 2.8, gainDb[k] * 0.8f);
-                }
+                // the gains are cuts (0 or below); glided as cut depths
+                float depth = -gainDb[k];
+                dynamics::glideCut (depth, -target, blockSec, atk * 0.001f, rel * 0.001f, false);
+                gainDb[k] = 0.0f - depth; // (a gain of no cut is +0)
+                cut[k].setCut (depth);
             }
 
             if (! active && allFlat()) { running = false; return; }
-            if (! running) { for (auto& b : cut) b.reset(); running = true; }
+            if (! running) { for (auto& b : cut) b.clearState(); running = true; }
 
             // All bands always run while carving (a 0 dB bell is exact
             // pass-through), so no filter ever restarts from stale state.
-            for (int c = 0; c < numCh; ++c)
-                for (int i = start; i < start + len; ++i)
-                {
-                    float x = ch[c][i];
-                    for (int k = 0; k < numBands; ++k)
-                        x = cut[k].process (c, x);
-                    ch[c][i] = x;
-                }
+            for (int k = 0; k < numBands; ++k)
+                cut[k].filter (ch, numCh, start, len);
         }
 
     private:
         bool allFlat() const
         {
-            for (int k = 0; k < numBands; ++k) if (applied[k] < -0.001f) return false;
+            for (int k = 0; k < numBands; ++k) if (cut[k].appliedCutDb() > 0.001f) return false;
             return true;
         }
 
         double fs = 48000.0;
         Settings settings;
-        Biquad det[numBands], cut[numBands];
-        float env[numBands] {}, gainDb[numBands] {}, applied[numBands] {};
+        Biquad det[numBands];
+        DynamicBell cut[numBands];
+        float env[numBands] {}, gainDb[numBands] {};
         float envC = 0.01f, atk = 40.0f, rel = 200.0f;
         bool hasSidechain = false, running = false;
     };
