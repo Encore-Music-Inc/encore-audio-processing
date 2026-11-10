@@ -3,9 +3,9 @@
 // Linkwitz-Riley crossover. Built without JUCE, as the browser build is. Each
 // check prints PASS or FAIL; the suite exits non-zero on any failure.
 #include <cmath>
+#include <algorithm>
 #include <complex>
 #include <cstdio>
-#include <cstring>
 #include <random>
 #include <vector>
 #include "dsp/Fft.h"
@@ -209,7 +209,9 @@ namespace
     {
         // the same output as a plain FIR over the zero-stuffed signal (which is
         // what the ring buffers and skipped zeros must reproduce), for the
-        // default filter and the limiter's longer one
+        // default filter and the limiter's longer one. Compilers add the terms
+        // in different orders, so it's the same to float rounding: the error
+        // against the sum of the terms' sizes.
         for (const auto [numTaps, beta] : { std::pair { 63, 8.0 }, std::pair { 127, 10.0 } })
         {
             vs::Oversampler<float> os (1, 1, numTaps, beta);
@@ -229,20 +231,22 @@ namespace
             std::vector<float> x (src.begin(), src.end());
             const float* in[1] { x.data() };
             auto* const* up = os.processSamplesUp (in, 1, n);
-            bool same = true;
+            double worst = 0.0;
             for (int i = 0; i < 2 * n; ++i)
             {
-                float acc = 0.0f;
+                double acc = 0.0, size = 0.0;
                 for (int k = 0; k < taps; ++k)
                 {
                     const int j = i - k;
-                    acc += h[(size_t) k] * ((j >= 0 && (j & 1) == 0) ? x[(size_t) (j / 2)] * 2.0f : 0.0f);
+                    const double term = (double) h[(size_t) k] * ((j >= 0 && (j & 1) == 0) ? x[(size_t) (j / 2)] * 2.0 : 0.0);
+                    acc += term;
+                    size += std::abs (term);
                 }
-                same = same && std::memcmp (&acc, &up[0][i], sizeof (float)) == 0;
+                if (size > 0.0) worst = std::max (worst, std::abs (acc - (double) up[0][i]) / size);
             }
             char name[96];
-            std::snprintf (name, sizeof (name), "Oversampler up (%d taps): bit-for-bit a plain FIR over the zero-stuffed signal", taps);
-            expect (name, same);
+            std::snprintf (name, sizeof (name), "Oversampler up (%d taps): a plain FIR over the zero-stuffed signal", taps);
+            expect (name, worst < 1.0e-6, worst);
         }
 
         // passband and level: a 1 kHz sine at 48 kHz through 2x up and down comes out the same, delayed
