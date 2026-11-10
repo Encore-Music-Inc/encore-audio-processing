@@ -35,34 +35,43 @@ namespace vs
         // 0 dB-at-centre form.
         enum class Type { lowPass, highPass, bandPass, notch, peak, lowShelf, highShelf };
 
-        static BiquadCoefs rbj (Type type, double fs, double f, double q, double gainDb = 0.0)
+        // The six coefficients as the cookbook gives them, before dividing by a0.
+        struct Raw { double b0 = 1.0, b1 = 0.0, b2 = 0.0, a0 = 1.0, a1 = 0.0, a2 = 0.0; };
+
+        static Raw rbjRaw (Type type, double fs, double f, double q, double gainDb = 0.0)
         {
             const double w = juce::MathConstants<double>::twoPi * f / fs, alpha = std::sin (w) / (2.0 * q), c = std::cos (w);
             switch (type)
             {
-                case Type::lowPass:  return make ((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + alpha, -2 * c, 1 - alpha);
-                case Type::highPass: return make ((1 + c) / 2, -(1 + c), (1 + c) / 2, 1 + alpha, -2 * c, 1 - alpha);
-                case Type::bandPass: return make (alpha, 0.0, -alpha, 1 + alpha, -2 * c, 1 - alpha);
-                case Type::notch:    return make (1, -2 * c, 1, 1 + alpha, -2 * c, 1 - alpha);
+                case Type::lowPass:  return { (1 - c) / 2, 1 - c, (1 - c) / 2, 1 + alpha, -2 * c, 1 - alpha };
+                case Type::highPass: return { (1 + c) / 2, -(1 + c), (1 + c) / 2, 1 + alpha, -2 * c, 1 - alpha };
+                case Type::bandPass: return { alpha, 0.0, -alpha, 1 + alpha, -2 * c, 1 - alpha };
+                case Type::notch:    return { 1, -2 * c, 1, 1 + alpha, -2 * c, 1 - alpha };
                 case Type::peak:
                 {
                     const double A = std::pow (10.0, gainDb / 40.0);
-                    return make (1 + alpha * A, -2 * c, 1 - alpha * A, 1 + alpha / A, -2 * c, 1 - alpha / A);
+                    return { 1 + alpha * A, -2 * c, 1 - alpha * A, 1 + alpha / A, -2 * c, 1 - alpha / A };
                 }
                 case Type::lowShelf:
                 {
                     const double A = std::pow (10.0, gainDb / 40.0), s = 2.0 * std::sqrt (A) * alpha;
-                    return make (A * ((A + 1) - (A - 1) * c + s), 2 * A * ((A - 1) - (A + 1) * c), A * ((A + 1) - (A - 1) * c - s),
-                                 (A + 1) + (A - 1) * c + s, -2 * ((A - 1) + (A + 1) * c), (A + 1) + (A - 1) * c - s);
+                    return { A * ((A + 1) - (A - 1) * c + s), 2 * A * ((A - 1) - (A + 1) * c), A * ((A + 1) - (A - 1) * c - s),
+                             (A + 1) + (A - 1) * c + s, -2 * ((A - 1) + (A + 1) * c), (A + 1) + (A - 1) * c - s };
                 }
                 case Type::highShelf:
                 {
                     const double A = std::pow (10.0, gainDb / 40.0), s = 2.0 * std::sqrt (A) * alpha;
-                    return make (A * ((A + 1) + (A - 1) * c + s), -2 * A * ((A - 1) + (A + 1) * c), A * ((A + 1) + (A - 1) * c - s),
-                                 (A + 1) - (A - 1) * c + s, 2 * ((A - 1) - (A + 1) * c), (A + 1) - (A - 1) * c - s);
+                    return { A * ((A + 1) + (A - 1) * c + s), -2 * A * ((A - 1) + (A + 1) * c), A * ((A + 1) + (A - 1) * c - s),
+                             (A + 1) - (A - 1) * c + s, 2 * ((A - 1) - (A + 1) * c), (A + 1) - (A - 1) * c - s };
                 }
             }
             return {};
+        }
+
+        static BiquadCoefs rbj (Type type, double fs, double f, double q, double gainDb = 0.0)
+        {
+            const auto r = rbjRaw (type, fs, f, q, gainDb);
+            return make (r.b0, r.b1, r.b2, r.a0, r.a1, r.a2);
         }
 
         // The same designs with the frequency kept to 5 Hz .. 0.49 fs.
@@ -92,6 +101,24 @@ namespace vs
             return (float) y;
         }
     };
+
+    // One section run once over a whole buffer, in place, in direct form I
+    // with the coefficients as designed (not divided by a0): each output is
+    // (b0 x + b1 x1 + b2 x2 - a1 y1 - a2 y2) / a0, the past outputs kept in
+    // double and the inputs as stored. The click and drum synthesizers filter
+    // this way, so their sounds come out the same on every platform.
+    template <typename T>
+    void filterDirectFormI (const BiquadCoefs::Raw& k, T* x, int n)
+    {
+        double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            const double v = (double) x[i];
+            const double y = (k.b0 * v + k.b1 * x1 + k.b2 * x2 - k.a1 * y1 - k.a2 * y2) / k.a0;
+            x2 = x1; x1 = v; y2 = y1; y1 = y;
+            x[i] = (T) y;
+        }
+    }
 
     // An even-order Butterworth filter (low-pass or high-pass) as order / 2
     // cascaded RBJ sections, section k with Q = 1 / (2 cos (pi (2k + 1) / (2 order))).
