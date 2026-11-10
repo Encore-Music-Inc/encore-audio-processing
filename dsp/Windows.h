@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include "Util.h"
 
 namespace vs
 {
@@ -150,7 +151,7 @@ namespace vs
             if (! (u < (double) (t.size() - 1))) return 0.0;
             const int i = (int) u;
             const double f = u - i;
-            return t[(size_t) i] + f * (t[(size_t) i + 1] - t[(size_t) i]);
+            return lerp (t[(size_t) i], t[(size_t) i + 1], f);
         }
 
         int halfWidth() const { return half; }

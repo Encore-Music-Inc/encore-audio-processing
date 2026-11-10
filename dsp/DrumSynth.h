@@ -36,10 +36,7 @@ namespace vs::drumsynth
 
     // The running peak of |v|; a NaN sample makes it NaN (a NaN peak then
     // counts as no peak), as a browser's Math.max does
-    inline float peakOf (float peak, float v)
-    {
-        return std::isnan (peak) || std::isnan (v) ? std::numeric_limits<float>::quiet_NaN() : std::max (peak, std::abs (v));
-    }
+    using channels::runningPeak;
 
     // ---- the building blocks
 
@@ -47,7 +44,7 @@ namespace vs::drumsynth
     // kept at or under 0.45 of the sample rate. gainDb is for peak.
     inline Buffer& biquad (Buffer& x, double sr, Type type, double hz, double q, double gainDb = 0)
     {
-        filterDirectFormI (BiquadCoefs::rbjRaw (type, sr, std::min (hz, sr * 0.45), q, gainDb), x.data(), (int) x.size());
+        filterRbjCapped (x.data(), (int) x.size(), sr, type, hz, q, gainDb);
         return x;
     }
 
@@ -106,25 +103,13 @@ namespace vs::drumsynth
     }
 
     // Starts a sound where it first gets loud (filters ease into a hit)
-    inline Buffer onTime (const Buffer& x)
-    {
-        float peak = 0;
-        for (float v : x) peak = peakOf (peak, v);
-        size_t i = 0;
-        while (i < x.size() && std::abs (x[i]) < 0.3 * peak) ++i;
-        return i > 2 ? Buffer (x.begin() + (std::ptrdiff_t) (i - 2), x.end()) : x;
-    }
+    inline Buffer onTime (const Buffer& x) { return channels::fromOnset (x); }
 
     // Peak to `level`, with a short fade at the very end so nothing clicks off
     inline Buffer finish (const Buffer& in, double level)
     {
         Buffer x = onTime (in);
-        float peak = 0;
-        for (float v : x) peak = peakOf (peak, v);
-        const double g = level / (peak != 0 && ! std::isnan (peak) ? (double) peak : 1.0);
-        for (auto& v : x) v = (float) (v * g);
-        float* ch[1] { x.data() };
-        channels::fadeSamples (ch, 1, (int) x.size(), 0, std::min ((int) x.size(), 512), channels::FadeCurve::linear, channels::FadePoint::end);
+        channels::toPeakWithEndFade (x, level, 512);
         return x;
     }
 

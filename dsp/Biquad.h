@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <vector>
@@ -119,6 +120,16 @@ namespace vs
             x2 = x1; x1 = v; y2 = y1; y1 = y;
             x[i] = (T) y;
         }
+    }
+
+    // An RBJ section over a whole buffer in place (direct form I, as
+    // filterDirectFormI), its frequency kept at or under 0.45 of the sample
+    // rate so a filter set above that (a hat's 12 kHz at 22.05 kHz) stays
+    // stable. The click and drum synthesizers filter their sounds with it.
+    template <typename T>
+    void filterRbjCapped (T* x, int n, double fs, BiquadCoefs::Type type, double hz, double q, double gainDb = 0.0)
+    {
+        filterDirectFormI (BiquadCoefs::rbjRaw (type, fs, std::min (hz, fs * 0.45), q, gainDb), x, n);
     }
 
     // An even-order Butterworth filter (low-pass or high-pass) as order / 2

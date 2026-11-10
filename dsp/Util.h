@@ -32,6 +32,9 @@ namespace vs
     inline double db10 (double power, double floor = 1e-20)         { return 10.0 * std::log10 (power + floor); }
     inline double db20 (double amp, double floor = 1e-12)           { return 20.0 * std::log10 (amp + floor); }
 
+    // Straight-line interpolation from a (t = 0) to b (t = 1)
+    template <typename T> inline T lerp (T a, T b, T t) { return a + t * (b - a); }
+
     // Mid and side of a stereo pair, (l + r) / 2 and (l - r) / 2; back to
     // left and right as mid + side and mid - side.
     template <typename T> inline T midOf (T l, T r)  { return T (0.5) * (l + r); }

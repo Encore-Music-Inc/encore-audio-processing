@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <vector>
 #include "Loudness.h"
 #include "Util.h"
 
@@ -164,6 +166,37 @@ namespace vs
             for (int c = 0; c < numCh; ++c)
                 for (int i = 0; i < n; ++i) p = std::max (p, std::abs (ch[c][i]));
             return p;
+        }
+
+        // The running peak of |v|, NaN-aware as a browser's Math.max is: a NaN
+        // sample makes the peak NaN.
+        inline float runningPeak (float peak, float v)
+        {
+            return std::isnan (peak) || std::isnan (v) ? std::numeric_limits<float>::quiet_NaN() : std::max (peak, std::abs (v));
+        }
+
+        // A sound from where it first gets loud (0.3 of its peak), keeping
+        // the two samples before: a synthesized hit lands right on its time.
+        inline std::vector<float> fromOnset (const std::vector<float>& x)
+        {
+            float peak = 0;
+            for (float v : x) peak = runningPeak (peak, v);
+            size_t i = 0;
+            while (i < x.size() && std::abs (x[i]) < 0.3 * peak) ++i;
+            return std::vector<float> (x.begin() + (std::ptrdiff_t) (i >= 2 ? i - 2 : 0), x.end());
+        }
+
+        // A synthesized sound finished: its peak brought to `level` (a NaN or
+        // silent sound left at its level), then a straight fade to silence
+        // over its last fadeOut samples (fewer if it is shorter).
+        inline void toPeakWithEndFade (std::vector<float>& x, double level, int fadeOut)
+        {
+            float peak = 0;
+            for (float v : x) peak = runningPeak (peak, v);
+            const double g = level / (peak != 0 && ! std::isnan (peak) ? (double) peak : 1.0);
+            for (auto& v : x) v = (float) (v * g);
+            float* ch[1] { x.data() };
+            fadeSamples (ch, 1, (int) x.size(), 0, std::min ((int) x.size(), fadeOut), FadeCurve::linear, FadePoint::end);
         }
 
         // Integrated loudness (BS.1770, vs::LoudnessMeter) of the first one or

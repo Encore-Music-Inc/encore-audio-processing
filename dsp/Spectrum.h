@@ -158,7 +158,7 @@ namespace vs
             const float bin = f / (float) sampleRate * (float) opt.size;
             const int b0 = std::max (1, std::min ((int) db.size() - 2, (int) bin));
             const float frac = bin - (float) b0;
-            float v = db[(size_t) b0] + frac * (db[(size_t) b0 + 1] - db[(size_t) b0]);
+            float v = lerp (db[(size_t) b0], db[(size_t) b0 + 1], frac);
             if (tiltDbPerOctave != 0.0f) v += tiltDbPerOctave * std::log2 (f / tiltCentreHz);
             return v;
         }

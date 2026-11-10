@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdint>
 #include <vector>
+#include "Util.h"
 
 namespace vs
 {
@@ -20,7 +21,7 @@ namespace vs
         const auto i = (std::int64_t) std::floor (pos);
         const float f = (float) (pos - (P) i);
         const float a = buf[(size_t) (i & mask)], b = buf[(size_t) ((i + 1) & mask)];
-        return a + f * (b - a);
+        return lerp (a, b, f);
     }
 
     // 4-point cubic (Hermite) interpolation: smoother than a straight line

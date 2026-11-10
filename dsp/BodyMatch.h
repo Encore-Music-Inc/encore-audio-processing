@@ -48,7 +48,7 @@ namespace vs
             if (pos >= (float) (numPoints - 1)) return db[numPoints - 1];
             const int i = (int) pos;
             const float t = pos - (float) i;
-            return db[(size_t) i] + t * (db[(size_t) i + 1] - db[(size_t) i]);
+            return lerp (db[(size_t) i], db[(size_t) i + 1], t);
         }
 
         bool operator== (const BodyCurve& o) const { return db == o.db && levelDb == o.levelDb && valid == o.valid; }

@@ -229,7 +229,7 @@ namespace vs
             const float x = juce::jlimit (0.0f, 1.0f, p) * (float) hannSize;
             const int i = std::min ((int) x, hannSize - 1);
             const float f = x - (float) i;
-            return hann[(size_t) i] + f * (hann[(size_t) i + 1] - hann[(size_t) i]);
+            return lerp (hann[(size_t) i], hann[(size_t) i + 1], f);
         }
 
         float readIn (double pos) const
