@@ -147,7 +147,7 @@ Every header builds this way except `DeEsser.h`, `PitchEngine.h` and
 `BodyMatch.h`, which need JUCE.
 
 On macOS (and other Apple systems), link the Accelerate framework:
-`dsp/Fft.h` runs its transforms on Accelerate's vDSP there. JUCE products
+`dsp/Fft.h` runs its transforms on Apple's Accelerate framework there. JUCE products
 already link it through `juce_dsp`. Define `VS_FFT_PORTABLE` to use this
 repository's own FFT instead (the browser build always does).
 

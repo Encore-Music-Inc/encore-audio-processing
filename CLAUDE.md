@@ -77,7 +77,7 @@ The headers, by area (each header's top comment says more):
 
 | Area | Header | What |
 |---|---|---|
-| Building blocks | `Fft.h` | the one FFT (complex and real input), on Accelerate's vDSP on Apple systems |
+| Building blocks | `Fft.h` | the one FFT (complex and real input), on Apple's Accelerate framework on Apple systems |
 | | `Windows.h` | window functions and the shared windowed-sinc table |
 | | `Biquad.h` | second-order filter coefficients (the RBJ cookbook designs) and their curves |
 | | `Crossover.h` | Linkwitz-Riley band splits that recombine flat |
@@ -147,7 +147,7 @@ new file with its own prefix.
 - Every header builds without JUCE (`VS_NO_JUCE=1`, through `dsp/JuceInclude.h`)
   except `DeEsser.h`, `PitchEngine.h` and `BodyMatch.h`, which include `juce_dsp`
   directly. Keep new headers buildable without JUCE.
-- On Apple systems `dsp/Fft.h` runs on Accelerate's vDSP, so a product that uses
+- On Apple systems `dsp/Fft.h` runs on Apple's Accelerate framework, so a product that uses
   the headers there links the Accelerate framework (JUCE's `juce_dsp` already
   does; `tests/CMakeLists.txt` does it for the suites without JUCE).
   `VS_FFT_PORTABLE` forces this repository's own FFT; the browser build always
