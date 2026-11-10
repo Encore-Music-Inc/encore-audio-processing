@@ -77,9 +77,10 @@ namespace vs
                                                                : windows::hannPeriodic (opt.size);
             win.assign (w.begin(), w.end());
             fft.setSize (opt.size);
-            re.assign ((size_t) opt.size, 0.0);
-            im.assign ((size_t) opt.size, 0.0);
+            frame.assign ((size_t) opt.size, 0.0);
             const size_t bins = (size_t) opt.size / 2 + 1;
+            re.assign (bins, 0.0);
+            im.assign (bins, 0.0);
             mag.assign (bins, 0.0f);
             db.assign (bins, opt.floorDb);
             pow.assign (bins, 0.0f);
@@ -124,11 +125,8 @@ namespace vs
         {
             const int n = opt.size, mask = opt.history - 1;
             for (int i = 0; i < n; ++i)
-            {
-                re[(size_t) i] = (double) (hist[(size_t) ((write - n + i) & mask)] * win[(size_t) i]);
-                im[(size_t) i] = 0.0;
-            }
-            fft.forward (re.data(), im.data());
+                frame[(size_t) i] = (double) (hist[(size_t) ((write - n + i) & mask)] * win[(size_t) i]);
+            fft.forward (frame.data(), re.data(), im.data());
             for (size_t b = 0; b < mag.size(); ++b)
             {
                 const float m = (float) std::sqrt (re[b] * re[b] + im[b] * im[b]) / opt.scale;
@@ -167,8 +165,8 @@ namespace vs
         Options opt;
         std::vector<float> hist, win, mag, db, pow, dbNow;
         int write = 0;
-        Fft fft;
-        std::vector<double> re, im;
+        RealFft fft;
+        std::vector<double> frame, re, im;
     };
 
     // A long-term power spectrum: frames of n samples (n a power of two),
@@ -183,8 +181,10 @@ namespace vs
             n = frameSize;
             win = windows::hannPeriodic (n);
             pow.assign ((size_t) n / 2 + 1, 0.0);
-            re.assign ((size_t) n, 0.0);
-            im.assign ((size_t) n, 0.0);
+            fft.setSize (n);
+            frame.assign ((size_t) n, 0.0);
+            re.assign ((size_t) n / 2 + 1, 0.0);
+            im.assign ((size_t) n / 2 + 1, 0.0);
             count = 0;
         }
 
@@ -192,7 +192,7 @@ namespace vs
         template <typename T>
         void addFrame (const T* x)
         {
-            for (int i = 0; i < n; ++i) { re[(size_t) i] = (double) x[i] * win[(size_t) i]; im[(size_t) i] = 0.0; }
+            for (int i = 0; i < n; ++i) frame[(size_t) i] = (double) x[i] * win[(size_t) i];
             transformAndAdd();
         }
 
@@ -202,9 +202,8 @@ namespace vs
         template <typename T>
         void addShort (const T* x, int length)
         {
-            std::fill (re.begin(), re.end(), 0.0);
-            std::fill (im.begin(), im.end(), 0.0);
-            for (int i = 0; i < length; ++i) re[(size_t) i] = (double) x[i] * win[(size_t) (((std::int64_t) i * n) / length)];
+            std::fill (frame.begin(), frame.end(), 0.0);
+            for (int i = 0; i < length; ++i) frame[(size_t) i] = (double) x[i] * win[(size_t) (((std::int64_t) i * n) / length)];
             transformAndAdd();
         }
 
@@ -227,13 +226,14 @@ namespace vs
     private:
         void transformAndAdd()
         {
-            fftFor (n).forward (re.data(), im.data());
+            fft.forward (frame.data(), re.data(), im.data());
             for (int k = 0; k <= n / 2; ++k) pow[(size_t) k] += re[(size_t) k] * re[(size_t) k] + im[(size_t) k] * im[(size_t) k];
             ++count;
         }
 
         int n = 0, count = 0;
-        std::vector<double> win, pow, re, im;
+        RealFft fft;
+        std::vector<double> win, pow, frame, re, im;
     };
 
     // An averaged power spectrum and its bin spacing
