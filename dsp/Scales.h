@@ -1,36 +1,49 @@
 #pragma once
 
+// Pitch correction's keys, scales and harmony intervals: the 12 keys (named by
+// the note-name rule in Music.h), the 5 scales a voice can be corrected to
+// (taken from the scale library, ScaleLibrary.h), and the harmony voices'
+// intervals. The lists are plain C++; with JUCE they are also juce::StringArray
+// (keyNames, scaleNames, intervalNames) for plugin parameters.
+
+#include <array>
 #include <cmath>
-#include <juce_core/juce_core.h>
+#include "Music.h"
+#include "ScaleLibrary.h"
+#if ! VS_NO_JUCE
+ #include <juce_core/juce_core.h>
+#endif
 
 namespace vs::scales
 {
-    inline const juce::StringArray keyNames { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    inline const juce::StringArray scaleNames { "Chromatic", "Major", "Minor", "Major Pent", "Minor Pent" };
-    inline const juce::StringArray intervalNames { "Off", "Double", "Oct Down", "6th Down", "5th Down", "4th Down",
-                                                   "3rd Down", "3rd Up", "4th Up", "5th Up", "6th Up", "Oct Up" };
+    // The keys, C to B, named by the rule (C, C#, D, Eb, ...)
+    inline constexpr std::array<const char*, 12> keyNameList { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    inline constexpr std::array<const char*, 5> scaleNameList { "Chromatic", "Major", "Minor", "Major Pent", "Minor Pent" };
+    inline constexpr std::array<const char*, 12> intervalNameList { "Off", "Double", "Oct Down", "6th Down", "5th Down", "4th Down",
+                                                                    "3rd Down", "3rd Up", "4th Up", "5th Up", "6th Up", "Oct Up" };
+
+   #if VS_NO_JUCE
+    inline constexpr const auto& keyNames = keyNameList;
+    inline constexpr const auto& scaleNames = scaleNameList;
+    inline constexpr const auto& intervalNames = intervalNameList;
+   #else
+    inline const juce::StringArray keyNames { keyNameList.data(), (int) keyNameList.size() };
+    inline const juce::StringArray scaleNames { scaleNameList.data(), (int) scaleNameList.size() };
+    inline const juce::StringArray intervalNames { intervalNameList.data(), (int) intervalNameList.size() };
+   #endif
 
     struct Scale { const int* steps; int size; };
 
+    // Pitch correction's scale (index into scaleNames): its semitones above the key
     inline Scale get (int index)
     {
-        static const int chromatic[12] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 };
-        static const int major[7] { 0, 2, 4, 5, 7, 9, 11 };
-        static const int minor[7] { 0, 2, 3, 5, 7, 8, 10 };
-        static const int majPent[5] { 0, 2, 4, 7, 9 };
-        static const int minPent[5] { 0, 3, 5, 7, 10 };
-
-        switch (index)
-        {
-            case 1:  return { major, 7 };
-            case 2:  return { minor, 7 };
-            case 3:  return { majPent, 5 };
-            case 4:  return { minPent, 5 };
-            default: return { chromatic, 12 };
-        }
+        static constexpr std::array<const LibraryScale*, 5> table { find ("chromatic"), find ("ionian"), find ("aeolian"),
+                                                                    find ("major_pent"), find ("minor_pent") };
+        const auto* s = table[(size_t) (index >= 1 && index <= 4 ? index : 0)];
+        return { s->semis.data(), (int) s->semis.size() };
     }
 
-    inline int floorDiv (int a, int b) { return (a >= 0) ? a / b : -((-a + b - 1) / b); }
+    inline int floorDiv (int a, int b) { return music::floorDiv (a, b); }
     inline int mod (int a, int b)      { return a - b * floorDiv (a, b); }
 
     inline bool inScale (int note, int key, Scale s)
