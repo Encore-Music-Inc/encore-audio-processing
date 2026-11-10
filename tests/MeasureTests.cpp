@@ -5,6 +5,7 @@
 // exits non-zero on any failure.
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <random>
 #include <vector>
 #include "dsp/Analysis.h"
@@ -99,6 +100,40 @@ int main()
         expect ("true peak: the detector's delay is a whole number of samples here",
                 vs::TruePeakDetector::groupLatency() * vs::TruePeakDetector::factor - vs::TruePeakDetector::upLatency() <= 2,
                 "%.0f sub-samples, %.0f samples", vs::TruePeakDetector::upLatency(), vs::TruePeakDetector::groupLatency());
+
+        // skipping the stretches that can't change the reading: the same to the bit,
+        // with the same samples reported over a level
+        {
+            std::vector<float> l2 = noise ((size_t) fs * 20, 0.6f, 31), r2 = noise (l2.size(), 0.5f, 32);
+            for (size_t i = 0; i < l2.size(); ++i)
+            {
+                const double t = (double) i / fs, g = std::fmod (t, 5.0) < 2.0 ? 0.01 : 1.0; // quiet, then loud
+                l2[i] = (float) (g * (l2[i] + 0.4 * std::sin (twoPi * 997 * t)));
+                r2[i] = (float) (g * r2[i]);
+            }
+            l2[(size_t) (fs * 0.7)] = 0.3f; // a spike in the quiet
+            std::vector<std::pair<std::int64_t, float>> over[2];
+            float tpk[2][2] {};
+            std::int64_t pos[2] {};
+            for (int skip = 0; skip < 2; ++skip)
+            {
+                vs::TruePeakMeter m;
+                m.prepare (2, 1000);
+                m.setSkipping (skip == 1);
+                auto note = [&] (std::int64_t p, float v) { over[skip].push_back ({ p, v }); };
+                for (size_t s0 = 0; s0 < l2.size(); s0 += 1000)
+                {
+                    const float* ch[2] { l2.data() + s0, r2.data() + s0 };
+                    m.processOver (ch, (int) std::min<size_t> (1000, l2.size() - s0), 0.7f, note);
+                }
+                m.finishOver (0.7f, note);
+                tpk[skip][0] = m.truePeak (0); tpk[skip][1] = m.truePeak (1);
+                pos[skip] = m.truePeakPosition();
+            }
+            expect ("true peak: skipping changes nothing (readings, position, samples over a level)",
+                    std::memcmp (tpk[0], tpk[1], sizeof tpk[0]) == 0 && pos[0] == pos[1] && over[0] == over[1] && ! over[0].empty(),
+                    "%.0f samples over", (double) over[0].size());
+        }
 
         // the limiter holds its ceiling on the meter's reading: the same detector
         std::vector<float> l = noise ((size_t) fs * 3, 1.0f, 7), r = noise ((size_t) fs * 3, 1.0f, 8);
@@ -235,6 +270,14 @@ int main()
         expect ("spectrum: and far from it, far down", an.levelsDb()[400] < -60.0f, "%.1f dB", an.levelsDb()[400]);
         expect ("spectrum: levelAt reads the bin, with a tilt", std::abs (an.levelAt (hz, fs) - an.levelsDb()[100]) < 1e-3f
                     && std::abs (an.levelAt (hz, fs, 4.5f, (float) hz / 2) - an.levelsDb()[100] - 4.5f) < 1e-3f);
+        // the Web Audio AnalyserNode's reading: Blackman (its mean 0.42) halves
+        // a sine's amplitude onto its bin, |X| / N = 0.21 for a full-scale sine
+        vs::SpectrumAnalyser web;
+        web.prepare (vs::SpectrumAnalyser::webAudio (2048, 0.8f));
+        const auto w = sine (fs, 1.0, 100.0 * fs / 2048.0, 1.0);
+        for (size_t at = 0; at + 1024 <= w.size(); at += 1024) { web.push (w.data() + at, 1024); web.analyse(); }
+        expect ("spectrum: the AnalyserNode's reading of a full-scale sine on a bin", std::abs (web.decibels()[100] - 20.0 * std::log10 (0.21)) < 0.01,
+                "%.3f dB", web.decibels()[100]);
         expect ("spectrum: the power average rises toward the level", an.power()[100] > 0.3f && an.power()[100] < 1.0f, "%.3f", an.power()[100]);
     }
 

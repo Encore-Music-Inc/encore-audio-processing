@@ -245,7 +245,9 @@ extern "C"
 
     // ---- spectrum analyser ----
 
-    // window: 0 symmetric Hann, 1 periodic Hann. smoothing 0: none.
+    // window: 0 symmetric Hann, 1 periodic Hann, 2 Blackman (alpha 0.16).
+    // smoothing 0: none. For the AnalyserNode's numbers: window 2, scale
+    // size, history size, smoothing its smoothingTimeConstant, read ms_sp_decibels after ms_sp_analyse.
     EMSCRIPTEN_KEEPALIVE void* ms_sp_create (int size, int history, int window, float scale, float attack, float release,
                                              float powerSmoothing, float smoothing, int maxBlock)
     {
@@ -254,7 +256,8 @@ extern "C"
         vs::SpectrumAnalyser::Options o;
         o.size = size;
         o.history = history;
-        o.window = window == 1 ? vs::SpectrumAnalyser::Window::hannPeriodic : vs::SpectrumAnalyser::Window::hannSymmetric;
+        o.window = window == 2 ? vs::SpectrumAnalyser::Window::blackman
+                 : window == 1 ? vs::SpectrumAnalyser::Window::hannPeriodic : vs::SpectrumAnalyser::Window::hannSymmetric;
         o.scale = scale;
         o.attack = attack;
         o.release = release;
@@ -275,6 +278,8 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE int ms_sp_bins (void* p) { return static_cast<Spectrum*> (p)->analyser.bins(); }
     EMSCRIPTEN_KEEPALIVE const float* ms_sp_magnitude (void* p) { return static_cast<Spectrum*> (p)->analyser.magnitude().data(); }
     EMSCRIPTEN_KEEPALIVE const float* ms_sp_levels (void* p) { return static_cast<Spectrum*> (p)->analyser.levelsDb().data(); }
+    // 20 log10 of the magnitudes as they are (no ballistics)
+    EMSCRIPTEN_KEEPALIVE const float* ms_sp_decibels (void* p) { return static_cast<Spectrum*> (p)->analyser.decibels().data(); }
     EMSCRIPTEN_KEEPALIVE const float* ms_sp_power (void* p) { return static_cast<Spectrum*> (p)->analyser.power().data(); }
     EMSCRIPTEN_KEEPALIVE float ms_sp_level_at (void* p, double hz, double sampleRate, float tiltDbPerOctave, float tiltCentreHz)
     {

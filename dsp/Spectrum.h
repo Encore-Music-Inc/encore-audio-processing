@@ -24,12 +24,19 @@ namespace vs
     //               transients don't)
     //   smoothing   averages the magnitudes themselves over time (each update
     //               keeps `smoothing` of the last), before the two above
+    //   decibels()  20 log10 of the magnitudes as they are (no ballistics)
     // levelAt() reads the levels between bins (linear interpolation) for
     // drawing on a frequency axis, with an optional tilt in dB per octave.
+    //
+    // webAudio() gives the options of the browser's AnalyserNode
+    // (getFloatFrequencyData in the Web Audio specification): a Blackman
+    // window (alpha 0.16), magnitudes divided by the size, smoothed over time
+    // by its smoothingTimeConstant, read as decibels(). The AnalyserNode has
+    // size / 2 bins; the one more here is the Nyquist bin.
     class SpectrumAnalyser
     {
     public:
-        enum class Window { hannSymmetric, hannPeriodic };
+        enum class Window { hannSymmetric, hannPeriodic, blackman };
 
         struct Options
         {
@@ -41,7 +48,19 @@ namespace vs
             float powerSmoothing = 0.04f;
             float smoothing = 0.0f;            // 0: none
             float floorDb = -120.0f;           // where levelsDb starts
+            double blackmanAlpha = 0.16;
         };
+
+        static Options webAudio (int fftSize = 2048, float smoothingTimeConstant = 0.8f)
+        {
+            Options o;
+            o.size = fftSize;
+            o.history = fftSize;
+            o.window = Window::blackman;
+            o.scale = (float) fftSize;
+            o.smoothing = smoothingTimeConstant;
+            return o;
+        }
 
         void prepare (const Options& o)
         {
@@ -49,7 +68,9 @@ namespace vs
             opt.history = std::max (opt.history, opt.size);
             hist.assign ((size_t) opt.history, 0.0f);
             write = 0;
-            const auto w = opt.window == Window::hannSymmetric ? windows::hannSymmetric (opt.size) : windows::hannPeriodic (opt.size);
+            const auto w = opt.window == Window::hannSymmetric ? windows::hannSymmetric (opt.size)
+                         : opt.window == Window::blackman      ? windows::blackman (opt.size, opt.blackmanAlpha)
+                                                               : windows::hannPeriodic (opt.size);
             win.assign (w.begin(), w.end());
             fft.setSize (opt.size);
             re.assign ((size_t) opt.size, 0.0);
@@ -58,6 +79,7 @@ namespace vs
             mag.assign (bins, 0.0f);
             db.assign (bins, opt.floorDb);
             pow.assign (bins, 0.0f);
+            dbNow.assign (bins, 0.0f);
         }
 
         // Clears what was heard (the history, the levels, the averages).
@@ -106,8 +128,16 @@ namespace vs
             for (size_t b = 0; b < mag.size(); ++b)
             {
                 const float m = (float) std::sqrt (re[b] * re[b] + im[b] * im[b]) / opt.scale;
-                mag[b] = opt.smoothing > 0.0f ? opt.smoothing * mag[b] + (1.0f - opt.smoothing) * m : m;
+                const float v = opt.smoothing > 0.0f ? opt.smoothing * mag[b] + (1.0f - opt.smoothing) * m : m;
+                mag[b] = std::isfinite (v) ? v : 0.0f;
             }
+        }
+
+        // 20 log10 of each magnitude as it is (-inf for 0), after analyse() or update()
+        const std::vector<float>& decibels()
+        {
+            for (size_t b = 0; b < mag.size(); ++b) dbNow[b] = 20.0f * std::log10 (mag[b]);
+            return dbNow;
         }
 
         int size() const { return opt.size; }
@@ -131,7 +161,7 @@ namespace vs
 
     private:
         Options opt;
-        std::vector<float> hist, win, mag, db, pow;
+        std::vector<float> hist, win, mag, db, pow, dbNow;
         int write = 0;
         Fft fft;
         std::vector<double> re, im;
@@ -172,12 +202,17 @@ namespace vs
 
         void process (const float* l, const float* r, int n)
         {
-            for (int i = 0; i < n && next < frames; ++i)
+            // frames don't overlap: copy the part of the next frame in this block
+            std::int64_t i = 0;
+            while (next < frames)
             {
-                const std::int64_t g = at + i, s = (std::int64_t) next * step;
-                if (g < s) continue;
-                frame[(size_t) (g - s)] = 0.5 * ((double) l[i] + (double) r[i]);
-                if (g - s == N - 1) { analyseFrame(); ++next; }
+                const std::int64_t s = (std::int64_t) next * step;
+                i = std::max (i, s - at);
+                if (i >= n) break;
+                const std::int64_t end = std::min<std::int64_t> (n, s + N - at);
+                for (; i < end; ++i) frame[(size_t) (at + i - s)] = 0.5 * ((double) l[i] + (double) r[i]);
+                if (at + end - s == N) { analyseFrame(); ++next; }
+                else break;
             }
             at += n;
         }
