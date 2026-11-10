@@ -37,10 +37,20 @@ namespace vs
             reset();
         }
 
+        // Off by default. On, the meter also keeps each channel's K-weighted
+        // energy (sum of squares) for every 100 ms block, for a report made
+        // after the fact (short-term loudness, loudness range, balance). It
+        // allocates as it goes, so it's for offline measuring, not a live meter.
+        void setRecordBlocks (bool on) { record = on; }
+        const std::vector<double>& blockEnergy (int channel) const { return channel == 0 ? energyL : energyR; }
+        int blockLength() const { return subLen; }
+
         void reset()
         {
             shelf.reset(); hp.reset();
             subAcc = 0.0; subCount = 0;
+            accL = accR = 0.0;
+            energyL.clear(); energyR.clear();
             for (auto& s : sub) s = 0.0;
             subIndex = 0; subFilled = 0;
             numBlocks.store (0);
@@ -54,6 +64,7 @@ namespace vs
                 const double kl = hp.process (0, shelf.process (0, l[i]));
                 const double kr = r != nullptr ? hp.process (1, shelf.process (1, r[i])) : 0.0;
                 subAcc += kl * kl + kr * kr;
+                if (record) { accL += kl * kl; accR += kr * kr; }
                 if (++subCount >= subLen) closeSubBlock();
             }
         }
@@ -81,6 +92,7 @@ namespace vs
     private:
         void closeSubBlock()
         {
+            if (record) { energyL.push_back (accL); energyR.push_back (accR); accL = accR = 0.0; }
             sub[subIndex] = subAcc / subCount;
             subIndex = (subIndex + 1) % 30;
             subFilled = std::min (subFilled + 1, 30);
@@ -111,6 +123,9 @@ namespace vs
         int subLen = 4800, subCount = 0, subIndex = 0, subFilled = 0;
         std::vector<float> blocks;
         std::atomic<int> numBlocks { 0 };
+        bool record = false;
+        double accL = 0.0, accR = 0.0;
+        std::vector<double> energyL, energyR;
     };
 
     // Brickwall true-peak limiter. The audio itself stays at the normal rate

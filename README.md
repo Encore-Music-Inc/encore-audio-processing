@@ -2,7 +2,8 @@
 
 The audio processing code shared by ENCORE.'s products: the mastering chain,
 EQ, compressor, de-esser, gate, rider, reverb, pitch detection and correction,
-and the acoustic guitar fixes. It is header-only C++20.
+the loudness meter, the tuner and its list of instruments and tunings, and the
+acoustic guitar fixes. It is header-only C++20.
 
 Copyright (c) Encore Music, Inc. Licensed under the GNU Affero General Public
 License v3 (see `LICENSE`). The ENCORE. name and logo are not licensed (see
@@ -15,18 +16,26 @@ License v3 (see `LICENSE`). The ENCORE. name and logo are not licensed (see
 |---|---|
 | ENCORE. VST (the plugins) | builds the headers with JUCE (`juce_dsp`) |
 | ENCORE. Basement Studio (the desktop DAW) | builds the headers with JUCE, with the plugins built in |
-| Green Room, the artist tools in the ENCORE. app (browser) | loads `master.wasm`, built from `wasm/master_api.cpp` and the headers without JUCE |
+| Green Room, the artist tools in the ENCORE. app (browser) | loads `master.wasm`, built from `wasm/master_api.cpp` and the headers without JUCE, and `tunings.json` |
 
 ## What is here
 
 ```
 dsp/                  the headers (MasterChain.h, EqBand.h, ReverbEngine.h, ...)
 dsp/lite/JuceLite.h   a small stand-in for the JUCE pieces the headers use, for builds without JUCE
-wasm/master_api.cpp   the browser engine: plain C functions around the mastering chain
+dsp/Tunings.h         the tuner's instruments, tunings, temperaments and reference pitches (made by tools/tunings.py)
+data/tunings.json     the same list for the browser (made by tools/tunings.py)
+tools/tunings.py      the one list of instruments and tunings, and what writes the two files above
+wasm/master_api.cpp   the browser engine: plain C functions around the mastering chain (mc_*),
+                      the loudness meter (lm_*) and the tuner (tp_*)
 wasm/build.sh         builds master.wasm with Emscripten
 tests/                offline test suites and their CMake build
 external/JUCE         JUCE (submodule): the JUCE version for all of ENCORE.
 ```
+
+To change an instrument or a tuning, edit `tools/tunings.py`, run
+`python3 tools/tunings.py`, and commit both files it writes. CI fails if either
+differs from what the script writes.
 
 ## Using it in a product
 
@@ -49,7 +58,8 @@ git -C external/encore-audio-processing submodule update --init --depth 1 extern
 
 With JUCE (desktop), link `juce::juce_dsp`; `dsp/JuceInclude.h` includes it.
 Without JUCE, define `VS_NO_JUCE=1` and `dsp/lite/JuceLite.h` is used instead
-(only the headers the mastering chain needs work this way).
+(only the headers the mastering chain needs work this way). `dsp/TunerPitch.h`
+and `dsp/Tunings.h` need nothing but the C++ standard library.
 
 ## Pinned releases
 
@@ -75,9 +85,9 @@ ctest --test-dir build --output-on-failure
 ```
 
 Each suite prints a PASS or FAIL line per check and exits non-zero on any
-failure. `LiteMasterTests` builds the mastering chain without JUCE, the way
-the browser build does. To build only that one (no JUCE needed), configure
-with `-DENCORE_JUCE_TESTS=OFF`.
+failure. `LiteMasterTests`, `LoudnessTests` and `TunerTests` build without
+JUCE, the way the browser build does. To build only those (no JUCE needed),
+configure with `-DENCORE_JUCE_TESTS=OFF`.
 
 `StrumTests` also has whole-plugin checks that need the Strum plugin's own
 sources; they build only with `ENCORE_STRUM_PLUGIN_TESTS=1`, in the plugin repo.
@@ -106,7 +116,8 @@ wasm/build.sh
 
 This writes `wasm/master.wasm` (not committed). The same Emscripten version
 gives the same bytes, so a release's `master.wasm.sha256` can be checked
-against a local build.
+against a local build. A release's `tunings.json` is `data/tunings.json` from
+the same commit.
 
 ## Versioning
 
@@ -116,15 +127,17 @@ in its own pull request, with the release notes in `CHANGELOG.md`. Every merge
 to `main` builds and tests `master.wasm`. Once that build has passed, a person
 at Encore Music, Inc. publishes the release in GitHub (the steps are in
 `CLAUDE.md`). The release isn't rebuilt: CI checks that the tag matches the
-version, attaches the `master.wasm` and `master.wasm.sha256` that `main` built
-from the same commit, and sets the title and notes from `CHANGELOG.md`.
+version, attaches the `master.wasm`, `tunings.json` and their `.sha256` files
+that `main` built from the same commit, and sets the title and notes from
+`CHANGELOG.md`.
 
 - MAJOR: a change that breaks a consumer: a renamed or removed header, class
-  or function, a changed `mc_*` export in `master.wasm`, or a change in the
-  sound that a product must re-check (for example, a mastering style that
-  measures differently).
+  or function, a changed export in `master.wasm` (`mc_*`, `lm_*`, `tp_*`), a
+  renamed or removed field in `tunings.json`, or a change in the sound or the
+  measurements that a product must re-check (for example, a mastering style
+  that measures differently).
 - MINOR: new processing or options that leave existing behaviour alone.
 - PATCH: fixes that keep the API and the intended sound.
 
 Products pin the submodule to a tag, and Green Room pins the matching
-`master.wasm` by its SHA-256.
+`master.wasm` and `tunings.json` by their SHA-256.

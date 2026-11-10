@@ -16,13 +16,15 @@ get_filename_component(ENCORE_AUDIO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLU
 enable_testing()
 
 # The browser build's configuration (no JUCE: dsp/lite/JuceLite.h stands in), tested natively
-add_executable(LiteMasterTests LiteMasterTests.cpp)
-target_include_directories(LiteMasterTests PRIVATE ${ENCORE_AUDIO_ROOT})
-target_compile_definitions(LiteMasterTests PRIVATE VS_NO_JUCE=1 _USE_MATH_DEFINES)
-if (MSVC)
-    target_compile_options(LiteMasterTests PRIVATE /O2 /fp:fast)
-endif()
-add_test(NAME LiteMasterTests COMMAND LiteMasterTests)
+foreach (suite LiteMaster Loudness Tuner)
+    add_executable(${suite}Tests ${suite}Tests.cpp)
+    target_include_directories(${suite}Tests PRIVATE ${ENCORE_AUDIO_ROOT})
+    target_compile_definitions(${suite}Tests PRIVATE VS_NO_JUCE=1 _USE_MATH_DEFINES)
+    if (MSVC)
+        target_compile_options(${suite}Tests PRIVATE /O2 /fp:fast)
+    endif()
+    add_test(NAME ${suite}Tests COMMAND ${suite}Tests)
+endforeach()
 
 # The desktop build's configuration (JUCE's juce_dsp)
 option(ENCORE_JUCE_TESTS "Build the tests that need JUCE (external/JUCE)" ON)

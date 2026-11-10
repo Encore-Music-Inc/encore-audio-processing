@@ -38,14 +38,15 @@ products.
 |---|---|
 | `dsp/` | the headers (`MasterChain.h`, `EqBand.h`, `ReverbEngine.h`, ...) |
 | `dsp/lite/JuceLite.h` | stand-in for the JUCE pieces the headers use, for builds without JUCE (`VS_NO_JUCE=1`). Don't delete it: the wasm build needs it |
-| `wasm/master_api.cpp`, `wasm/build.sh` | the browser engine and its Emscripten build |
+| `tools/tunings.py` | the one list of the tuner's instruments, tunings, temperaments and reference pitches; writes `dsp/Tunings.h` and `data/tunings.json` (edit the list and run it, never the two files; CI fails if they differ from what it writes) |
+| `wasm/master_api.cpp`, `wasm/build.sh` | the browser engine (the mastering chain `mc_*`, the loudness meter `lm_*`, the tuner `tp_*`) and its Emscripten build |
 | `tests/` | the offline test suites and their CMake build |
 | `external/JUCE` | JUCE, pinned to a release (the README's Pinned releases table): the JUCE version for all of ENCORE. (see below) |
 | `CHANGELOG.md` | every release's notes, newest first; the release job copies the version's section onto the GitHub release |
 | `.github/release-notes.sh` | prints a version's notes from `CHANGELOG.md`, and fails if they're missing (CI runs it on every build) |
 | `.github/pins/check.sh` | CI's check that every pin is a release (the README's Pinned releases table) |
 | `.github/sanitizers/` | the scheduled sanitizer run's exceptions (`ubsan.supp`, each with its reason; keep it short) and `report.sh` |
-| `.github/workflows/ci.yml` | tests on Linux, Windows and macOS and master.wasm on pull requests and main (skipped when only docs change, and for a pull request that only changes the version line and `CHANGELOG.md`); on a schedule: the tests with sanitizers; `v*` tags attach main's master.wasm to the Release, no rebuild; "CI passed" is the one check to require |
+| `.github/workflows/ci.yml` | tests on Linux, Windows and macOS and master.wasm on pull requests and main (skipped when only docs change, and for a pull request that only changes the version line and `CHANGELOG.md`); on a schedule: the tests with sanitizers; `v*` tags attach main's master.wasm and tunings.json to the Release, no rebuild; "CI passed" is the one check to require |
 
 ## Consumers
 
@@ -57,7 +58,7 @@ products.
   tests run on is the JUCE that ships. Consumers fetch it by its path
   (`git -C external/encore-audio-processing submodule update --init --depth 1 external/JUCE`),
   never with `--recursive`. Move JUCE only to a JUCE release.
-- They pin the submodule to a release tag. Green Room pins `master.wasm` by its SHA-256.
+- They pin the submodule to a release tag. Green Room pins `master.wasm` and `tunings.json` by their SHA-256.
 
 ## Pins
 
@@ -103,8 +104,8 @@ products.
 2. Changing it is its own small pull request ("Release vX.Y.Z"), so a person sees the
    number before it's built. It adds the release notes to `CHANGELOG.md` (see
    Release notes below); CI fails until they're there.
-3. Merging builds everything on `main`: the tests run and `master.wasm` is uploaded as
-   a workflow artifact.
+3. Merging builds everything on `main`: the tests run and `master.wasm` and `tunings.json`
+   are uploaded as a workflow artifact.
 4. After the `main` build of that commit has passed, a person publishes the release in
    GitHub. Never a Claude session. Releases, Draft a new release; tag `vX.Y.Z` (Create
    new tag) with target `main` at the "Release vX.Y.Z" commit; leave the title and the
@@ -112,8 +113,8 @@ products.
    release job fills all of them in); Publish. Never publish an old draft release:
    publishing creates its tag on whatever its target is at that moment.
 5. The tag's CI run doesn't rebuild. It checks that the tag matches the version, finds
-   the successful `main` build of that exact commit and attaches its `master.wasm` and
-   `master.wasm.sha256` to the Release, and sets its title
+   the successful `main` build of that exact commit and attaches its `master.wasm`,
+   `tunings.json` and their `.sha256` files to the Release, and sets its title
    (`ENCORE. Audio Processing vX.Y.Z`) and notes (the version's section of
    `CHANGELOG.md`). If either check fails, nothing is attached.
    If that commit was docs-only (its build was skipped), run CI by hand on `main`
