@@ -424,14 +424,7 @@ namespace
             { "softtick", "poly", 2160, 140.691279 },
             { "softtick", "sub", 1440, 70.8446698 },
         };
-        // Exact to float rounding, except under MSVC's /fp:fast (tests/CMakeLists.txt),
-        // where an onset that falls exactly on a sample (the clap's hands) can
-        // move by one sample
-       #if defined (_MSC_VER) && ! defined (__clang__)
-        const double sumTolerance = 1e-3;
-       #else
         const double sumTolerance = 1e-5;
-       #endif
         int bad = 0;
         std::string first;
         for (auto& p : drums)

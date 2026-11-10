@@ -145,13 +145,26 @@ namespace vs::drumsynth
     struct Filter { Type type; double hz, q, gainDb = 0; };
 
     // Filtered noise with an envelope (env: seconds to level)
-    inline Buffer hiss (double sr, double seconds, const std::function<double (double)>& env, std::uint32_t seed, std::initializer_list<Filter> filters)
+    inline Buffer hissBySample (double sr, double seconds, const std::function<double (int)>& env, std::uint32_t seed, std::initializer_list<Filter> filters)
     {
         const int n = (int) std::floor (sr * seconds);
         auto x = noise (n, seed);
         for (const auto& f : filters) biquad (x, sr, f.type, f.hz, f.q, f.gainDb);
-        for (int i = 0; i < n; ++i) x[(size_t) i] = (float) (x[(size_t) i] * env (i / sr));
+        for (int i = 0; i < n; ++i) x[(size_t) i] = (float) (x[(size_t) i] * env (i));
         return x;
+    }
+
+    // The same, with the envelope given the time in seconds
+    inline Buffer hiss (double sr, double seconds, const std::function<double (double)>& env, std::uint32_t seed, std::initializer_list<Filter> filters)
+    {
+        return hissBySample (sr, seconds, [&] (int i) { return env (i / sr); }, seed, filters);
+    }
+
+    // The first sample at or after `seconds`, as whole samples, so a compiler's
+    // rounding of i / sr can't move an onset that falls on a sample
+    inline int onsetSample (double seconds, double sr)
+    {
+        return std::max (0, (int) std::ceil (seconds * sr - 1.0e-7));
     }
 
     struct Part { const Buffer* x; double gain; };
@@ -171,13 +184,16 @@ namespace vs::drumsynth
     inline Buffer clap (double sr, double gap, double room, double hz, std::uint32_t seed)
     {
         const double hits[] { 0, gap, gap * 2, gap * 2.9 }, last = hits[3];
-        auto env = [=] (double t)
+        int at[4];
+        for (int k = 0; k < 4; ++k) at[k] = onsetSample (hits[k], sr);
+        auto env = [=] (int i)
         {
+            const double t = i / sr;
             double v = 0;
-            for (double h : hits) if (t >= h) v = std::max (v, std::exp (-(t - h) / 0.0045));
-            return t >= last ? std::max (v, 0.6 * std::exp (-(t - last) / room)) : v;
+            for (int k = 0; k < 4; ++k) if (i >= at[k]) v = std::max (v, std::exp (-(t - hits[k]) / 0.0045));
+            return i >= at[3] ? std::max (v, 0.6 * std::exp (-(t - last) / room)) : v;
         };
-        auto x = hiss (sr, room * 3.5, env, seed, { { Type::bandPass, hz, 1.1 }, { Type::highPass, 500, 0.7 }, { Type::peak, hz * 2.2, 1, 3 } });
+        auto x = hissBySample (sr, room * 3.5, env, seed, { { Type::bandPass, hz, 1.1 }, { Type::highPass, 500, 0.7 }, { Type::peak, hz * 2.2, 1, 3 } });
         return drive (x, 1.6);
     }
 
