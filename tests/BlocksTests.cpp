@@ -1,6 +1,6 @@
 // The building blocks: FFT, windows, random generators, statistics, linear
-// prediction, Butterworth sections and cascades, oversampling and the
-// Linkwitz-Riley crossover. Built without JUCE, as the browser build is. Each
+// prediction, Butterworth sections and cascades, oversampling, the
+// Linkwitz-Riley crossover, the state-variable filter and convolution. Built without JUCE, as the browser build is. Each
 // check prints PASS or FAIL; the suite exits non-zero on any failure.
 #include <cmath>
 #include <algorithm>
@@ -16,6 +16,8 @@
 #include "dsp/Biquad.h"
 #include "dsp/Oversampler.h"
 #include "dsp/Crossover.h"
+#include "dsp/Svf.h"
+#include "dsp/Convolution.h"
 
 namespace
 {
@@ -413,6 +415,92 @@ namespace
         const double atDb = 10 * std::log10 (sq / 12000.0);
         expect ("LinkwitzRiley: -6 dB at the cut-off", std::abs (atDb + 6.02) < 0.05, atDb);
     }
+
+    void svfTests()
+    {
+        // the Butterworth high-pass: -3 dB at the cut-off, -24 dB two octaves below, flat above
+        const double fs = 48000.0;
+        auto levelAt = [&] (double f)
+        {
+            vs::StateVariableFilter<float> hp;
+            hp.prepare (fs, 1);
+            hp.setType (vs::StateVariableFilter<float>::Type::highPass);
+            hp.setResonance (0.70710678f);
+            hp.setCutoffFrequency (4000.0f);
+            double sq = 0.0, in = 0.0;
+            for (int i = 0; i < 48000; ++i)
+            {
+                const float x = (float) std::sin (2 * pi * f * i / fs), y = hp.processSample (0, x);
+                if (i > 24000) { sq += (double) y * y; in += (double) x * x; }
+            }
+            return 10 * std::log10 (sq / in);
+        };
+        const double atCut = levelAt (4000.0), twoBelow = levelAt (1000.0), above = levelAt (16000.0);
+        expect ("StateVariableFilter: high-pass -3 dB at the cut-off", std::abs (atCut + 3.01) < 0.05, atCut);
+        expect ("StateVariableFilter: high-pass -24 dB two octaves below", twoBelow < -24.0 && twoBelow > -25.0, twoBelow);
+        expect ("StateVariableFilter: high-pass flat well above", std::abs (above) < 0.1, above);
+    }
+
+    void convolutionTests()
+    {
+        // against the direct sum, for impulse responses shorter and longer
+        // than a partition and blocks of every size up to the largest
+        double worst = 0.0;
+        unsigned seed = 10;
+        for (int len : { 1, 7, 300, 2048, 5000 })
+            for (int maxBlock : { 16, 128, 200, 512 })
+            {
+                const auto h = noise (len, seed++), x = noise (12000, seed++);
+                std::vector<float> ir (h.begin(), h.end()), l (x.begin(), x.end()), r ((size_t) x.size(), 0.0f);
+                vs::Convolution c;
+                c.loadImpulseResponse ({ ir });
+                c.prepare (48000.0, maxBlock);
+                std::mt19937 rng (seed);
+                for (size_t i = 0; i < l.size();)
+                {
+                    const int n = (int) std::min<size_t> ((size_t) std::uniform_int_distribution<int> (1, maxBlock) (rng), l.size() - i);
+                    float* ch[2] { l.data() + i, r.data() + i };
+                    c.process (ch, 2, n);
+                    i += (size_t) n;
+                }
+                double peak = 0.0, err = 0.0;
+                for (size_t i = 0; i < l.size(); ++i)
+                {
+                    double want = 0.0;
+                    for (size_t k = 0; k < ir.size() && k <= i; ++k) want += (double) ir[k] * (double) (float) x[i - k];
+                    err = std::max ({ err, std::abs (l[i] - want), (double) std::abs (r[i]) });
+                    peak = std::max (peak, std::abs (want));
+                }
+                worst = std::max (worst, err / std::max (peak, 1.0));
+            }
+        expect ("Convolution: the direct sum to float rounding, no latency", worst < 1e-5, worst);
+
+        // a new response crossfades in over 50 ms: no jump bigger than the signal's own steps
+        {
+            const double fs = 48000.0;
+            vs::Convolution c;
+            std::vector<float> a (512, 0.0f), b (512, 0.0f);
+            a[0] = 1.0f;
+            b[0] = -1.0f;
+            c.loadImpulseResponse ({ a });
+            c.prepare (fs, 256);
+            std::vector<float> l (256 * 190), r (256 * 190);
+            for (size_t i = 0; i < l.size(); ++i) l[i] = r[i] = (float) std::sin (2 * pi * 100.0 * i / fs);
+            for (size_t i = 0; i < l.size(); i += 256)
+            {
+                if (i == 256 * 40) c.loadImpulseResponse ({ b });
+                float* ch[2] { l.data() + i, r.data() + i };
+                c.process (ch, 2, 256);
+            }
+            double jump = 0.0;
+            for (size_t i = 1; i < l.size(); ++i) jump = std::max (jump, (double) std::abs (l[i] - l[i - 1]));
+            const size_t swapAt = 256 * 40, fadeEnd = swapAt + 2400;
+            const bool flipped = std::abs (l[fadeEnd + 100] + (float) std::sin (2 * pi * 100.0 * (fadeEnd + 100) / fs)) < 1e-5f;
+            const bool before = std::abs (l[swapAt - 1] - (float) std::sin (2 * pi * 100.0 * (swapAt - 1) / fs)) < 1e-5f;
+            const bool middle = std::abs (l[swapAt + 1200]) < 0.02f + std::abs ((float) std::sin (2 * pi * 100.0 * (swapAt + 1200) / fs)) * 0.01f;
+            expect ("Convolution: a new response crossfades in over 50 ms", flipped && before && middle && jump < 0.02, jump);
+        }
+    }
 }
 
 int main()
@@ -425,6 +513,8 @@ int main()
     biquadTests();
     oversamplerTests();
     crossoverTests();
+    svfTests();
+    convolutionTests();
     std::printf ("\n%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
     return failures == 0 ? 0 : 1;
 }
