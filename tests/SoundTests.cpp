@@ -424,12 +424,20 @@ namespace
             { "softtick", "poly", 2160, 140.691279 },
             { "softtick", "sub", 1440, 70.8446698 },
         };
+        // Exact to float rounding, except under MSVC's /fp:fast (tests/CMakeLists.txt),
+        // where an onset that falls exactly on a sample (the clap's hands) can
+        // move by one sample
+       #if defined (_MSC_VER) && ! defined (__clang__)
+        const double sumTolerance = 1e-3;
+       #else
+        const double sumTolerance = 1e-5;
+       #endif
         int bad = 0;
         std::string first;
         for (auto& p : drums)
         {
             const auto x = d::renderSound (p.id, 48000);
-            if ((int) x.size() != p.length || std::abs (absSum (x) - p.absSum) > 1e-5 * p.absSum)
+            if ((int) x.size() != p.length || std::abs (absSum (x) - p.absSum) > sumTolerance * p.absSum)
             {
                 if (! bad++) first = std::string (p.id) + " " + std::to_string (x.size()) + " " + num (absSum (x));
             }
@@ -441,7 +449,7 @@ namespace
             const auto s = m::makeSounds (p.set, 48000);
             const std::string r = p.role;
             const auto& x = r == "accent" ? s.accent : r == "beat" ? s.beat : r == "sub" ? s.sub : r == "poly" ? s.poly : s.alt;
-            if ((int) x.size() != p.length || std::abs (absSum (x) - p.absSum) > 1e-5 * p.absSum)
+            if ((int) x.size() != p.length || std::abs (absSum (x) - p.absSum) > sumTolerance * p.absSum)
             {
                 if (! bad++) first = std::string (p.set) + " " + r + " " + std::to_string (x.size()) + " " + num (absSum (x));
             }
