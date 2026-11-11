@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include "Ramp.h"
 
 namespace vs
@@ -128,6 +129,53 @@ namespace vs
         inline void addWithGain (const float* src, float* dst, int n, float gain)
         {
             for (int i = 0; i < n; ++i) dst[i] += gain * src[i];
+        }
+
+        // n samples of x times a gain moving in equal steps from start toward
+        // end, the step (end - start) / n added before each sample, so the first
+        // sample already has one step and the last has end: how a DAW's rack
+        // return moves its wet level (Tracktion Engine's, number for number)
+        inline void applyGainRampStepFirst (float* x, int n, float start, float end)
+        {
+            if (n <= 0) return;
+            const float step = (end - start) / (float) n;
+            for (int i = 0; i < n; ++i)
+            {
+                start += step;
+                x[i] *= start;
+            }
+        }
+
+        // n samples of src added into dst with a gain moving in equal steps from
+        // start (on the first sample) toward end, the step (end - start) / n added
+        // after each sample: a rack return's dry level as it moves
+        inline void addWithGainRamp (const float* src, float* dst, int n, float start, float end)
+        {
+            if (n <= 0) return;
+            const float delta = (end - start) / (float) n;
+            float gain = start;
+            for (int i = 0; i < n; ++i)
+            {
+                dst[i] += src[i] * gain;
+                gain += delta;
+            }
+        }
+
+        // A hosted plugin's dry and wet levels as a DAW applies them (Tracktion
+        // Engine's rule, so songs play as before): the dry copy is kept only above
+        // a whisper (hostKeepsDry), the plugin's output is scaled by wet only below
+        // full level (hostWetGain; nothing at all at zero), then the kept dry copy is
+        // added with addWithGain.
+        inline bool hostKeepsDry (float dry) { return dry > 0.00004f; }
+
+        inline void hostWetGain (float wet, float* const* ch, int numCh, int n)
+        {
+            if (! (wet < 0.999f)) return;
+            for (int c = 0; c < numCh; ++c)
+            {
+                if (std::abs (wet) < std::numeric_limits<float>::min()) { std::fill (ch[c], ch[c] + n, 0.0f); continue; }
+                for (int i = 0; i < n; ++i) ch[c][i] *= wet;
+            }
         }
     }
 }

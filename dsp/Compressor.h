@@ -59,17 +59,34 @@ namespace vs
             rmsDetect = d.rms;
         }
 
-        void process (float* const* ch, int numCh, int numSamples)
+        // Compresses ch in place. With key channels (a sidechain), the compressor
+        // listens to them, times keyGain, instead of to ch: another track can
+        // trigger it (ducking under a kick drum or a voice).
+        void process (float* const* ch, int numCh, int numSamples,
+                      const float* const* key = nullptr, int numKey = 0, float keyGain = 1.0f)
         {
             float maxGr = 0.0f;
+            const bool keyed = key != nullptr && numKey > 0;
 
             for (int i = 0; i < numSamples; ++i)
             {
                 float peak = 0.0f, sq = 0.0f;
-                for (int c = 0; c < numCh; ++c)
+                if (keyed)
                 {
-                    peak = std::max (peak, std::abs (ch[c][i]));
-                    sq = std::max (sq, ch[c][i] * ch[c][i]);
+                    for (int c = 0; c < numKey; ++c)
+                    {
+                        const float k = key[c][i] * keyGain;
+                        peak = std::max (peak, std::abs (k));
+                        sq = std::max (sq, k * k);
+                    }
+                }
+                else
+                {
+                    for (int c = 0; c < numCh; ++c)
+                    {
+                        peak = std::max (peak, std::abs (ch[c][i]));
+                        sq = std::max (sq, ch[c][i] * ch[c][i]);
+                    }
                 }
 
                 rms += rmsCoef * (sq - rms);

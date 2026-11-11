@@ -130,7 +130,7 @@ def rule(op, name):
         return "exact" if parts[0] in ("tempo", "tuner") else "law"
     if op == "levels":
         return {"rms": "level", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
-    if op in ("processor", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument"):
+    if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument"):
         if op == "vocoder" and last == "peak":
             return "vocoder-peak"
         if last in ("sum", "peak", "lufs"):
@@ -594,6 +594,7 @@ native("native/de-esser/vox", VOX, "de-esser", amount=1.0, freq=6500, block=512)
 native("native/pitch-engine/correction", VOX, "pitch-engine", key=0, scale=0, speedMs=20, block=512)
 native("native/pitch-engine/harmony", VOX, "pitch-engine", key=0, scale=0, speedMs=20, harmony=1, interval=3, block=512)
 native("native/body/guitar", GUITAR, "body", block=512)
+case("native/host-mix/song", "host-mix", SONG, block=512, native=True)
 
 
 # ---- writing

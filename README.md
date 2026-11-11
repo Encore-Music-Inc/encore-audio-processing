@@ -78,7 +78,7 @@ CI fails if either differs from what the script writes.
 | | `Oversampler.h` | power-of-two oversampling |
 | | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), its live form for playback, and decimation |
 | | `Ramp.h` | a value ramping to a new target, and how automation moves between its points |
-| | `Mix.h` | gain stages, crossfades, the dry/wet send law and pan laws |
+| | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels and a rack return's ramps |
 | | `Oscillator.h`, `Envelope.h` | band-limited oscillators, and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut and the dynamic EQ bell that turn a sound down by its level |
 | | `Lpc.h` | linear prediction |
@@ -94,7 +94,7 @@ CI fails if either differs from what the script writes.
 | | `Waveform.h` | waveform overviews for drawing, and a DAW's waveform picture at any zoom |
 | | `Meters.h` | how a meter moves on screen (ballistics, peak hold, its scale) and the volume fader's law |
 | Processing and mastering | `EqBand.h`, `VocalEq.h` | a parametric EQ band, and the vocal EQ |
-| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor, de-esser, gate and fader rider |
+| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider |
 | | `Saturator.h` | preamp drive |
 | | `ReverbEngine.h`, `Space.h` | the reverb, and the delay (the vocal send, with its reverb) |
 | | `Chorus.h`, `Phaser.h` | the chorus and the phaser |
@@ -103,7 +103,7 @@ CI fails if either differs from what the script writes.
 | | `MasterChain.h` | the one-knob mastering chain |
 | | `Mastering.h` | mastering a whole song with the chain |
 | | `Dither.h` | float to integer samples, with dither |
-| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence and normalizing |
+| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing and the clean-up after a plugin |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
 | | `Dsd.h` | DSD (the one-bit audio of SACDs, .dsf and .dff files) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |

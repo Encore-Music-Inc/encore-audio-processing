@@ -223,6 +223,29 @@ namespace vs
             return std::abs (x[0]) <= thresh && std::abs (x[n / 2]) <= thresh && peakOf (one, 1, n) <= thresh;
         }
 
+        // A DAW's clean-up after a plugin, number for number as Tracktion Engine's:
+        // every sample closer to zero than minAbs (about -108 dBFS by default), and
+        // every NaN, becomes zero, and any sample beyond maxAbs is held at it.
+        inline void sanitise (float* const* ch, int numCh, int n, float maxAbs, float minAbs = 1.0f / 262144.0f)
+        {
+            for (int c = 0; c < numCh; ++c)
+                for (int i = 0; i < n; ++i)
+                {
+                    const float v = ch[c][i];
+                    if (v >= minAbs) { if (v > maxAbs) ch[c][i] = maxAbs; }
+                    else if (v <= -minAbs) { if (v < -maxAbs) ch[c][i] = -maxAbs; }
+                    else ch[c][i] = 0.0f;
+                }
+        }
+
+        // Every NaN sample becomes zero (what a DAW does to each plugin's output)
+        inline void zeroNaN (float* const* ch, int numCh, int n)
+        {
+            for (int c = 0; c < numCh; ++c)
+                for (int i = 0; i < n; ++i)
+                    if (std::isnan (ch[c][i])) ch[c][i] = 0.0f;
+        }
+
         // Every channel averaged into one (what a detector or an analyser listens to).
         inline void monoAverage (const float* const* ch, int numCh, int n, float* out)
         {

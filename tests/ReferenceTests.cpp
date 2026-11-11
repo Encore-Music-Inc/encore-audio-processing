@@ -1241,6 +1241,40 @@ namespace
             tp.finish();
             out.push_back ({ "truePeak", (double) tp.truePeak (-1) });
         }
+        else if (op == "host-mix")
+        {
+            // what a DAW does around a hosted plugin and a rack: the ramps, the dry/wet
+            // rule, the clean-up, and a compressor keyed by the other channel
+            const int len = (int) n;
+            auto rampFirst = copyOf (*in);
+            for (auto& c : rampFirst) vs::mix::applyGainRampStepFirst (c.data(), len, 0.2f, 0.9f);
+            fingerprintAudio (out, "rampStepFirst", rampFirst, fs);
+            auto added = copyOf (*in);
+            if (added.size() > 1) vs::mix::addWithGainRamp (added[1].data(), added[0].data(), len, 1.0f, 0.25f);
+            fingerprintAudio (out, "addWithRamp", added, fs);
+            auto wet = copyOf (*in);
+            auto wp = pointers (wet);
+            vs::mix::hostWetGain (0.5f, wp.data(), (int) wet.size(), len);
+            fingerprintAudio (out, "hostWet", wet, fs);
+            auto clean = copyOf (*in);
+            auto cp = pointers (clean);
+            vs::channels::sanitise (cp.data(), (int) clean.size(), len, 0.3f);
+            fingerprintAudio (out, "sanitise", clean, fs);
+            Channels keyed (1, in->l);
+            float* kp[] { keyed[0].data() };
+            const float* key[] { in->channels > 1 ? in->r.data() : in->l.data() };
+            vs::Compressor comp;
+            comp.prepare (fs);
+            comp.setDetail ({ -24.0f, 6.0f, 2.0f, 80.0f, 0.0f, false });
+            for (int s = 0; s < len; s += block)
+            {
+                const int k = std::min (block, len - s);
+                float* bp[] { kp[0] + s };
+                const float* bk[] { key[0] + s };
+                comp.process (bp, 1, k, bk, 1, 0.8f);
+            }
+            fingerprintAudio (out, "keyedCompressor", keyed, fs);
+        }
         else if (op == "theory")
         {
             // each request's answer, named by its function and its place in the list

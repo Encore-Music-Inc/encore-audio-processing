@@ -11,6 +11,7 @@
 #include <vector>
 #include "dsp/AbCompare.h"
 #include "dsp/Channels.h"
+#include "dsp/Compressor.h"
 #include "dsp/LoudnessReport.h"
 #include "dsp/Lpc.h"
 #include "dsp/Windows.h"
@@ -243,6 +244,69 @@ int main()
         for (size_t i = 0; i < tone.size(); ++i) tone[i] = (float) (0.4 * std::sin (twoPi * 110.0 * (double) i / 48000.0));
         const float hz = TunerPitch::estimateLatest (tone.data(), (int) tone.size(), 48000.0);
         expect ("tuner: the latest window of a 110 Hz tone reads 110 Hz", near (hz, 110.0, 0.1), "%.2f Hz", hz);
+    }
+
+    // hosting: a plugin's dry and wet levels, a rack return's ramps, the clean-up after a plugin
+    // (each checked against the arithmetic Tracktion Engine used, written out here)
+    {
+        std::vector<float> x (256), a, b;
+        for (size_t i = 0; i < x.size(); ++i) x[i] = (float) std::sin (0.07 * (double) i) * 0.8f;
+
+        a = x; b = x;
+        mix::applyGainRampStepFirst (a.data(), 256, 0.2f, 0.9f);
+        { const float step = (0.9f - 0.2f) / 256.0f; float g = 0.2f; for (auto& v : b) { g += step; v *= g; } }
+        expect ("rack return: the wet ramp steps before each sample, as before", a == b && near (a[255], x[255] * 0.9, 1e-5));
+
+        a = x; b = x;
+        mix::addWithGainRamp (x.data(), a.data(), 256, 1.0f, 0.25f);
+        { const float d = (0.25f - 1.0f) / 256.0f; float g = 1.0f; for (size_t i = 0; i < b.size(); ++i) { b[i] += x[i] * g; g += d; } }
+        expect ("rack return: the dry signal added with a ramp, as before", a == b);
+
+        expect ("hosted plugin: the dry copy is kept only above 0.00004", ! mix::hostKeepsDry (0.00004f) && mix::hostKeepsDry (0.00005f));
+        a = x; float* ch[] { a.data() };
+        mix::hostWetGain (0.9995f, ch, 1, 256);
+        const bool fullUntouched = a == x;
+        mix::hostWetGain (0.5f, ch, 1, 256);
+        const bool halved = a[10] == x[10] * 0.5f;
+        mix::hostWetGain (0.0f, ch, 1, 256);
+        expect ("hosted plugin: wet at full level leaves it, below scales it, zero clears it",
+                fullUntouched && halved && std::all_of (a.begin(), a.end(), [] (float v) { return v == 0.0f && ! std::signbit (v); }));
+
+        std::vector<float> s { 0.5f, -0.5f, 1e-7f, -1e-7f, 150.0f, -150.0f, std::nanf (""), 1.0f / 262144.0f };
+        float* sc[] { s.data() };
+        channels::sanitise (sc, 1, (int) s.size(), 100.0f);
+        expect ("clean-up: tiny samples and NaN to zero, loud ones held at the limit",
+                s == std::vector<float> { 0.5f, -0.5f, 0.0f, 0.0f, 100.0f, -100.0f, 0.0f, 1.0f / 262144.0f });
+        std::vector<float> nn { 0.25f, std::nanf (""), -2.0f };
+        float* nc[] { nn.data() };
+        channels::zeroNaN (nc, 1, 3);
+        expect ("NaN to zero, everything else kept", nn == std::vector<float> { 0.25f, 0.0f, -2.0f });
+    }
+
+    // the compressor's key input (a sidechain)
+    {
+        constexpr int n = 48000;
+        std::vector<float> tone (n), kick (n, 0.0f);
+        for (int i = 0; i < n; ++i) tone[(size_t) i] = (float) (0.1 * std::sin (twoPi * 220.0 * i / 48000.0));
+        for (int i = 24000; i < 30000; ++i) kick[(size_t) i] = 0.9f;
+        auto run = [&] (bool keyed)
+        {
+            Compressor c;
+            c.prepare (48000.0);
+            c.setDetail ({ -10.0f, 8.0f, 1.0f, 50.0f, 0.0f, false });
+            std::vector<float> y = tone;
+            float* ch[] { y.data() };
+            const float* key[] { kick.data() };
+            c.process (ch, 1, n, keyed ? key : nullptr, keyed ? 1 : 0);
+            return y;
+        };
+        const auto plain = run (false), ducked = run (true);
+        const float* before[] { ducked.data() + 12000 };
+        const float* during[] { ducked.data() + 26000 };
+        const float quietDb = ampToDb (channels::peakOf (before, 1, 2000)), duckDb = ampToDb (channels::peakOf (during, 1, 2000));
+        expect ("sidechain: the quiet tone passes until the key is loud", near (quietDb, -20.0, 0.1), "%.2f dB", quietDb);
+        expect ("sidechain: a loud key ducks it", duckDb < quietDb - 5.0f, "%.2f dB", duckDb);
+        expect ("sidechain: without a key, a tone 10 dB under the threshold is untouched", plain == tone);
     }
 
     std::printf (failures == 0 ? "ALL PASSED\n" : "%d FAILED\n", failures);
