@@ -4,6 +4,46 @@ Each release's notes, newest first. When a release is published, the release
 job puts its section on the GitHub release (see "Release notes" in
 `CLAUDE.md`).
 
+## v2.2.0
+
+Adds what a plugin needs to draw the reverb's early reflections and the carve
+curve from these headers, and fixes "hear the original" when the processing
+has no latency.
+
+### What's new
+- `ReverbEngine::earlyReflections`: each early reflection's time and gains
+  for a mode and size, and the level the mode mixes them at. The reverb plays
+  from the same table.
+- `Carve::bandCurve`: one carve band's bell as the band applies it.
+
+### What's fixed
+- "Hear the original" (`AbCompare`) with no latency played the original one
+  sample late. It now plays it in line. On the reference set this moves the
+  matched loudness of that case by 0.0035 LU.
+
+### Downloads
+- `master.wasm`: the browser engine, with `master.wasm.sha256`.
+- `tunings.json`, `scales.json`: the tuner's instruments and tunings and the
+  scale library for the browser, each with its `.sha256`.
+- `reference.json`: the reference set, with `reference.json.sha256`.
+
+### Using it
+Pin `external/encore-audio-processing` to `v2.2.0`, then fetch its JUCE by
+path:
+
+```
+git -C external/encore-audio-processing submodule update --init --depth 1 external/JUCE
+```
+
+On Apple systems, link the Accelerate framework (JUCE products already do).
+Green Room pins `master.wasm`, `tunings.json`, `scales.json` and
+`reference.json` by their SHA-256 and runs `wasm/reference.mjs` on them.
+
+### Built on
+JUCE 9.0.5. `master.wasm` is built without JUCE, with Emscripten 6.0.13.
+
+Questions or problems: support@encoremusic.studio
+
 ## v2.1.0
 
 Adds the browser functions the ENCORE. app still kept its own copies of, DSD
