@@ -11,6 +11,9 @@
 #include <vector>
 #include "dsp/AbCompare.h"
 #include "dsp/Channels.h"
+#include "dsp/LoudnessReport.h"
+#include "dsp/Lpc.h"
+#include "dsp/Windows.h"
 #include "dsp/Meters.h"
 #include "dsp/Metronome.h"
 #include "dsp/Mix.h"
@@ -193,6 +196,25 @@ int main()
         plain.takeOriginal (orig.data(), orig.data(), 512);
         plain.mix (procL.data(), procR.data(), 512);
         expect ("no match: the processed version as it is", procL[100] == 0.7f);
+    }
+
+    // a streaming service's playback gain
+    {
+        using loudness::playbackGainDb;
+        expect ("playback gain: a loud song is turned down to the service's level", near (playbackGainDb (-8, -0.5, -14, true), -6.0, 1e-12));
+        expect ("playback gain: a quiet song is turned up only into its headroom", near (playbackGainDb (-18, -3, -14, true), 2.0, 1e-12));
+        expect ("playback gain: a service that never turns up leaves it", playbackGainDb (-18, -3, -14, false) == 0.0);
+    }
+
+    // a lossless encoder's predictors: a sine is predicted almost exactly from two samples
+    {
+        std::vector<std::int32_t> x (4096);
+        for (size_t i = 0; i < x.size(); ++i) x[i] = (std::int32_t) std::lround (10000.0 * std::sin (twoPi * 440.0 * (double) i / 48000.0));
+        const auto w = windows::tukey (4096, 0.5);
+        double err1 = 0, err2 = 0;
+        int orders = 0;
+        lpc::blockPredictors (x.data(), 4096, w.data(), 12, [&] (int order, const double*, double err) { if (order == 1) err1 = err; if (order == 2) err2 = err; orders = order; });
+        expect ("predictors: a sine needs two coefficients, every order up to 12 offered", err2 < err1 * 1e-3 && orders == 12, "%.3g / %.3g", err1, err2);
     }
 
     // levels, silence and a mono average

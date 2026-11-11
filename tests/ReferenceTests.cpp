@@ -33,6 +33,7 @@
 #include "dsp/Synth.h"
 #include "dsp/TimeStretch.h"
 #include "dsp/Mix.h"
+#include "dsp/Lpc.h"
 #include "dsp/Meters.h"
 #include "dsp/Analysis.h"
 #include "dsp/Channels.h"
@@ -681,6 +682,29 @@ namespace
             }
             fingerprintAudio (out, "", res, fs / step);
         }
+        else if (op == "lpc")
+        {
+            // a lossless encoder's predictors: blocks of the first channel as 16-bit whole numbers, Tukey (0.5)
+            const int size = (int) c.get ("size", 4096), maxOrder = (int) c.get ("order", 12);
+            const auto w = vs::windows::tukey (size, 0.5);
+            for (double t : { 0.0, 0.25, 0.5, 0.9 }) out.push_back ({ "tukey" + std::to_string ((int) (t * 100)), w[(size_t) (t * (size - 1))] });
+            int b = 0;
+            for (std::int64_t at = 0; at + size <= n && b < (int) c.get ("blocks", 3); at += size * 7, ++b)
+            {
+                std::vector<std::int32_t> x ((size_t) size);
+                for (int i = 0; i < size; ++i) x[(size_t) i] = (std::int32_t) std::lround (in->l[(size_t) (at + i)] * 32767.0f);
+                int count = 0;
+                vs::lpc::blockPredictors (x.data(), size, w.data(), maxOrder, [&] (int order, const double* a, double err)
+                {
+                    const auto p = "b" + std::to_string (b) + ".o" + std::to_string (order);
+                    out.push_back ({ p + ".err", err });
+                    out.push_back ({ p + ".a1", a[1] });
+                    out.push_back ({ p + ".last", a[order] });
+                    count = order;
+                });
+                out.push_back ({ "b" + std::to_string (b) + ".orders", (double) count });
+            }
+        }
         else if (op == "levels")
         {
             using namespace vs::channels;
@@ -1143,6 +1167,9 @@ namespace
             }
             for (size_t i = 0; i < hzs.size(); ++i) out.push_back ({ "axis.hz" + at (i), (double) vs::axis::logPosition ((float) hzs[i]) });
             for (size_t i = 0; i < positions.size(); ++i) out.push_back ({ "axis.at" + at (i), (double) vs::axis::logHz ((float) positions[i]) });
+            const auto playback = nums (c, "playback");   // lufs, peak, ref, up in fours
+            for (size_t i = 0; i + 3 < playback.size(); i += 4)
+                out.push_back ({ "playback" + at (i / 4), vs::loudness::playbackGainDb (playback[i], playback[i + 1], playback[i + 2], playback[i + 3] != 0) });
             for (size_t i = 0; i < rates.size(); ++i)
             {
                 const auto w = vs::TunerPitch::window (rates[i]);

@@ -44,6 +44,20 @@ namespace vs
 
     namespace loudness
     {
+        // The gain (dB) a streaming service applies to a song of this loudness
+        // (LUFS) and true peak (dBTP) when it plays songs at refLufs: a loud
+        // song is turned down to it; a quiet one is turned up only by a service
+        // that does (turnsUp), and only as far as the peak stays under
+        // ceilingDb (no limiter). The services and their settings are the
+        // products' to know.
+        inline double playbackGainDb (double lufs, double truePeakDb, double refLufs, bool turnsUp, double ceilingDb = -1.0)
+        {
+            const double want = refLufs - lufs;
+            if (want <= 0) return want;
+            if (! turnsUp) return 0.0;
+            return std::max (0.0, std::min (want, ceilingDb - truePeakDb));
+        }
+
         using vs::db10;
         using vs::db20;
         using vs::roundHalfUp;

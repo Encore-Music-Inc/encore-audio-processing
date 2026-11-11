@@ -89,6 +89,20 @@ namespace vs
             levinson (r, maxOrder, 1e-9, 0.0, a.data(), err, onOrder);
         }
 
+        // The predictors a lossless encoder chooses from for one block: x[0..n)
+        // times the window w (a FLAC encoder's Tukey (0.5), windows::tukey), its
+        // autocorrelation to lag maxOrder, then predictorsUpTo. Calls
+        // onOrder (order, a, err) for each order with a positive error.
+        template <typename T, typename OnOrder>
+        void blockPredictors (const T* x, int n, const double* w, int maxOrder, OnOrder&& onOrder)
+        {
+            if (n <= 0 || maxOrder <= 0) return;
+            std::vector<double> y ((size_t) n), r ((size_t) maxOrder + 1);
+            for (int i = 0; i < n; ++i) y[(size_t) i] = (double) x[i] * w[i];
+            autocorrelation (y.data(), n, maxOrder, r.data());
+            predictorsUpTo (r.data(), maxOrder, onOrder);
+        }
+
         // The prediction-error filter of order p: e[n] = sum a[k] x[n-k], k = 0..p,
         // a[0] = 1 (the predictor's coefficients negated), with a stronger 1e-4
         // white-noise bias (and 1e-12 floor) for short, noisy stretches. Stops early,

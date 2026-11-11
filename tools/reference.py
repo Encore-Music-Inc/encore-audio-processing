@@ -88,6 +88,8 @@ TOLERANCES = {
             "why": "A block averaged down (the tuner's): double sums of a few samples rounded to float, which compilers may order differently, so a value can move by a float step."},
     "law": {"abs": 1e-6, "rel": 1e-6,
             "why": "Gains and positions from the pan, fader, fade and automation laws and the drawing axes: float sin, cos, pow, exp and log, which maths libraries round differently in the last place."},
+    "lpc": {"abs": 1e-9, "rel": 1e-9,
+            "why": "Linear prediction's coefficients and errors: double-precision sums and a cosine window, which maths libraries and compilers round differently in the last places."},
     "dsd": {"abs": 1e-6, "rel": 1e-6,
             "why": "DSD to PCM: the low-pass is designed in double with sin and cos, which maths libraries round differently in the last place, so its float tables can differ in the last place, and a sample (a sum of up to 512 of them) by a few float steps."},
 }
@@ -120,8 +122,12 @@ def rule(op, name):
     parts = name.split(".")
     last = parts[-1]
     stem = last.rstrip("0123456789")
+    if op == "lpc":
+        return "exact" if last == "orders" else "lpc"
     if last in EXACT_WORDS or stem in ("pad", "midi", "trim"):
         return "exact"
+    if op == "lpc":
+        return "exact" if last == "orders" else "lpc"
     if op == "laws":
         return "exact" if parts[0] in ("tempo", "tuner") else "law"
     if op == "levels":
@@ -403,7 +409,9 @@ case("processing/levels/song", "levels", SONG)
 case("analysis/minmax/song", "minmax", SONG, size=256, columns=40, block=1000)
 case("processing/laws", "laws", pans=[-1, -0.5, 0, 0.3, 1], positions=[0, 0.05, 0.5, 1], dbs=[-100, -60, -12, 0, 6],
      ts=[0, 0.25, 0.5, 0.9, 1], curves=[0, 0.25, -0.4, 0.5, 0.75, -0.9, 1], xs=[0.1, 0.5, 0.8],
-     bpms=[10, 20, 120, 400, 500], hzs=[20, 100, 1000, 20000], rates=[44100, 48000, 96000])
+     bpms=[10, 20, 120, 400, 500], hzs=[20, 100, 1000, 20000], rates=[44100, 48000, 96000],
+     playback=[-8, -0.5, -14, 1, -18, -3, -14, 1, -18, -3, -14, 0, -20, -1.5, -16, 1, -14, -1, -14, 1])
+case("processing/lpc/song", "lpc", SONG, size=4096, order=12, blocks=3)
 case("processing/fracdelay/song", "fracdelay", SONG, block=4096, delays=[0.5, 2.25])
 case("processing/decimate/by-2", "decimate", HIGH, block=4096, factor=2)
 case("processing/decimate/by-4", "decimate", HIGH, block=999, factor=4)

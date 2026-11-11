@@ -485,4 +485,10 @@ extern "C"
         out[0] = r.lo; out[1] = r.hi;
     }
     EMSCRIPTEN_KEEPALIVE float ms_minmax_peak (void* p) { return static_cast<vs::waveform::MinMax*> (p)->peak(); }
+
+    // ---- The gain (dB) a streaming service applies (vs::loudness::playbackGainDb)
+    EMSCRIPTEN_KEEPALIVE double ms_playback_gain (double lufs, double truePeakDb, double refLufs, int turnsUp, double ceilingDb)
+    {
+        return vs::loudness::playbackGainDb (lufs, truePeakDb, refLufs, turnsUp != 0, ceilingDb);
+    }
 }

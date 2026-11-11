@@ -20,6 +20,8 @@
 #include "dsp/Loudness.h"
 #include "dsp/Resampler.h"
 #include "dsp/VocalEq.h"
+#include "dsp/Lpc.h"
+#include "dsp/Windows.h"
 
 namespace
 {
@@ -369,5 +371,29 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE int pr_live_resampler_process (void* p, double step, const float* in, int inAvailable, float* out, int nOut)
     {
         return static_cast<vs::LiveResampler*> (p)->process (step, in, inAvailable, out, nOut);
+    }
+
+    // ---- Lossless coding's linear prediction (a FLAC encoder): the Tukey
+    // window (out[0..n)), and one block's predictors. pr_lpc_predictors windows
+    // x[0..n) (whole numbers) with Tukey (0.5), and for each order 1..maxOrder
+    // with a positive error writes its coefficients to coefs[(order - 1) *
+    // maxOrder ..] and its error to errs[order - 1]; it returns how many orders
+    // it wrote.
+    EMSCRIPTEN_KEEPALIVE void pr_tukey (int n, double a, double* out)
+    {
+        const auto w = vs::windows::tukey (n, a);
+        std::copy (w.begin(), w.end(), out);
+    }
+    EMSCRIPTEN_KEEPALIVE int pr_lpc_predictors (const std::int32_t* x, int n, int maxOrder, double* coefs, double* errs)
+    {
+        const auto w = vs::windows::tukey (n, 0.5);
+        int count = 0;
+        vs::lpc::blockPredictors (x, n, w.data(), maxOrder, [&] (int order, const double* a, double err)
+        {
+            for (int k = 0; k < order; ++k) coefs[(order - 1) * maxOrder + k] = a[k + 1];
+            errs[order - 1] = err;
+            count = order;
+        });
+        return count;
     }
 }

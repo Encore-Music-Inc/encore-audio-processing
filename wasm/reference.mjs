@@ -350,6 +350,29 @@ function runMore(c, sig, out) {
       fingerprintAudio(out, '', res.map((parts) => { const all = new Float32Array(parts.length * outBlock); parts.forEach((q, k) => all.set(q, k * outBlock)); return all; }), fs / step);
       return true;
     }
+    case 'lpc': {
+      const size = c.size ?? 4096, maxOrder = c.order ?? 12;
+      const wp = X.malloc(8 * size);
+      X.pr_tukey(size, 0.5, wp);
+      const w = f64(wp, size);
+      for (const t of [0, 0.25, 0.5, 0.9]) out.push([`tukey${Math.trunc(t * 100)}`, w[Math.trunc(t * (size - 1))]]);
+      X.free(wp);
+      const xp = X.malloc(4 * size), cp = X.malloc(8 * maxOrder * maxOrder), ep = X.malloc(8 * maxOrder);
+      let b = 0;
+      for (let at = 0; at + size <= n && b < (c.blocks ?? 3); at += size * 7, b++) {
+        const x = i32(xp, size);
+        for (let i = 0; i < size; i++) { const v = Math.fround(sig.l[at + i] * 32767); x[i] = v < 0 ? -Math.round(-v) : Math.round(v); }   // as lround: halves away from zero
+        const count = X.pr_lpc_predictors(xp, size, maxOrder, cp, ep);
+        const coefs = f64(cp, maxOrder * maxOrder), errs = f64(ep, maxOrder);
+        for (let o = 1; o <= count; o++) {
+          const p = `b${b}.o${o}`;
+          out.push([p + '.err', errs[o - 1]], [p + '.a1', coefs[(o - 1) * maxOrder]], [p + '.last', coefs[(o - 1) * maxOrder + o - 1]]);
+        }
+        out.push([`b${b}.orders`, count]);
+      }
+      X.free(xp); X.free(cp); X.free(ep);
+      return true;
+    }
     case 'levels': {
       const src = channelsOf(sig);
       const buf = alloc(src);
@@ -718,6 +741,8 @@ function runMore(c, sig, out) {
       (c.bpms ?? []).forEach((bpm, i) => out.push([`tempo.clamp${i}`, X.rh_clamp_tempo(bpm)], [`tempo.is${i}`, X.rh_is_tempo(bpm)]));
       (c.hzs ?? []).forEach((hz, i) => out.push([`axis.hz${i}`, X.ms_axis_log_position(hz, 20, 20000)]));
       (c.positions ?? []).forEach((p, i) => out.push([`axis.at${i}`, X.ms_axis_log_hz(p, 20, 20000)]));
+      const pb = c.playback ?? [];
+      for (let i = 0; i + 3 < pb.length; i += 4) out.push([`playback${i / 4}`, X.ms_playback_gain(pb[i], pb[i + 1], pb[i + 2], pb[i + 3], -1)]);
       (c.rates ?? []).forEach((rate, i) => out.push([`tuner.stride${i}`, X.tp_window_stride(rate)], [`tuner.n${i}`, X.tp_window_length(rate)]));
       X.free(two);
       return true;
