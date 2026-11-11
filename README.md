@@ -76,7 +76,7 @@ CI fails if either differs from what the script writes.
 | | `Random.h` | seeded random numbers, the same on every system |
 | | `Stats.h` | median, percentile, mean, deviation and a least-squares line |
 | | `Util.h` | smoothers, decibels, mid and side, rounding |
-| Measurement | `Loudness.h` | the loudness meter (ITU-R BS.1770, EBU R128) |
+| Measurement | `Loudness.h` | the loudness meter (ITU-R BS.1770, EBU R128), and the true-peak limiter the mastering chain ends with |
 | | `LoudnessReport.h` | a song's loudness report |
 | | `TruePeak.h` | the true-peak detector |
 | | `Analysis.h` | everything a release check measures on a finished song |
@@ -93,6 +93,7 @@ CI fails if either differs from what the script writes.
 | | `Dither.h` | float to integer samples, with dither |
 | | `Channels.h` | channel maps, trims, fades, peak and normalizing for whole files |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
+| | `Dsd.h` | DSD (the one-bit audio of SACDs, .dsf and .dff files) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
 | Pitch | `Yin.h` | the pitch detector, with its settings for following a voice, the tuner and singing |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction: its detector and its real-time engine |
@@ -116,12 +117,12 @@ CI fails if either differs from what the script writes.
 | `wasm/api_mastering.cpp` | `mt_` | whole-song mastering |
 | `wasm/api_loudness.cpp` | `lm_` | the loudness meter |
 | `wasm/api_measure.cpp` | `ms_` | true peak, the loudness report, the analysis, spectrum, waveforms |
-| `wasm/api_processing.cpp` | `pr_` | resampling, delays, dither, channel work, device simulation, the vocal EQ, "hear the original" |
+| `wasm/api_processing.cpp` | `pr_` | resampling, delays, dither, channel work, device simulation, the vocal EQ, "hear the original", DSD to PCM, the true-peak limiter on its own |
 | `wasm/api_pitch.cpp` | `pi_` | voice pitch and its measurements, played notes, drum tuning |
-| `wasm/api_tuner.cpp` | `tp_` | the tuner |
-| `wasm/api_rhythm.cpp` | `rh_` | tempo, onsets, timing |
-| `wasm/api_sound.cpp` | `sd_` | the drums and the metronome |
-| `wasm/api_music.cpp` | `mu_` | note names, keys, Hz and MIDI |
+| `wasm/api_tuner.cpp` | `tp_` | the tuner, and the block averaging before a reading |
+| `wasm/api_rhythm.cpp` | `rh_` | tempo, onsets, timing, the beat grid's meters (groupings, accents, note values, subdivisions, tempo names) |
+| `wasm/api_sound.cpp` | `sd_` | the drums and the metronome (its sounds, its click engine and mending its settings) |
+| `wasm/api_music.cpp` | `mu_` | note names, spelled notes and the sounds they make, keys and the key lists, Hz and MIDI |
 
 The lists (tunings, scales) are the `data/*.json` files, not functions.
 

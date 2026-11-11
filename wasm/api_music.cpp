@@ -79,6 +79,17 @@ extern "C"
 
     EMSCRIPTEN_KEEPALIVE int mu_pc_of (int letter, int acc) { return vs::music::pcOf (vs::music::note (letter, acc)); }
 
+    // The note on a letter (any int, wrapped to 0..6) that sounds as pitch
+    // class pc, into out[0..1]: its letter and accidental (-5..6)
+    EMSCRIPTEN_KEEPALIVE void mu_on_letter (int letter, int pc, int* out) { put (vs::music::onLetter (letter, pc), out); }
+
+    // For a note like Cb, Fb, E#, B# or any double accidental, the plain
+    // note it sounds as ("B" for Cb); "" for any other note
+    EMSCRIPTEN_KEEPALIVE int mu_sounds_as (int letter, int acc, char* out, int cap)
+    {
+        return put (vs::music::soundsAs (vs::music::note (letter, acc)), out, cap);
+    }
+
     // The rule's spelling of a pitch class with no key, into out[0..1]
     EMSCRIPTEN_KEEPALIVE void mu_plain_note (int pc, int* out) { put (vs::music::plainNote (pc), out); }
 
@@ -116,6 +127,18 @@ extern "C"
     {
         const auto notes = vs::music::scaleNotes (key (tonicLetter, tonicAcc, minor));
         for (size_t i = 0; i < notes.size(); ++i) put (notes[i], out + 2 * i);
+    }
+
+    // The keys with at most seven sharps or flats (minor 0: the major keys,
+    // 1: the minor keys), in the order C, G, D, ... then F, Bb, ...: how many,
+    // and key i's tonic as text ("F#"); -1 for an i out of range
+    EMSCRIPTEN_KEEPALIVE int mu_key_count (int minor) { return (int) (minor ? vs::music::minorKeys : vs::music::majorKeys).size(); }
+
+    EMSCRIPTEN_KEEPALIVE int mu_key_tonic (int minor, int i, char* out, int cap)
+    {
+        const auto& keys = minor ? vs::music::minorKeys : vs::music::majorKeys;
+        if (i < 0 || i >= (int) keys.size()) { if (cap > 0) out[0] = 0; return -1; }
+        return put (keys[(size_t) i], out, cap);
     }
 
     // Sharps (positive) or flats (negative) in the key signature

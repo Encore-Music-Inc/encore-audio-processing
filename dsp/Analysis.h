@@ -62,6 +62,7 @@ namespace vs
             bool empty = true;
 
             double samplePeakDb = 0, samplePeakAt = 0, peakLDb = 0, peakRDb = 0, dcL = 0, dcR = 0;
+            double dcLDb = -240, dcRDb = -240;    // each channel's DC offset in dBFS: 20 log10 (|dc| + 1e-12)
             int oversFloat = 0;                // samples over full scale
             double corr = 1, monoLossDb = 0, sideToMidDb = 0;
             bool identical = false;
@@ -317,6 +318,8 @@ namespace vs
             m.peakRDb = db20 (pkR);
             m.dcL = sL / nd;
             m.dcR = sR / nd;
+            m.dcLDb = db20 (std::abs (m.dcL));
+            m.dcRDb = db20 (std::abs (m.dcR));
             m.oversFloat = oversL + oversR;
             m.corr = eL > 1e-12 && eR > 1e-12 ? xLR / std::sqrt (eL * eR) : 1.0;
             m.monoLossDb = db10 (eMid) - db10 ((eL + eR) / 2.0);

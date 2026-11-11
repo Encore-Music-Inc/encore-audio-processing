@@ -164,6 +164,10 @@ namespace
         vs::tempo::TempoFinder early (sr);
         early.push (g.data(), (int) (sr * 3.9));
         expect ("tempo: nothing before 4 s", ! early.estimate().valid);
+        // no rhythm: digital silence or a constant (nothing starts) is no tempo, not the slowest one searched
+        const auto silent = listen (std::vector<float> ((size_t) (sr * 6), 0.0f), sr, 4096);
+        const auto flat = listen (std::vector<float> ((size_t) (sr * 6), 0.25f), sr, 4096);
+        expect ("tempo: silence and a constant have no tempo", ! silent.valid && silent.bpm == 0 && silent.others.empty() && ! flat.valid);
     }
 
     // ---- onsets, on synthetic playing

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -171,7 +172,8 @@ namespace vs::metronome
         std::string digits;
         auto flush = [&]
         {
-            if (! digits.empty()) parts.push_back (std::stod (digits));
+            // strtod, not stod: a run of digits too long for a double reads as infinity (and so is no grouping) instead of throwing
+            if (! digits.empty()) parts.push_back (std::strtod (digits.c_str(), nullptr));
             digits.clear();
         };
         for (char c : text)

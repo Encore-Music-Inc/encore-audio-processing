@@ -1,6 +1,6 @@
 // The reference set (data/reference.json) through master.wasm: makes each
 // case's input with rf_render, runs it through the exported functions the
-// browser calls (lm_*, ms_*, tp_*, pi_*, rh_*, mt_*, sd_*) and checks every
+// browser calls (lm_*, ms_*, tp_*, pi_*, rh_*, mt_*, sd_*, pr_*, mu_*) and checks every
 // expected result within its tolerance, as tests/ReferenceTests.cpp does
 // natively. Fails when a result is off, when an input is not the one the file
 // names (its hash), when the file has a result this run did not produce, or
@@ -151,13 +151,37 @@ const ANALYSIS = ['empty', 'duration', 'samplePeakDb', 'samplePeakAt', 'peakLDb'
   'shortTermMaxAt', 'lra', 'balanceDb', 'truePeakDb', 'truePeakAt', 'tpOverCount', 'tpOverZeroCount', 'clipRuns',
   'clipEvents', 'clipLongest', 'clipHasLevel', 'clipLevelDb', 'lowCorr', 'lowMonoLossDb', 'lowShareDb', 'leadSec',
   'tailSec', 'firstSampleDb', 'lastSampleDb', 'headRmsDb', 'endRmsDb', 'endDecayDb', 'hasSpectrum', 'cliffHz',
-  'cliffDrop', 'hasPadded16', 'padded16'];
+  'cliffDrop', 'hasPadded16', 'padded16', 'dcLDb', 'dcRDb'];
 
 // text written by a mu_* function into a buffer
 const textBuf = X.malloc(256), intBuf = X.malloc(64);
 const mtext = (fn) => { fn(textBuf, 256); return cstr(textBuf); };
 const noteText = (letter, acc) => mtext((b, cap) => X.mu_note_text(letter, acc, b, cap));
 const spelledAt = (p) => { const v = i32(p, 2); return noteText(v[0], v[1]); };
+
+// a list of ints at p
+const intList = (p, n) => Array.from(i32(p, n));
+const ints = (a) => { const p = X.malloc(4 * Math.max(1, a.length)); i32(p, a.length).set(a); return p; };
+
+// A DSD stream from a reference input, as tests/ReferenceTests.cpp's dsdBits: kind "sine", a
+// second-order one-bit modulator in integers; kind "sign", each sample's sign
+function dsdBits(x, kind) {
+  const out = new Uint8Array(Math.trunc(x.length / 8));
+  const one = 2 ** 24;
+  let i1 = 0, i2 = 0, y = 0;
+  for (let k = 0; k < out.length * 8; k++) {
+    let bit;
+    if (kind === 'sine') {
+      const xi = Math.floor(x[k] * one);
+      i1 += xi - y;
+      i2 += i1 - y;
+      bit = i2 >= 0;
+      y = bit ? one : -one;
+    } else bit = x[k] >= 0;
+    if (bit) out[k >> 3] |= 0x80 >> (k & 7);
+  }
+  return out;
+}
 
 function runMore(c, sig, out) {
   const fs = sig ? sig.rate : (c.rate ?? 48000);
@@ -475,6 +499,118 @@ function runMore(c, sig, out) {
         out.push([`drum${d}`, mtext((b, cap) => X.mu_gm_drum_name(d, b, cap))]);
         out.push([`pad${d}`, X.mu_pad_for_note(d)]);
       }
+      for (let letter = 0; letter < 7; letter++) {
+        for (let pc = 0; pc < 12; pc++) { X.mu_on_letter(letter, pc, intBuf); out.push([`onLetter.${letter}.${pc}`, spelledAt(intBuf)]); }
+        for (let acc = -2; acc <= 2; acc++) out.push([`soundsAs.${letter}.${acc}`, mtext((b, cap) => X.mu_sounds_as(letter, acc, b, cap))]);
+      }
+      for (const [name, minor] of [['majorKeys', 0], ['minorKeys', 1]])
+        out.push([name, Array.from({ length: X.mu_key_count(minor) }, (_, i) => mtext((b, cap) => X.mu_key_tonic(minor, i, b, cap))).join(' ')]);
+      return true;
+    }
+    case 'meter': {
+      const cap = 1024, buf = X.malloc(4 * cap), buf2 = X.malloc(4 * cap), dbl = X.malloc(8 * 32);
+      for (const top of nums('tops'))
+        for (const bottom of nums('bottoms')) {
+          const m = `${top}/${bottom}`;
+          const count = X.rh_grouping_options(top, bottom, buf, cap);
+          const v = intList(buf, cap), options = [];
+          for (let i = 0, k = 0; i < count; i++) { options.push(v.slice(k + 1, k + 1 + v[k]).join('+')); k += 1 + v[k]; }
+          out.push([`options.${m}`, options.join(' ')]);
+          const g = intList(buf, X.rh_default_groups(top, bottom, buf, cap));
+          out.push([`groups.${m}`, g.join('+')]);
+          const gp = ints(g);
+          out.push([`accents.${m}`, intList(buf2, X.rh_default_accents(gp, g.length, buf2, cap)).join(' ')]);
+          const places = X.rh_group_map(gp, g.length, buf2, cap), map = intList(buf2, 2 * places), parts = [];
+          for (let i = 0; i < places; i++) parts.push(`${map[2 * i]}${map[2 * i + 1] ? 's' : ''}`);
+          out.push([`map.${m}`, parts.join(' ')]);
+          const units = intList(buf2, X.rh_unit_options(gp, g.length, bottom, buf2));
+          out.push([`units.${m}`, units.map((u) => `${u} ${mtext((b, c2) => X.rh_note_value_name(u, bottom, b, c2))}`).join(', ')]);
+          X.free(gp);
+        }
+      (c.parse ?? []).forEach(([t, top], i) => {
+        const tp = text(t), n = X.rh_parse_groups(tp, top, buf, cap);
+        X.free(tp);
+        out.push([`parse${i}`, n > 0 ? intList(buf, n).join('+') : '-']);
+      });
+      for (let units = 1; units <= 12; units++)
+        for (const bottom of [1, 2, 4, 8, 16, 32, 3]) out.push([`noteValue.${units}/${bottom}`, mtext((b, c2) => X.rh_note_value_name(units, bottom, b, c2))]);
+      for (const id of ['none', '8', '3', '16', '5', '6', 'x'])
+        nums('swings').forEach((swing, k) => {
+          const tp = text(id), n = X.rh_sub_fractions(tp, swing, dbl);
+          X.free(tp);
+          out.push([`sub.${id}.${k}.count`, n]);
+          f64(dbl, n).forEach((f, i) => out.push([`sub.${id}.${k}.f${i}`, f]));
+        });
+      nums('bpms').forEach((bpm, k) => out.push([`tempoName${k}`, mtext((b, c2) => X.rh_tempo_name(bpm, b, c2))]));
+      const SUBS = ['none', '8', '3', '16', '5', '6'];
+      (c.clean ?? []).forEach((item, i) => {
+        const sp = X.malloc(8 * 18);
+        f64(sp, 18).set(item.s);
+        const gp = ints(item.groups ?? []), ap = ints(item.accents ?? []), subp = text(item.sub ?? 'none');
+        X.sd_clean_settings(sp, gp, item.groups ? item.groups.length : -1, ap, item.accents ? item.accents.length : -1, subp, dbl, buf, buf2);
+        const o = Array.from(f64(dbl, 21));
+        for (let k = 0; k < 18; k++) out.push([`clean${i}.v${k}`, o[k]]);
+        out.push([`clean${i}.groups`, intList(buf, o[18]).join('+')], [`clean${i}.accents`, intList(buf2, o[19]).join(' ')], [`clean${i}.sub`, SUBS[o[20]]]);
+        [sp, gp, ap, subp].forEach((p) => X.free(p));
+      });
+      [buf, buf2, dbl].forEach((p) => X.free(p));
+      return true;
+    }
+    case 'downsample': {
+      const xp = X.malloc(4 * n + 4), yp = X.malloc(4 * n + 4);
+      f32(xp, n).set(sig.l);
+      for (const stride of nums('strides')) {
+        const m = X.tp_downsample(xp, n, stride, yp), y = f32(yp, m);
+        const p = `stride${Math.trunc(stride)}`;
+        let sum = 0;
+        for (let i = 0; i < m; i++) sum += Math.abs(y[i]);
+        out.push([`${p}.length`, m], [`${p}.sum`, sum]);
+        for (const at of nums('at')) if (Math.trunc(at) < m) out.push([`${p}.at${Math.trunc(at)}`, y[Math.trunc(at)]]);
+      }
+      X.free(xp); X.free(yp);
+      return true;
+    }
+    case 'dsd': {
+      const bits = [dsdBits(sig.l, c.kind)];
+      if (stereo) bits.push(dsdBits(sig.r, c.kind));
+      const h = X.pr_dsd_create(fs, bits.length, block);
+      out.push(['rate', h ? X.pr_dsd_rate(h) : 0]);
+      const pcm = bits.map(() => []);
+      const len = bits[0].length;
+      blocks(len, block, (s, k) => {
+        bits.forEach((b, ch) => new Uint8Array(X.memory.buffer, X.pr_dsd_input(h, ch), k).set(b.subarray(s, s + k)));
+        const made = X.pr_dsd_push(h, k);
+        bits.forEach((_, ch) => pcm[ch].push(...f32(X.pr_dsd_output(h, ch), made)));
+      });
+      X.pr_dsd_destroy(h);
+      const rate = out[out.length - 1][1] || 88200;
+      fingerprintAudio(out, '', pcm.map((x) => Float32Array.from(x)), rate);
+      for (const at of nums('at')) if (Math.trunc(at) < pcm[0].length) out.push([`at${Math.trunc(at)}`, pcm[0][Math.trunc(at)]]);
+      return true;
+    }
+    case 'limiter': {
+      const h = X.pr_limiter_create(fs, sig.channels, c.ceiling ?? -1);
+      if (c.release !== undefined) X.pr_limiter_release(h, c.release);
+      out.push(['latency', X.pr_limiter_latency(h)]);
+      const ch = channelsOf(sig).map((x) => x.slice());
+      const buf = alloc(ch.map((x) => x.subarray(0, block)));
+      blocks(n, block, (s, k) => {
+        ch.forEach((x, i) => f32(buf.ptrs[i], k).set(x.subarray(s, s + k)));
+        X.pr_limiter_process(h, buf.table, k);
+        ch.forEach((x, i) => x.set(f32(buf.ptrs[i], k), s));
+      });
+      buf.free();
+      X.pr_limiter_destroy(h);
+      fingerprintAudio(out, '', ch, fs);
+      const m = X.ms_tp_create(ch.length, 4096);
+      blocks(n, 4096, (s, k) => {
+        f32(X.ms_tp_left(m), k).set(ch[0].subarray(s, s + k));
+        if (ch.length > 1) f32(X.ms_tp_right(m), k).set(ch[1].subarray(s, s + k));
+        X.ms_tp_process(m, k);
+      });
+      X.ms_tp_finish(m);
+      out.push(['truePeak', X.ms_tp_true_peak(m, -1)]);
+      X.ms_tp_destroy(m);
       return true;
     }
   }

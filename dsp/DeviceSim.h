@@ -16,7 +16,9 @@ namespace vs
     // The filters are the Web Audio API's BiquadFilterNode designs (the
     // specification's formulas): lowpass and highpass take Q in dB
     // (alpha = sin w / (2 * 10^(Q / 20))), peaking takes a plain Q, and the
-    // shelves ignore Q (slope S = 1). A mono device (a phone's single speaker)
+    // shelves ignore Q (slope S = 1). The devices' lowpass and highpass Qs
+    // are plain Qs (0.7 is about Butterworth's, flat to the corner), given
+    // to those formulas in dB (qDb), so each corner has no resonance. A mono device (a phone's single speaker)
     // first sums the channels to 0.5 (L + R), as Web Audio's stereo to mono
     // mix does, and plays that on both.
     namespace device
@@ -37,14 +39,17 @@ namespace vs
             std::vector<Filter> filters;
         };
 
+        // A plain Q as the lowpass and highpass formulas read it, dB: 20 log10 (q)
+        inline double qDb (double q) { return 20.0 * std::log10 (q); }
+
         inline const std::vector<Device>& devices()
         {
             using F = FilterType;
             static const std::vector<Device> list {
                 { "studio", "Studio monitors", false, {} },
-                { "phone", "Phone speaker", true, { { F::highpass, 450, 0.9 }, { F::peaking, 2500, 1.2, 5 }, { F::lowpass, 9000, 0.7 } } },
-                { "laptop", "Laptop", false, { { F::highpass, 200, 0.8 }, { F::peaking, 1800, 1, 3 }, { F::lowpass, 13000, 0.7 } } },
-                { "earbuds", "Earbuds", false, { { F::highpass, 40, 0.7 }, { F::lowshelf, 120, 1, 2 }, { F::peaking, 6000, 2, 3 } } },
+                { "phone", "Phone speaker", true, { { F::highpass, 450, qDb (0.9) }, { F::peaking, 2500, 1.2, 5 }, { F::lowpass, 9000, qDb (0.7) } } },
+                { "laptop", "Laptop", false, { { F::highpass, 200, qDb (0.8) }, { F::peaking, 1800, 1, 3 }, { F::lowpass, 13000, qDb (0.7) } } },
+                { "earbuds", "Earbuds", false, { { F::highpass, 40, qDb (0.7) }, { F::lowshelf, 120, 1, 2 }, { F::peaking, 6000, 2, 3 } } },
                 { "car", "Car", false, { { F::lowshelf, 90, 1, 5 }, { F::peaking, 300, 1.5, 2 }, { F::highshelf, 7000, 1, -4 } } },
             };
             return list;
