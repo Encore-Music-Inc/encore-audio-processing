@@ -109,6 +109,21 @@ namespace vs
                 for (int i = 0; i < n; ++i) ch[c][i] *= gain;
         }
 
+        // n samples of x times a gain moving in equal steps from start (on the
+        // first sample) toward end, the step (end - start) / n added after each
+        // sample: a click-free mute or a short fade, number for number as JUCE's
+        // applyGainRamp
+        inline void applyGainRamp (float* x, int n, float start, float end)
+        {
+            if (n <= 0) return;
+            const float increment = (end - start) / (float) n;
+            while (--n >= 0)
+            {
+                *x++ *= start;
+                start += increment;
+            }
+        }
+
         // n samples of src times a fixed gain added into dst
         inline void addWithGain (const float* src, float* dst, int n, float gain)
         {

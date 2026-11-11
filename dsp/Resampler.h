@@ -305,7 +305,8 @@ namespace vs
     // each call gives the step (input samples per output sample, which may
     // change from call to call), the input for the block and how many outputs
     // to make. It keeps the last taps of input between calls, so the output
-    // is latency() input samples behind; prepare() and reset() don't run on
+    // is latency() input samples behind (at a step of exactly 1 each sample
+    // comes through as it is); prepare() and reset() don't run on
     // the audio thread, process() never allocates. The kernel is the shared
     // sinc's shape with fewer crossings (liveSincTable) so many clips can
     // play at once, its cut-off lowered for a step above 1 as the streaming
@@ -354,9 +355,18 @@ namespace vs
                     pos -= 1.0;
                 }
                 const float* x = buf.data() + (w - taps);
-                double sum = 0.0;
-                for (int q = 0; q < taps; ++q) sum += k.at (((double) (q - W + 1) - pos) * fc) * x[q];
-                const float y = (float) (sum * fc) * gain;
+                float y;
+                if (step == 1.0 && pos == 0.0)
+                {
+                    // nothing to convert: each sample as it is, latency() behind
+                    y = x[W - 1] * gain;
+                }
+                else
+                {
+                    double sum = 0.0;
+                    for (int q = 0; q < taps; ++q) sum += k.at (((double) (q - W + 1) - pos) * fc) * x[q];
+                    y = (float) (sum * fc) * gain;
+                }
                 out[i] = adding ? out[i] + y : y;
                 pos += step;
             }

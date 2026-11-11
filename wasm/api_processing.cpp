@@ -243,6 +243,12 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE float* pr_ab_left (void* p)  { return static_cast<Ab*> (p)->processed[0].data(); }
     EMSCRIPTEN_KEEPALIVE float* pr_ab_right (void* p) { return static_cast<Ab*> (p)->processed[1].data(); }
     EMSCRIPTEN_KEEPALIVE void pr_ab_hear_original (void* p, int on) { static_cast<Ab*> (p)->ab.setHearOriginal (on != 0); }
+    // How the two are matched: live (the original to the processed version's
+    // short-term loudness, the default), fixed (the processed version at
+    // gainDb, the original as it is) or none
+    EMSCRIPTEN_KEEPALIVE void pr_ab_live_match (void* p) { static_cast<Ab*> (p)->ab.setLiveMatch(); }
+    EMSCRIPTEN_KEEPALIVE void pr_ab_fixed_match (void* p, float gainDb) { static_cast<Ab*> (p)->ab.setFixedMatch (gainDb); }
+    EMSCRIPTEN_KEEPALIVE void pr_ab_no_match (void* p) { static_cast<Ab*> (p)->ab.setNoMatch(); }
     EMSCRIPTEN_KEEPALIVE void pr_ab_take_original (void* p, int n)
     {
         auto* a = static_cast<Ab*> (p);

@@ -202,12 +202,13 @@ namespace vs
             return p;
         }
 
-        // The RMS level of one channel's n samples (0 for none).
-        inline float rmsOf (const float* x, int n)
+        // The RMS level of one channel's n samples (0 for none), every
+        // stride-th value for a channel interleaved with others.
+        inline float rmsOf (const float* x, int n, int stride = 1)
         {
             if (n <= 0) return 0.0f;
             double sum = 0.0;
-            for (int i = 0; i < n; ++i) sum += (double) x[i] * x[i];
+            for (int i = 0; i < n; ++i) { const double v = x[(std::ptrdiff_t) i * stride]; sum += v * v; }
             return (float) std::sqrt (sum / n);
         }
 

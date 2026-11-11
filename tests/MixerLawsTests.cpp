@@ -1,6 +1,7 @@
 // What a DAW's mixer and timeline lean on: pan laws, the volume fader's law,
 // fade shapes, automation curves, the click voices a host schedules, the live
-// resampler for clips at another rate or speed, the waveform picture, levels and silence, the tempo
+// resampler for clips at another rate or speed, the waveform picture, a fixed
+// A/B match for two renders, levels and silence, the tempo
 // range, drawing axes and the tuner's window. Built without JUCE. Each check
 // prints PASS or FAIL; the suite exits non-zero on any failure.
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <cstdio>
 #include <memory>
 #include <vector>
+#include "dsp/AbCompare.h"
 #include "dsp/Channels.h"
 #include "dsp/Meters.h"
 #include "dsp/Metronome.h"
@@ -161,6 +163,36 @@ int main()
         expect ("waveform: the lowest and highest of a block", a.lo == -0.5f && a.hi == 0.2f);
         expect ("waveform: a part-filled last block counts", b.lo == 0.3f && b.hi == 0.9f && all.lo == -0.5f && all.hi == 0.9f);
         expect ("waveform: each channel apart, and the peak of both", rr.lo == -0.7f && rr.hi == 0.0f && mm.peak() == 0.9f && mm.samples() == 6);
+    }
+
+    // a fixed A/B match: two renders compared after the fact
+    {
+        AbCompare ab;
+        ab.prepare (48000.0, 512, 0);
+        ab.setFixedMatch (-6.0f);
+        std::vector<float> orig (512, 0.5f), procL (512, 0.5f), procR (512, 0.5f);
+        for (int b = 0; b < 20; ++b)   // past the gain's glide
+        {
+            std::fill (procL.begin(), procL.end(), 0.5f); std::fill (procR.begin(), procR.end(), 0.5f);
+            ab.takeOriginal (orig.data(), orig.data(), 512);
+            ab.mix (procL.data(), procR.data(), 512);
+        }
+        expect ("fixed match: the processed version at its gain", near (procL[100], 0.5 * dbToGain (-6.0f), 1e-5), "%.4f", procL[100]);
+        ab.setHearOriginal (true);
+        for (int b = 0; b < 20; ++b)
+        {
+            std::fill (procL.begin(), procL.end(), 0.9f); std::fill (procR.begin(), procR.end(), 0.9f);
+            ab.takeOriginal (orig.data(), orig.data(), 512);
+            ab.mix (procL.data(), procR.data(), 512);
+        }
+        expect ("fixed match: the original as it is", near (procL[100], 0.5, 1e-6), "%.4f", procL[100]);
+        AbCompare plain;
+        plain.prepare (48000.0, 512, 0);
+        plain.setNoMatch();
+        std::fill (procL.begin(), procL.end(), 0.7f); std::fill (procR.begin(), procR.end(), 0.7f);
+        plain.takeOriginal (orig.data(), orig.data(), 512);
+        plain.mix (procL.data(), procR.data(), 512);
+        expect ("no match: the processed version as it is", procL[100] == 0.7f);
     }
 
     // levels, silence and a mono average
