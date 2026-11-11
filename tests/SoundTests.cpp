@@ -61,6 +61,7 @@ namespace
                     && m::defaultGroups (4, 4) == V { 1, 1, 1, 1 });
         expect ("parseGroups: 3+2+2 for 7, nothing when the sum is wrong",
                 m::parseGroups ("3+2+2", 7) == V { 3, 2, 2 } && ! m::parseGroups ("3+2", 7) && ! m::parseGroups ("0+7", 7) && ! m::parseGroups ("", 7));
+        expect ("parseGroups: a run of digits too long for a number is no grouping", ! m::parseGroups (std::string (400, '9'), 9));
         expect ("accents: downbeat 3, group starts 2, the rest 1", m::defaultAccents ({ 2, 2, 3 }) == V { 3, 1, 2, 1, 2, 1, 1 });
         expect ("note values: 1 of 8, 3 of 8, 2 of 4, 5 of 8",
                 m::noteValueName (1, 8) == "8th" && m::noteValueName (3, 8) == "dotted quarter" && m::noteValueName (2, 4) == "half"

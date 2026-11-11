@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <vector>
@@ -20,6 +21,21 @@ namespace vs
     // samples it made, readable through output (channel) until the next call;
     // flush() after the last push makes the rest (zeros after the end give the
     // last samples their full window).
+    //
+    // How it sums. A constant step that is a ratio of small whole numbers, M
+    // input samples for every L output samples (every pair of the usual
+    // sample rates: 96 kHz to 48 kHz is 2/1, 44.1 kHz to 48 kHz is 147/160),
+    // keeps its position as a whole sample and a phase in L parts, so it
+    // stays exact however long the recording, and reads its taps from a table
+    // of the L phases made once. A whole-number step (L = 1) splits the input
+    // into M lines (every M-th sample in each), so each tap of sixteen
+    // consecutive outputs reads one contiguous run, and sums the sixteen side
+    // by side, each over its taps in order. Any other step adds the step to
+    // its position and looks each tap up in the SincTable. Every sum is in
+    // double precision and runs over the taps in order, except one read from
+    // the table an output at a time (L above 1, or M above 16), which keeps
+    // four running sums (taps 0, 4, 8 ... in the first) and adds them at the
+    // end.
     class Resampler
     {
     public:
@@ -32,9 +48,10 @@ namespace vs
               fc (0.97 * std::min (1.0, 1.0 / maxStep)),
               k (sincTable()),
               W ((int) std::ceil (k.halfWidth() / fc)),
+              taps (2 * W),
               ch (channels),
               base (-W),
-              buf ((size_t) channels, std::vector<float> ((size_t) W, 0.0f)),
+              buf ((size_t) channels, std::vector<double> ((size_t) W, 0.0)),
               out ((size_t) channels),
               w ((size_t) (2 * W + 2), 0.0)
         {
@@ -42,8 +59,70 @@ namespace vs
 
         // A constant step (fsIn / fsOut for a sample rate change).
         Resampler (double step, int channels)
-            : Resampler ([step] (double) { return step; }, std::max (1.0, step), channels) {}
+            : Resampler ([step] (double) { return step; }, std::max (1.0, step), channels)
+        {
+            findPhases (step);
+        }
 
+        // A sample rate change from fsIn to fsOut. Whole-number rates give their ratio M / L
+        // exactly (by their greatest common divisor), whatever the compiler does to division;
+        // other rates go by the step.
+        Resampler (double fsIn, double fsOut, int channels)
+            : Resampler ([s = fsIn / fsOut] (double) { return s; }, std::max (1.0, fsIn / fsOut), channels)
+        {
+            const bool whole = fsIn >= 1 && fsOut >= 1 && fsIn <= 1e9 && fsOut <= 1e9
+                               && std::floor (fsIn) == fsIn && std::floor (fsOut) == fsOut;
+            if (whole)
+            {
+                const long long a = (long long) fsIn, b = (long long) fsOut, g = gcd (a, b);
+                const long long m = a / g, l = b / g;
+                if (l <= maxPhases && l * taps <= maxTable) usePhases (m, (int) l);
+                return;
+            }
+            findPhases (fsIn / fsOut);
+        }
+
+    private:
+        // The smallest L with step M / L, while the table stays small. Compared to within 1e-12
+        // of M rather than exactly: a step within that of M / L is M / L for any recording (it
+        // moves a sample after 1e12 of them). For a sample rate change, the constructor from the
+        // two rates finds M and L without floating point.
+        void findPhases (double step)
+        {
+            for (int l = 1; l <= maxPhases && (long long) l * taps <= maxTable; ++l)
+            {
+                const double m = std::round (step * l);
+                if (m >= 1.0 && m <= 1e9 && std::abs (step * l - m) <= 1e-12 * m)
+                {
+                    usePhases ((long long) m, l);
+                    return;
+                }
+            }
+        }
+
+        // Sums by the table of L phases (and, for a whole-number step, by lines): step M / L.
+        void usePhases (long long m, int l)
+        {
+            phases = l;
+            advance = m;
+            // phase r reads sample ip - W + 1 + q with the kernel at (q - W + 1 - r / L) fc
+            table.resize ((size_t) phases * (size_t) taps);
+            for (int r = 0; r < phases; ++r)
+                for (int q = 0; q < taps; ++q)
+                    table[(size_t) r * (size_t) taps + (size_t) q] = k.at (((double) (q - W + 1) - (double) r / phases) * fc);
+            if (phases == 1 && advance <= maxLines)
+            {
+                lines.assign ((size_t) advance, {});
+                for (int q = 0; q < taps; ++q)
+                {
+                    const long long j = q - W + 1;
+                    lineOf.push_back ((int) floorMod (j, advance));
+                    lineAt.push_back (floorDiv (j, advance));
+                }
+            }
+        }
+
+    public:
         // Takes the next n samples of each channel (a null channel repeats the first).
         int push (const float* const* chans, int n)
         {
@@ -59,7 +138,7 @@ namespace vs
         // The rest of the output, after the last push.
         int flush()
         {
-            for (auto& b : buf) b.resize (b.size() + (size_t) W + 2, 0.0f);
+            for (auto& b : buf) b.resize (b.size() + (size_t) W + 2, 0.0);
             return run (true);
         }
 
@@ -71,11 +150,54 @@ namespace vs
         int halfWidth() const { return W; }
 
     private:
+        static constexpr int maxPhases = 4096;         // L at most
+        static constexpr long long maxTable = 1 << 18; // L times the taps at most
+        static constexpr long long maxLines = 16;      // whole-number steps summed by lines, M at most
+        static constexpr int tile = 16;                // outputs summed side by side
+
+        static long long gcd (long long a, long long b) { while (b != 0) { const long long t = a % b; a = b; b = t; } return a; }
+        static long long floorDiv (long long a, long long b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
+        static long long floorMod (long long a, long long b) { return a - floorDiv (a, b) * b; }
+
+        // The sum over n taps, in four running sums (taps 0, 4, 8 ... in the
+        // first) added at the end.
+        static double dot (const double* wt, const double* x, int n)
+        {
+            double a0 = 0.0, a1 = 0.0, a2 = 0.0, a3 = 0.0;
+            int q = 0;
+            for (; q + 4 <= n; q += 4)
+            {
+                a0 += wt[q] * x[q];
+                a1 += wt[q + 1] * x[q + 1];
+                a2 += wt[q + 2] * x[q + 2];
+                a3 += wt[q + 3] * x[q + 3];
+            }
+            for (; q < n; ++q) a0 += wt[q] * x[q];
+            return (a0 + a1) + (a2 + a3);
+        }
+
         int run (bool final)
         {
             for (auto& o : out) o.clear();
             const long long end = base + (long long) buf[0].size(); // absolute index past the last buffered sample
-            const double limit = final ? (double) inTotal : (double) (end - W - 1);
+            const long long limit = final ? inTotal : end - W - 1;
+            if (! lines.empty()) runLines (end, limit);
+            else if (phases > 0) runPhases (limit);
+            else runAnyStep ((double) limit);
+            // drop what no future output needs
+            const long long keepFrom = std::max (base, ip - W - 2);
+            if (keepFrom > base)
+            {
+                const auto d = (std::ptrdiff_t) (keepFrom - base);
+                for (auto& b : buf) b.erase (b.begin(), b.begin() + std::min (d, (std::ptrdiff_t) b.size()));
+                base = keepFrom;
+            }
+            return (int) out[0].size();
+        }
+
+        // Any step: each tap looked up at its distance from the position.
+        void runAnyStep (double limit)
+        {
             while (pos < limit)
             {
                 const double p = pos;
@@ -86,33 +208,88 @@ namespace vs
                 const size_t off = (size_t) (lo - base);
                 for (int c = 0; c < ch; ++c)
                 {
-                    const float* b = buf[(size_t) c].data() + off;
+                    const double* b = buf[(size_t) c].data() + off;
                     double s = 0.0;
                     for (int q = 0; q < n; ++q) s += w[(size_t) q] * b[q];
                     out[(size_t) c].push_back ((float) (s * fc));
                 }
                 pos += stepAt (p);
             }
-            // drop what no future output needs
-            const long long keepFrom = std::max (base, (long long) std::floor (pos) - W - 2);
-            if (keepFrom > base)
+            ip = (long long) std::floor (pos);
+        }
+
+        // Step M / L: position ip + phase / L, that phase's taps from the table.
+        void runPhases (long long limit)
+        {
+            while (ip < limit)
             {
-                const auto d = (std::ptrdiff_t) (keepFrom - base);
-                for (auto& b : buf) b.erase (b.begin(), b.begin() + std::min (d, (std::ptrdiff_t) b.size()));
-                base = keepFrom;
+                const double* wt = table.data() + (size_t) phase * (size_t) taps;
+                const size_t off = (size_t) (ip - W + 1 - base);
+                for (int c = 0; c < ch; ++c)
+                    out[(size_t) c].push_back ((float) (dot (wt, buf[(size_t) c].data() + off, taps) * fc));
+                phase += advance;
+                ip += phase / phases;
+                phase %= phases;
             }
-            return (int) out[0].size();
+        }
+
+        // Whole-number step M: output o is at sample M o and its tap q reads
+        // sample M o - W + 1 + q, which is in line lineOf[q] at o + lineAt[q].
+        // Each line holds the buffered samples M i + m from i = first.
+        void runLines (long long end, long long limit)
+        {
+            const long long M = advance;
+            const long long first = floorDiv (base, M);
+            const long long count = floorDiv (end - 1, M) - first + 1 + tile;
+            const long long oFirst = ip / M, oEnd = (limit + M - 1) / M; // outputs with M o < limit
+            if (oEnd <= oFirst) return;
+            std::array<double, tile> acc {};
+            for (int c = 0; c < ch; ++c)
+            {
+                const auto& b = buf[(size_t) c];
+                for (long long m = 0; m < M; ++m)
+                {
+                    auto& ln = lines[(size_t) m];
+                    ln.assign ((size_t) count, 0.0);
+                    for (long long i = 0; i < count; ++i)
+                    {
+                        const long long a = M * (first + i) + m;
+                        if (a >= base && a < end) ln[(size_t) i] = b[(size_t) (a - base)];
+                    }
+                }
+                auto& o = out[(size_t) c];
+                for (long long t0 = oFirst; t0 < oEnd; t0 += tile)
+                {
+                    acc.fill (0.0);
+                    for (int q = 0; q < taps; ++q)
+                    {
+                        const double wq = table[(size_t) q];
+                        const double* x = lines[(size_t) lineOf[(size_t) q]].data() + (t0 + lineAt[(size_t) q] - first);
+                        for (int t = 0; t < tile; ++t) acc[(size_t) t] += wq * x[t];
+                    }
+                    const int made = (int) std::min<long long> (tile, oEnd - t0);
+                    for (int t = 0; t < made; ++t) o.push_back ((float) (acc[(size_t) t] * fc));
+                }
+            }
+            ip = oEnd * M;
         }
 
         StepFunction stepAt;
         double fc;
         const SincTable& k;
-        int W, ch;
+        int W, taps, ch;
         long long base;          // absolute index of buf[0] (zeros before the start)
         long long inTotal = 0;
-        double pos = 0.0;
-        std::vector<std::vector<float>> buf, out;
-        std::vector<double> w;
+        double pos = 0.0;        // any step: the position
+        long long ip = 0;        // the whole sample of the position (of the next output)
+        int phases = 0;          // L for a step M / L (0: any step)
+        long long advance = 0;   // M
+        int phase = 0;           // the position's phase, in L parts
+        std::vector<std::vector<double>> buf, lines;
+        std::vector<std::vector<float>> out;
+        std::vector<double> w, table;
+        std::vector<int> lineOf;
+        std::vector<long long> lineAt;
     };
 
     // A whole recording from fsIn to fsOut: round (n fsOut / fsIn) samples per
@@ -128,7 +305,7 @@ namespace vs
             return;
         }
         for (int c = 0; c < numCh; ++c) std::fill (out[c], out[c] + want, 0.0f);
-        Resampler r (fsIn / fsOut, numCh);
+        Resampler r (fsIn, fsOut, numCh);
         int o = 0;
         auto put = [&] (int made)
         {

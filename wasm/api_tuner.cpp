@@ -1,5 +1,6 @@
-// The browser's tuner (tp_*): plain C functions around vs::TunerPitch and
-// vs::TunerReading. Built with the other wasm/api_*.cpp files into
+// The browser's tuner (tp_*): plain C functions around vs::TunerPitch,
+// vs::TunerReading and the block averaging before a reading
+// (vs::boxDownsample). Built with the other wasm/api_*.cpp files into
 // master.wasm by wasm/build.sh.
 #include <algorithm>
 #include <array>
@@ -14,6 +15,16 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE float tp_estimate (const float* x, int n, double sampleRate, float minHz, float maxHz)
     {
         return vs::TunerPitch::estimate (x, n, sampleRate, minHz, maxHz);
+    }
+
+    // x[0..n) averaged down by stride (each stride samples become their
+    // mean, a remainder at the end dropped) into out (n / stride floats, from
+    // malloc); stride 1 or less copies x. Returns how many it wrote.
+    EMSCRIPTEN_KEEPALIVE int tp_downsample (const float* x, int n, int stride, float* out)
+    {
+        const auto y = vs::boxDownsample (x, n, stride);
+        std::copy (y.begin(), y.end(), out);
+        return (int) y.size();
     }
 
     // What hz means on the instrument (vs::TunerReading). strings: nStrings

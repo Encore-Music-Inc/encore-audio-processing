@@ -239,6 +239,9 @@ int main()
         const auto p = vs::FileAnalysis::analyse (f.data(), g.data(), (std::int64_t) n, fs, 2, { 24, false });
         expect ("analysis: flipped polarity reads correlation -1", p.corr < -0.999 && p.band[1].corr < -0.99 && ! p.low.outTimes.empty(), "%.4f", p.corr);
         expect ("analysis: DC offset", std::abs (p.dcL - 0.01) < 1e-4 && std::abs (p.dcR + 0.01) < 1e-4, "%.5f / %.5f", p.dcL, p.dcR);
+        expect ("analysis: DC offset in dBFS, 20 log10 (|dc| + 1e-12) for each channel",
+                p.dcLDb == 20 * std::log10 (std::abs (p.dcL) + 1e-12) && p.dcRDb == 20 * std::log10 (std::abs (p.dcR) + 1e-12) && std::abs (p.dcLDb + 40) < 0.01,
+                "%.3f / %.3f dB", p.dcLDb, p.dcRDb);
         expect ("analysis: 16-bit audio in a 24-bit file", p.hasPadded16 && p.padded16);
 
         // a lossy encoder's wall at 16 kHz

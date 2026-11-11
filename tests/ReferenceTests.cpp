@@ -33,6 +33,7 @@
 #include "dsp/DeviceSim.h"
 #include "dsp/Dither.h"
 #include "dsp/Doubler.h"
+#include "dsp/Dsd.h"
 #include "dsp/DrumSynth.h"
 #include "dsp/Dynamics.h"
 #include "dsp/EqBand.h"
@@ -105,6 +106,36 @@ namespace
         void space() { while (i < s.size() && std::strchr (" \t\r\n", s[i]) != nullptr && s[i] != 0) ++i; }
         bool eat (char c) { space(); if (i < s.size() && s[i] == c) { ++i; return true; } return false; }
 
+        // The four hex digits after \u (and a second \u's for a surrogate pair), as a code point
+        std::uint32_t unicode()
+        {
+            auto hex4 = [this]
+            {
+                std::uint32_t v = 0;
+                for (int k = 0; k < 4 && i < s.size(); ++k, ++i)
+                {
+                    const char h = s[i];
+                    v = v * 16 + (std::uint32_t) (h <= '9' ? h - '0' : (h | 0x20) - 'a' + 10);
+                }
+                return v;
+            };
+            std::uint32_t u = hex4();
+            if (u >= 0xd800 && u < 0xdc00 && s.compare (i, 2, "\\u") == 0)
+            {
+                i += 2;
+                u = 0x10000 + ((u - 0xd800) << 10) + (hex4() - 0xdc00);
+            }
+            return u;
+        }
+
+        static void utf8 (std::string& out, std::uint32_t u)
+        {
+            if (u < 0x80) out += (char) u;
+            else if (u < 0x800) { out += (char) (0xc0 | (u >> 6)); out += (char) (0x80 | (u & 0x3f)); }
+            else if (u < 0x10000) { out += (char) (0xe0 | (u >> 12)); out += (char) (0x80 | ((u >> 6) & 0x3f)); out += (char) (0x80 | (u & 0x3f)); }
+            else { out += (char) (0xf0 | (u >> 18)); out += (char) (0x80 | ((u >> 12) & 0x3f)); out += (char) (0x80 | ((u >> 6) & 0x3f)); out += (char) (0x80 | (u & 0x3f)); }
+        }
+
         std::string readString()
         {
             std::string out;
@@ -115,7 +146,8 @@ namespace
                 if (c == '\\' && i < s.size())
                 {
                     const char e = s[i++];
-                    if (e == 'n') c = '\n'; else if (e == 't') c = '\t'; else if (e == 'u') { i += 4; c = '?'; } else c = e;
+                    if (e == 'u') { utf8 (out, unicode()); continue; }
+                    if (e == 'n') c = '\n'; else if (e == 't') c = '\t'; else c = e;
                 }
                 out += c;
             }
@@ -336,7 +368,8 @@ namespace
         "shortTermMaxAt", "lra", "balanceDb", "truePeakDb", "truePeakAt", "tpOverCount", "tpOverZeroCount", "clipRuns",
         "clipEvents", "clipLongest", "clipHasLevel", "clipLevelDb", "lowCorr", "lowMonoLossDb", "lowShareDb", "leadSec",
         "tailSec", "firstSampleDb", "lastSampleDb", "headRmsDb", "endRmsDb", "endDecayDb", "hasSpectrum", "cliffHz",
-        "cliffDrop", "hasPadded16", "padded16" };
+        "cliffDrop", "hasPadded16", "padded16", "dcLDb", "dcRDb" };
+    constexpr int numAnalysis = (int) std::size (analysisNames);
 
     double analysisValue (const vs::analysis::Measurements& m, int what)
     {
@@ -388,12 +421,48 @@ namespace
             case 43: return m.spectrum.drop;
             case 44: return m.hasPadded16 ? 1 : 0;
             case 45: return m.padded16 ? 1 : 0;
+            case 46: return m.dcLDb;
+            case 47: return m.dcRDb;
             default: return 0.0;
         }
     }
 
     // A spelled note as text
     std::string spelled (vs::music::Note n) { return vs::music::noteText (n); }
+
+    std::string joined (const std::vector<int>& v, const char* sep)
+    {
+        std::string t;
+        for (size_t i = 0; i < v.size(); ++i) t += (i ? sep : "") + std::to_string (v[i]);
+        return t;
+    }
+
+    // A DSD stream from a reference input, one bit per sample frame, most
+    // significant bit first: kind "sine", a second-order delta-sigma
+    // modulator in integers (the samples to 24-bit fixed point, rounded
+    // down), so every system makes the same bits; kind "sign", each sample's
+    // sign (a noise input makes random bytes).
+    std::vector<std::uint8_t> dsdBits (const std::vector<float>& x, const std::string& kind)
+    {
+        std::vector<std::uint8_t> out (x.size() / 8, 0);
+        std::int64_t i1 = 0, i2 = 0, y = 0;
+        constexpr std::int64_t one = 1LL << 24;
+        for (size_t k = 0; k < out.size() * 8; ++k)
+        {
+            bool bit;
+            if (kind == "sine")
+            {
+                const auto xi = (std::int64_t) std::floor ((double) x[k] * (double) one);
+                i1 += xi - y;
+                i2 += i1 - y;
+                bit = i2 >= 0;
+                y = bit ? one : -one;
+            }
+            else bit = x[k] >= 0.0f;
+            if (bit) out[k >> 3] = (std::uint8_t) (out[k >> 3] | (0x80 >> (k & 7)));
+        }
+        return out;
+    }
 
     bool runMore (const std::string& op, const Json& c, const vs::reference::Signal* in, double fs, int block, Results& out)
     {
@@ -411,7 +480,7 @@ namespace
             do blocks (n, block, [&] (std::int64_t s, int k) { a.process (in->l.data() + s, stereo ? in->r.data() + s : in->l.data() + s, k); });
             while (a.nextPass());
             const auto m = a.finish();
-            for (int k = 0; k < 46; ++k) out.push_back ({ analysisNames[k], analysisValue (m, k) });
+            for (int k = 0; k < numAnalysis; ++k) out.push_back ({ analysisNames[k], analysisValue (m, k) });
             static const char* const bandFields[] { "corr", "monoLossDb", "shareDb" };
             for (int b = 0; b < vs::analysis::numBands; ++b)
                 for (int k = 0; k < 3; ++k)
@@ -545,7 +614,7 @@ namespace
         else if (op == "resample")
         {
             const double to = c.get ("to", 48000);
-            vs::Resampler r (fs / to, in->channels);
+            vs::Resampler r (fs, to, in->channels);
             Channels res ((size_t) in->channels);
             auto take = [&] (int got) { for (int ci = 0; ci < in->channels; ++ci) res[(size_t) ci].insert (res[(size_t) ci].end(), r.output (ci), r.output (ci) + got); };
             blocks (n, block, [&] (std::int64_t s, int k)
@@ -758,6 +827,154 @@ namespace
                 out.push_back ({ "drum" + std::to_string (d), std::string (g != nullptr ? g : "") });
                 out.push_back ({ "pad" + std::to_string (d), (double) padForNote (d) });
             }
+            for (int letter = 0; letter < 7; ++letter)
+            {
+                for (int pc = 0; pc < 12; ++pc)
+                    out.push_back ({ "onLetter." + std::to_string (letter) + "." + std::to_string (pc), spelled (onLetter (letter, pc)) });
+                for (int acc = -2; acc <= 2; ++acc)
+                    out.push_back ({ "soundsAs." + std::to_string (letter) + "." + std::to_string (acc), soundsAs (note (letter, acc)) });
+            }
+            std::string major, minor;
+            for (auto k : majorKeys) major += (major.empty() ? "" : " ") + std::string (k);
+            for (auto k : minorKeys) minor += (minor.empty() ? "" : " ") + std::string (k);
+            out.push_back ({ "majorKeys", major });
+            out.push_back ({ "minorKeys", minor });
+        }
+        else if (op == "meter")
+        {
+            using namespace vs::metronome;
+            const auto tops = nums (c, "tops"), bottoms = nums (c, "bottoms");
+            for (double t : tops)
+                for (double b : bottoms)
+                {
+                    const int top = (int) t, bottom = (int) b;
+                    const auto m = std::to_string (top) + "/" + std::to_string (bottom);
+                    std::string options;
+                    for (const auto& g : groupingOptions (top, bottom)) options += (options.empty() ? "" : " ") + joined (g, "+");
+                    out.push_back ({ "options." + m, options });
+                    const auto g = defaultGroups (top, bottom);
+                    out.push_back ({ "groups." + m, joined (g, "+") });
+                    out.push_back ({ "accents." + m, joined (defaultAccents (g), " ") });
+                    std::string map;
+                    for (const auto& place : groupMap (g)) map += (map.empty() ? "" : " ") + std::to_string (place.group) + (place.start ? "s" : "");
+                    out.push_back ({ "map." + m, map });
+                    std::string units;
+                    for (const auto& u : unitOptions (g, bottom)) units += (units.empty() ? "" : ", ") + std::to_string (u.units) + " " + u.name;
+                    out.push_back ({ "units." + m, units });
+                }
+            const auto parse = c.find ("parse");
+            for (size_t i = 0; parse != nullptr && i < parse->items.size(); ++i)
+            {
+                const auto& item = parse->items[i];
+                const auto g = parseGroups (item.items.at (0).str, (int) item.items.at (1).num);
+                out.push_back ({ "parse" + std::to_string (i), g ? joined (*g, "+") : std::string ("-") });
+            }
+            for (int units = 1; units <= 12; ++units)
+                for (int bottom : { 1, 2, 4, 8, 16, 32, 3 })
+                    out.push_back ({ "noteValue." + std::to_string (units) + "/" + std::to_string (bottom), noteValueName (units, bottom) });
+            const auto swings = nums (c, "swings");
+            for (const char* id : { "none", "8", "3", "16", "5", "6", "x" })
+                for (size_t k = 0; k < swings.size(); ++k)
+                {
+                    const auto f = subFractions (id, swings[k]);
+                    const auto name = std::string ("sub.") + id + "." + std::to_string (k);
+                    out.push_back ({ name + ".count", (double) f.size() });
+                    for (size_t i = 0; i < f.size(); ++i) out.push_back ({ name + ".f" + std::to_string (i), f[i] });
+                }
+            const auto bpms = nums (c, "bpms");
+            for (size_t k = 0; k < bpms.size(); ++k) out.push_back ({ "tempoName" + std::to_string (k), std::string (tempoName (bpms[k])) });
+            // settings objects mended (cleanSettings), as sd_clean_settings reads and writes them
+            const auto clean = c.find ("clean");
+            for (size_t i = 0; clean != nullptr && i < clean->items.size(); ++i)
+            {
+                const auto& item = clean->items[i];
+                std::vector<double> v;
+                for (const auto& x : item.find ("s")->items) v.push_back (x.num);
+                auto r = [&] (double x) { return std::isnan (x) ? 0 : (int) roundHalfUp (x); };
+                MetronomeSettings m;
+                m.bpm = v[0]; m.top = r (v[1]); m.bottom = r (v[2]); m.units = r (v[3]); m.swing = v[4]; m.randomMute = v[5];
+                m.poly = { v[6] != 0, r (v[7]) };
+                m.gap = { v[8] != 0, r (v[9]), r (v[10]) };
+                m.trainer.mode = v[11] == 1 ? TrainerMode::steps : v[11] == 2 ? TrainerMode::ramp : TrainerMode::off;
+                m.trainer.from = v[12]; m.trainer.step = v[13]; m.trainer.every = v[14]; m.trainer.to = v[15];
+                m.trainer.loop = v[16] != 0; m.trainer.minutes = v[17];
+                if (const auto* g = item.find ("groups")) { m.groups.clear(); for (const auto& x : g->items) m.groups.push_back ((int) x.num); }
+                if (const auto* a = item.find ("accents")) { m.accents.clear(); for (const auto& x : a->items) m.accents.push_back ((int) x.num); }
+                m.sub = item.text ("sub");
+                m = cleanSettings (m);
+                const auto p = "clean" + std::to_string (i) + ".";
+                const double mode = m.trainer.mode == TrainerMode::steps ? 1 : m.trainer.mode == TrainerMode::ramp ? 2 : 0;
+                const double w[] { m.bpm, (double) m.top, (double) m.bottom, (double) m.units, m.swing, m.randomMute,
+                                   m.poly.on ? 1.0 : 0.0, (double) m.poly.n, m.gap.on ? 1.0 : 0.0, (double) m.gap.play, (double) m.gap.mute,
+                                   mode, m.trainer.from, m.trainer.step, m.trainer.every, m.trainer.to, m.trainer.loop ? 1.0 : 0.0, m.trainer.minutes };
+                for (int k = 0; k < 18; ++k) out.push_back ({ p + "v" + std::to_string (k), w[k] });
+                out.push_back ({ p + "groups", joined (m.groups, "+") });
+                out.push_back ({ p + "accents", joined (m.accents, " ") });
+                out.push_back ({ p + "sub", m.sub });
+            }
+        }
+        else if (op == "downsample")
+        {
+            for (double stride : nums (c, "strides"))
+            {
+                const auto y = vs::boxDownsample (in->l.data(), (int) n, (int) stride);
+                const auto p = "stride" + std::to_string ((int) stride);
+                out.push_back ({ p + ".length", (double) y.size() });
+                double sum = 0.0;
+                for (float v : y) sum += std::abs ((double) v);
+                out.push_back ({ p + ".sum", sum });
+                for (double at : nums (c, "at"))
+                    if ((size_t) at < y.size()) out.push_back ({ p + ".at" + std::to_string ((int) at), (double) y[(size_t) at] });
+            }
+        }
+        else if (op == "dsd")
+        {
+            const std::string kind = c.text ("kind");
+            std::vector<std::vector<std::uint8_t>> bits { dsdBits (in->l, kind) };
+            if (stereo) bits.push_back (dsdBits (in->r, kind));
+            vs::dsd::Decoder d (fs, (int) bits.size());
+            out.push_back ({ "rate", d.ok() ? d.outputSampleRate() : 0.0 });
+            Channels pcm (bits.size());
+            const int len = (int) bits[0].size();
+            for (int s = 0; s < len; s += block)
+            {
+                const int k = std::min (block, len - s);
+                std::vector<const std::uint8_t*> p;
+                for (auto& b : bits) p.push_back (b.data() + s);
+                const int made = d.push (p.data(), k);
+                for (size_t ch = 0; ch < bits.size(); ++ch) pcm[ch].insert (pcm[ch].end(), d.output ((int) ch), d.output ((int) ch) + made);
+            }
+            fingerprintAudio (out, "", pcm, d.ok() ? d.outputSampleRate() : 88200.0);
+            for (double at : nums (c, "at"))
+                if ((size_t) at < pcm[0].size()) out.push_back ({ "at" + std::to_string ((int) at), (double) pcm[0][(size_t) at] });
+        }
+        else if (op == "limiter")
+        {
+            vs::TruePeakLimiter lim;
+            lim.prepare (fs, 4096);
+            lim.setCeilingDb ((float) c.get ("ceiling", -1));
+            if (c.find ("release") != nullptr) lim.setReleaseMs ((float) c.get ("release", 80), fs);
+            out.push_back ({ "latency", (double) lim.getLatency() });
+            auto ch = copyOf (*in);
+            inBlocks (ch, block, [&] (float** p, int nc, int k)
+            {
+                for (int s = 0; s < k; s += 4096)
+                {
+                    float* q[2] { p[0] + s, nc > 1 ? p[1] + s : nullptr };
+                    juce::dsp::AudioBlock<float> b (q, (size_t) nc, (size_t) std::min (4096, k - s));
+                    lim.process (b);
+                }
+            });
+            fingerprintAudio (out, "", ch, fs);
+            vs::TruePeakMeter tp;
+            tp.prepare ((int) ch.size(), 4096);
+            for (size_t s = 0; s < ch[0].size(); s += 4096)
+            {
+                const float* q[2] { ch[0].data() + s, ch.size() > 1 ? ch[1].data() + s : nullptr };
+                tp.process (q, (int) std::min<size_t> (4096, ch[0].size() - s));
+            }
+            tp.finish();
+            out.push_back ({ "truePeak", (double) tp.truePeak (-1) });
         }
         else if (op == "scale-library")
         {

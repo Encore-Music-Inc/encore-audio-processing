@@ -95,7 +95,7 @@ The headers, by area (each header's top comment says more):
 | | `Random.h` | seeded random number generators, the same on every system |
 | | `Stats.h` | median, percentile, mean, deviation, least-squares line |
 | | `Util.h` | smoothers, envelope steps, decibels, mid and side, rounding |
-| Measurement | `Loudness.h` | the BS.1770 / EBU R128 loudness meter |
+| Measurement | `Loudness.h` | the BS.1770 / EBU R128 loudness meter, and the mastering chain's true-peak limiter |
 | | `LoudnessReport.h` | a song's loudness report |
 | | `TruePeak.h` | the true-peak detector |
 | | `Analysis.h` | everything a release check measures on a finished song |
@@ -113,6 +113,7 @@ The headers, by area (each header's top comment says more):
 | | `Dither.h` | the one float to integer conversion, with dither |
 | | `Channels.h` | channel maps, trims, fades, peak and normalizing for whole files |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
+| | `Dsd.h` | DSD (one-bit SACD audio, .dsf and .dff) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
 | Pitch | `Yin.h` | the one pitch detector, with its follow, tuner and voice settings |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction's detector and its real-time engine |
@@ -132,11 +133,12 @@ The headers, by area (each header's top comment says more):
 The browser engine, by file and prefix: `api_master.cpp` the mastering chain
 (`mc_*`), `api_mastering.cpp` whole-song mastering (`mt_*`), `api_loudness.cpp`
 the loudness meter (`lm_*`), `api_measure.cpp` measurement (`ms_*`),
-`api_processing.cpp` processing (`pr_*`), `api_pitch.cpp` pitch (`pi_*`),
-`api_tuner.cpp` the tuner (`tp_*`), `api_rhythm.cpp` rhythm (`rh_*`),
-`api_sound.cpp` sounds (`sd_*`), `api_music.cpp` music vocabulary (`mu_*`). The
-lists (scales, tunings) are `data/*.json` files, not functions. A new area is a
-new file with its own prefix.
+`api_processing.cpp` processing, DSD to PCM and the true-peak limiter on its
+own (`pr_*`), `api_pitch.cpp` pitch (`pi_*`), `api_tuner.cpp` the tuner
+(`tp_*`), `api_rhythm.cpp` rhythm and the beat grid's meters (`rh_*`),
+`api_sound.cpp` sounds and the metronome's settings (`sd_*`), `api_music.cpp`
+music vocabulary (`mu_*`). The lists (scales, tunings) are `data/*.json`
+files, not functions. A new area is a new file with its own prefix.
 
 ## Consumers
 

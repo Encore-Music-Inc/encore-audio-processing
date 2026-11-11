@@ -175,7 +175,7 @@ extern "C"
     // 32 low monoLossDb  33 low shareDb     34 leadSec         35 tailSec
     // 36 firstSampleDb   37 lastSampleDb    38 headRmsDb       39 endRmsDb
     // 40 endDecayDb      41 has spectrum    42 cliffHz         43 cliff drop
-    // 44 has padded16    45 padded16
+    // 44 has padded16    45 padded16        46 dcLDb           47 dcRDb
     // 100 + 3 band + k: band 0..4 (sub, bass, low mids, mids, highs), k 0 corr, 1 monoLossDb, 2 shareDb
     EMSCRIPTEN_KEEPALIVE double ms_an_value (void* p, int what)
     {
@@ -234,6 +234,8 @@ extern "C"
             case 43: return m.spectrum.drop;
             case 44: return m.hasPadded16 ? 1 : 0;
             case 45: return m.padded16 ? 1 : 0;
+            case 46: return m.dcLDb;
+            case 47: return m.dcRDb;
             default: return 0.0;
         }
     }

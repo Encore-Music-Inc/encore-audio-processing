@@ -1,14 +1,23 @@
 // The browser's rhythm tools (rh_*): plain C functions around dsp/Tempo.h
-// (tap tempo and the tempo finder), dsp/Onsets.h (the onset detector) and
+// (tap tempo and the tempo finder), dsp/Onsets.h (the onset detector),
 // dsp/TimingCheck.h (latency, matching notes to the beat grid, and the
-// report's numbers). Built with the other wasm/api_*.cpp files into
-// master.wasm by wasm/build.sh.
+// report's numbers) and the beat grid's meter maths in dsp/Metronome.h
+// (groupings, accents, note values, subdivisions, tempo names). Built with
+// the other wasm/api_*.cpp files into master.wasm by wasm/build.sh.
 //
 // Buffers are memory from malloc. Objects are made by *_create and freed by
 // *_destroy. Results with several numbers are written to an `out` array of
-// doubles, in the order each function lists.
+// doubles, in the order each function lists. A list of whole numbers (a
+// grouping such as 2+2+3, an accent pattern) crosses as ints, with its length
+// beside it; a function that writes one into out (room for cap ints) returns
+// how many it wrote, or -1 when they don't fit. Text is written to out
+// (cap bytes) and ends with a 0 byte; those functions return its length, or
+// -1 when it doesn't fit.
 #include <emscripten/emscripten.h>
+#include <cstring>
+#include <string>
 #include <vector>
+#include "dsp/Metronome.h"
 #include "dsp/Onsets.h"
 #include "dsp/Tempo.h"
 #include "dsp/TimingCheck.h"
@@ -46,6 +55,22 @@ namespace
         vs::timing::TimeReport report;
         Check (double sr, double latencyMs) : check (sr, latencyMs) {}
     };
+
+    int putInts (const std::vector<int>& v, int* out, int cap)
+    {
+        if ((int) v.size() > cap) return -1;
+        std::copy (v.begin(), v.end(), out);
+        return (int) v.size();
+    }
+
+    int putText (const std::string& s, char* out, int cap)
+    {
+        if ((int) s.size() + 1 > cap) { if (cap > 0) out[0] = 0; return -1; }
+        std::memcpy (out, s.c_str(), s.size() + 1);
+        return (int) s.size();
+    }
+
+    std::vector<int> ints (const int* x, int n) { return std::vector<int> (x, x + std::max (0, n)); }
 }
 
 extern "C"
@@ -71,6 +96,90 @@ extern "C"
         return putFit (static_cast<vs::tempo::TapTempo*> (p)->tap (ms), out);
     }
 
+    // ---- the beat grid's meters: a bar is top counts of 1/bottom notes, felt in groups
+
+    // The groupings worth offering for a meter (every count, the even ones,
+    // then the 2s-and-3s mixes), into out as each grouping's length followed
+    // by its groups ("1+1+1+1" and "2+2" for 4/4: 4 1 1 1 1 2 2 2). Returns
+    // how many groupings, or -1 when they don't fit in cap ints.
+    EMSCRIPTEN_KEEPALIVE int rh_grouping_options (int top, int bottom, int* out, int cap)
+    {
+        int used = 0;
+        const auto options = vs::metronome::groupingOptions (top, bottom);
+        for (const auto& g : options)
+        {
+            if (used + 1 + (int) g.size() > cap) return -1;
+            out[used++] = (int) g.size();
+            for (int v : g) out[used++] = v;
+        }
+        return (int) options.size();
+    }
+
+    // How a meter is felt unless you say otherwise (6/8 in threes, 7/8 as 2+2+3, x/4 on every count)
+    EMSCRIPTEN_KEEPALIVE int rh_default_groups (int top, int bottom, int* out, int cap)
+    {
+        return putInts (vs::metronome::defaultGroups (top, bottom), out, cap);
+    }
+
+    // Reads a grouping ("3+2+2", any non-digits between the numbers) from
+    // text (0-terminated, from malloc). Returns its length, or 0 unless it is
+    // whole numbers of at least 1 adding up to top.
+    EMSCRIPTEN_KEEPALIVE int rh_parse_groups (const char* text, int top, int* out, int cap)
+    {
+        const auto g = vs::metronome::parseGroups (text, top);
+        return g ? putInts (*g, out, cap) : 0;
+    }
+
+    // The accent pattern a grouping starts with (3 the downbeat, 2 each
+    // group's first count, 1 the counts inside a group), one per count
+    EMSCRIPTEN_KEEPALIVE int rh_default_accents (const int* groups, int nGroups, int* out, int cap)
+    {
+        return putInts (vs::metronome::defaultAccents (ints (groups, nGroups)), out, cap);
+    }
+
+    // For each count of the bar, two ints: which group it is in, and 1 when
+    // it starts that group. Returns how many counts (cap: room for 2 ints each).
+    EMSCRIPTEN_KEEPALIVE int rh_group_map (const int* groups, int nGroups, int* out, int cap)
+    {
+        const auto map = vs::metronome::groupMap (ints (groups, nGroups));
+        if (2 * (int) map.size() > cap) return -1;
+        for (size_t i = 0; i < map.size(); ++i) { out[2 * i] = map[i].group; out[2 * i + 1] = map[i].start ? 1 : 0; }
+        return (int) map.size();
+    }
+
+    // The note a beat of units counts of 1/bottom is ("8th", "dotted quarter", "5 × 8th")
+    EMSCRIPTEN_KEEPALIVE int rh_note_value_name (int units, int bottom, char* out, int cap)
+    {
+        return putText (vs::metronome::noteValueName (units, bottom), out, cap);
+    }
+
+    // What the tempo can count, as counts per beat (1, the written note;
+    // then the felt beat when every group is the same size): into out, room
+    // for 2. Each one's name is rh_note_value_name (units, bottom).
+    EMSCRIPTEN_KEEPALIVE int rh_unit_options (const int* groups, int nGroups, int bottom, int* out)
+    {
+        const auto options = vs::metronome::unitOptions (ints (groups, nGroups), bottom);
+        for (size_t i = 0; i < options.size(); ++i) out[i] = options[i].units;
+        return (int) options.size();
+    }
+
+    // Where the clicks inside one count fall, as fractions of it (the first
+    // 0), for a subdivision id ("none", "8", "3", "16", "5", "6"; an unknown
+    // id is none) and swing (50 straight to 75): into out, room for 6.
+    // Returns how many.
+    EMSCRIPTEN_KEEPALIVE int rh_sub_fractions (const char* id, double swing, double* out)
+    {
+        const auto f = vs::metronome::subFractions (id, swing);
+        std::copy (f.begin(), f.end(), out);
+        return (int) f.size();
+    }
+
+    // The Italian name for a tempo ("Andante")
+    EMSCRIPTEN_KEEPALIVE int rh_tempo_name (double bpm, char* out, int cap)
+    {
+        return putText (vs::metronome::tempoName (bpm), out, cap);
+    }
+
     // ---- the tempo finder: fill rh_tempo_input with up to maxBlock mono samples, rh_tempo_push them, repeat
 
     EMSCRIPTEN_KEEPALIVE void* rh_tempo_create (double sampleRate, int maxBlock) { return new Finder (sampleRate, maxBlock); }
@@ -85,7 +194,8 @@ extern "C"
 
     // The tempo between minBpm and maxBpm. out: bpm, confidence (0 to 1),
     // strength, how many others (0 to 2), then the others (half and double
-    // the tempo, where plausible). Returns 0 until 4 seconds are in.
+    // the tempo, where plausible). Returns 0 until 4 seconds are in, and when
+    // nothing in them starts (silence: no tempo).
     EMSCRIPTEN_KEEPALIVE int rh_tempo_estimate (void* p, double minBpm, double maxBpm, double* out)
     {
         const auto e = static_cast<Finder*> (p)->finder.estimate (minBpm, maxBpm);

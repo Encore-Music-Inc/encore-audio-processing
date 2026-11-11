@@ -1,18 +1,24 @@
 // The processing pieces built without JUCE, as the browser build is: the
 // resampler, fractional delay and decimator, float to integers with dither,
 // channel maps, trims, fades and normalizing, the playback device filters, the
-// vocal EQ and the loudness-matched "hear the original". Each check prints PASS
-// or FAIL; the suite exits non-zero on any failure.
+// vocal EQ, the loudness-matched "hear the original", DSD to PCM and the
+// mastering chain's true-peak limiter on its own. Each check prints PASS or
+// FAIL; the suite exits non-zero on any failure.
 #include <cmath>
 #include <cstdio>
 #include <random>
+#include <tuple>
 #include <vector>
 #include "dsp/AbCompare.h"
 #include "dsp/Channels.h"
 #include "dsp/DeviceSim.h"
 #include "dsp/Dither.h"
+#include "dsp/Dsd.h"
 #include "dsp/FracDelay.h"
+#include "dsp/Loudness.h"
+#include "dsp/MasterChain.h"
 #include "dsp/Resampler.h"
+#include "dsp/TruePeak.h"
 #include "dsp/VocalEq.h"
 
 namespace
@@ -101,6 +107,57 @@ namespace
             };
             const auto a = run ({ 30000 }), b = run ({ 1, 777, 4096, 13 });
             expect ("the resampler's output is the same however the input is cut", a == b, "(%.0f samples)", (double) a.size());
+        }
+        // a constant step summed by lines (whole numbers), by phases (other
+        // ratios) and tap by tap (a step function) gives the same samples
+        {
+            const int n = 30000;
+            auto x = noise (n, 3), x2 = noise (n, 4);
+            auto run = [&] (vs::Resampler& r, std::vector<int> blocks)
+            {
+                std::vector<float> out[2];
+                size_t b = 0;
+                for (int s = 0; s < n;)
+                {
+                    const int m = std::min (blocks[b++ % blocks.size()], n - s);
+                    const float* in[2] { x.data() + s, x2.data() + s };
+                    const int k = r.push (in, m);
+                    for (int c = 0; c < 2; ++c) out[c].insert (out[c].end(), r.output (c), r.output (c) + k);
+                    s += m;
+                }
+                const int k = r.flush();
+                for (int c = 0; c < 2; ++c) out[c].insert (out[c].end(), r.output (c), r.output (c) + k);
+                out[0].insert (out[0].end(), out[1].begin(), out[1].end());
+                return out[0];
+            };
+            for (double step : { 2.0, 4.0, 6.0, 44100.0 / 48000.0, 96000.0 / 44100.0 })
+            {
+                vs::Resampler fixed (step, 2), cut (step, 2), any ([step] (double) { return step; }, std::max (1.0, step), 2);
+                const auto a = run (fixed, { 30000 }), b = run (cut, { 1, 777, 4096, 13, 512 }), c = run (any, { 8192 });
+                double worst = 0;
+                for (size_t i = 0; i < std::min (a.size(), c.size()); ++i) worst = std::max (worst, (double) std::abs (a[i] - c[i]));
+                const bool whole = step == std::floor (step);
+                char name[96];
+                std::snprintf (name, sizeof name, "a step of %.4f: the same however cut, %s a step function", step, whole ? "exactly as" : "within rounding of");
+                expect (name, a == b && a.size() == c.size() && (whole ? worst == 0 : worst < 1e-6), "(%.0f samples, largest difference %.2g)", (double) a.size(), worst);
+            }
+        }
+        // a ratio of whole numbers keeps its position exact: as many samples
+        // as the length says, however long (an added step drifts by then)
+        {
+            for (const auto& [fsIn, fsOut, seconds] : { std::tuple { 96000.0, 44100.0, 10 }, { 48000.0, 44100.0, 10 }, { 44100.0, 48000.0, 30 } })
+            {
+                const int n = (int) (fsIn * seconds);
+                const std::vector<float> x ((size_t) n, 0.0f);
+                vs::Resampler r (fsIn, fsOut, 1);
+                const float* in[1] { x.data() };
+                // push, then flush: in one expression the order isn't fixed (MSVC flushes first)
+                int made = r.push (in, n);
+                made += r.flush();
+                char name[96];
+                std::snprintf (name, sizeof name, "%.1f to %.1f kHz for %d s makes exactly the resampled length", fsIn / 1000, fsOut / 1000, seconds);
+                expect (name, made == vs::resampledLength (n, fsIn, fsOut), "(%.0f samples, %.0f expected)", made, vs::resampledLength (n, fsIn, fsOut));
+            }
         }
         // a varying step (a wow fix) reads the input where it says: step 1 is a copy
         {
@@ -332,6 +389,197 @@ namespace
         const double lowEnd = vs::device::design (shelf, 48000).magnitudeDb (10, 48000), mid = vs::device::design (shelf, 48000).magnitudeDb (120, 48000);
         expect ("a Web Audio low shelf of +2 dB: +2 at the bottom, +1 at its frequency", std::abs (lowEnd - 2) < 0.02 && std::abs (mid - 1) < 1e-6, "(%.3f, %.6f dB)", lowEnd, mid);
         expect ("five devices: studio, phone, laptop, earbuds, car", vs::device::devices().size() == 5 && vs::device::find ("car") == 4);
+
+        // the devices' lowpass and highpass Qs are plain Qs: at its corner each reads 20 log10 (Q), and none rises above 0 dB
+        // more than a plain Q's own bump (Q 0.7 none, 0.8 0.21 dB, 0.9 0.69 dB)
+        for (const auto& d : vs::device::devices())
+            for (const auto& f : d.filters)
+            {
+                if (f.type != vs::device::FilterType::lowpass && f.type != vs::device::FilterType::highpass) continue;
+                const double q = std::pow (10.0, f.q / 20), corner = vs::device::design (f, 48000).magnitudeDb (f.frequency, 48000);
+                double top = -1e9;
+                for (double hz = 10; hz < 23000; hz *= 1.001) top = std::max (top, vs::device::design (f, 48000).magnitudeDb (hz, 48000));
+                const double bump = q * q > 0.5 ? 20 * std::log10 (q * q / std::sqrt (q * q - 0.25)) : 0.0;
+                char name[120];
+                std::snprintf (name, sizeof (name), "%s %s at %.0f Hz: Q %.1f, no resonance beyond that Q's", d.id,
+                               f.type == vs::device::FilterType::lowpass ? "lowpass" : "highpass", f.frequency, q);
+                expect (name, std::abs (corner - 20 * std::log10 (q)) < 1e-6 && top < bump + 0.01, "(corner %.3f dB, top %.3f dB)", corner, top);
+            }
+        // the phone: the highpass at 450 Hz no longer lifts the low mids
+        sim.setDevice (vs::device::find ("phone"));
+        expect ("the phone is flat (within 0.1 dB) at 500 Hz", std::abs (sim.magnitudeDb (500)) < 0.1, "(%.3f dB)", sim.magnitudeDb (500));
+    }
+
+    // ---------- DSD to PCM
+
+    // a second-order one-bit delta-sigma modulator, most significant bit first
+    std::vector<std::uint8_t> modulate (const std::vector<double>& x)
+    {
+        std::vector<std::uint8_t> out (x.size() / 8, 0);
+        double i1 = 0, i2 = 0, y = 0;
+        for (size_t k = 0; k < out.size() * 8; ++k)
+        {
+            i1 += x[k] - y;
+            i2 += i1 - y;
+            const bool bit = i2 >= 0;
+            y = bit ? 1 : -1;
+            if (bit) out[k >> 3] = (std::uint8_t) (out[k >> 3] | (0x80 >> (k & 7)));
+        }
+        return out;
+    }
+
+    void dsd()
+    {
+        using namespace vs::dsd;
+        expect ("DSD64 and DSD128 to 88.2 kHz, DSD256 and DSD512 to 176.4 kHz", outputRate (2822400) == 88200 && outputRate (5644800) == 88200
+                && outputRate (11289600) == 176400 && outputRate (22579200) == 176400);
+        expect ("bytes per sample: 4 (DSD64), 8 (DSD128, DSD256), 16 (DSD512); 0 for 3.072 MHz", bytesPerSample (2822400) == 4 && bytesPerSample (5644800) == 8
+                && bytesPerSample (11289600) == 8 && bytesPerSample (22579200) == 16 && bytesPerSample (3072000) == 0 && ! Decoder (3072000, 2).ok());
+        expect ("reverseBits: 0x01 to 0x80, 0xC5 to 0xA3", reverseBits (0x01) == 0x80 && reverseBits (0xC5) == 0xA3);
+        const auto f = makeFilter (2822400);
+        double dc = 0;
+        for (int k = 0; k < f.bytes; ++k) dc += f.table[(size_t) (k * 256 + 255)];
+        expect ("the DSD64 filter: 128 bytes of taps that sum to 1 (all ones read 1)", f.bytes == 128 && std::abs (dc - 1) < 1e-5, "(%.7f)", dc);
+
+        for (double rate : { 2822400.0, 5644800.0, 11289600.0 })
+        {
+            // a 1 kHz sine at half scale, and 20 kHz (kept) beside it
+            const int n = (int) (rate * 0.5);
+            std::vector<double> x ((size_t) n);
+            for (int i = 0; i < n; ++i) x[(size_t) i] = 0.5 * std::sin (twoPi * 1000 * i / rate) + 0.1 * std::sin (twoPi * 20000 * i / rate);
+            const auto bits = modulate (x);
+            const auto pcm = toPcm (bits.data(), (int) bits.size(), rate);
+            const double fs = outputRate (rate);
+            const int expectLen = ((int) bits.size() - makeFilter (rate).bytes) / bytesPerSample (rate) + 1;
+            const int from = (int) (fs * 0.1), len = (int) (fs * 0.3);
+            const double a1 = amplitudeAt (pcm.data() + from, len, fs, 1000), a20 = amplitudeAt (pcm.data() + from, len, fs, 20000);
+            // what is left once both tones are taken out (20 kHz at the level it came out: DSD256's filter, half as long in
+            // time as DSD64's, starts its slope lower): the modulator's noise below 30 kHz and the filter's leftovers
+            std::vector<float> rest ((size_t) len);
+            const double delay = (makeFilter (rate).bytes * 8 - 1) / 2.0 / rate;   // the linear-phase filter's delay: output i is the input around i / fs + delay
+            for (int i = 0; i < len; ++i)
+            {
+                const double t = (from + i) / fs + delay;
+                rest[(size_t) i] = (float) (pcm[(size_t) (from + i)] - 0.5 * std::sin (twoPi * 1000 * t) - a20 * std::sin (twoPi * 20000 * t));
+            }
+            const double restDb = 20 * std::log10 (rms (rest.data(), len) + 1e-12);
+            char name[120];
+            std::snprintf (name, sizeof (name), "DSD at %.4f MHz: 1 kHz and 20 kHz come through at their levels, in time", rate / 1e6);
+            expect (name, (int) pcm.size() == expectLen && std::abs (a1 - 0.5) < 0.005 && std::abs (20 * std::log10 (a20 / 0.1)) < 0.5 && restDb < -60,
+                    "(%.4f, %.4f, rest %.1f dB)", a1, a20, restDb);
+
+            // streaming in uneven pushes gives the same samples as all at once
+            Decoder d (rate, 2);
+            std::vector<float> got;
+            std::mt19937 rng (5);
+            for (size_t s = 0; s < bits.size();)
+            {
+                const int k = (int) std::min<size_t> (bits.size() - s, 1 + rng() % 3000);
+                const std::uint8_t* in[2] { bits.data() + s, bits.data() + s };
+                const int made = d.push (in, k);
+                got.insert (got.end(), d.output (1), d.output (1) + made);
+                s += (size_t) k;
+            }
+            std::snprintf (name, sizeof (name), "DSD at %.4f MHz: pushed in pieces, the same samples", rate / 1e6);
+            expect (name, got == pcm);
+        }
+        // the filter stops DSD's noise: 60 kHz (above the cut-off) is held more than 60 dB down
+        {
+            const double rate = 2822400;
+            const int n = (int) (rate * 0.3);
+            std::vector<double> x ((size_t) n);
+            for (int i = 0; i < n; ++i) x[(size_t) i] = 0.4 * std::sin (twoPi * 60000 * i / rate);
+            const auto pcm = toPcm (modulate (x).data(), n / 8, rate);
+            // from 0.1 s to the end of what came out (the filter holds back its first samples, so
+            // there are fewer than 0.3 s of them); 60 kHz folds to 28.2 kHz at 88.2 kHz
+            const int from = 8820, len = (int) pcm.size() - from;
+            const double a = amplitudeAt (pcm.data() + from, len, 88200, 88200 - 60000);
+            expect ("DSD64: a 60 kHz tone is gone (more than 60 dB down)", 20 * std::log10 (a / 0.4 + 1e-12) < -60, "(%.1f dB)", 20 * std::log10 (a / 0.4 + 1e-12));
+        }
+        expect ("nothing comes out until the filter has its bytes", toPcm (std::vector<std::uint8_t> (127, 0x69).data(), 127, 2822400).empty()
+                && toPcm (std::vector<std::uint8_t> (128, 0x69).data(), 128, 2822400).size() == 1);
+    }
+
+    // ---------- the mastering chain's true-peak limiter, on its own
+
+    void limiter()
+    {
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        {
+            // a hot mix: a buzzy bass, noise and a high tone, peaking well over full scale
+            const int n = (int) fs * 3;
+            auto l = noise (n, 31, 0.6f), r = noise (n, 32, 0.6f);
+            for (int i = 0; i < n; ++i)
+            {
+                const double t = i / fs, buzz = std::sin (twoPi * 110 * t) + 0.5 * std::sin (twoPi * 330 * t) + 0.3 * std::sin (twoPi * 5000 * t + 0.4);
+                l[(size_t) i] += (float) (0.9 * buzz);
+                r[(size_t) i] += (float) (0.8 * buzz);
+            }
+            auto meter = [] (const std::vector<float>& a, const std::vector<float>& b)
+            {
+                vs::TruePeakMeter m;
+                m.prepare (2, 4096);
+                for (size_t s = 0; s < a.size(); s += 4096)
+                {
+                    const float* ch[2] { a.data() + s, b.data() + s };
+                    m.process (ch, (int) std::min<size_t> (4096, a.size() - s));
+                }
+                m.finish();
+                return 20 * std::log10 ((double) m.truePeak (-1));
+            };
+            const double before = meter (l, r);
+
+            // on its own, as the browser runs it (blocks of up to 4096)
+            vs::TruePeakLimiter lim;
+            lim.prepare (fs, 4096);
+            lim.setCeilingDb (-1.0f);
+            auto ol = l, orr = r;
+            for (int s = 0; s < n; s += 4096)
+            {
+                float* ch[2] { ol.data() + s, orr.data() + s };
+                juce::dsp::AudioBlock<float> b (ch, 2, (size_t) std::min (4096, n - s));
+                lim.process (b);
+            }
+            const double after = meter (ol, orr);
+            char name[120];
+            std::snprintf (name, sizeof (name), "limiter at %.1f kHz: a hot mix held to -1 dBTP on the meter", fs / 1000);
+            expect (name, before > 3 && after <= -1.0, "(%.2f dBTP in, %.3f dBTP out)", before, after);
+
+            // the mastering chain's own limiter stage, fed the same input as the chain feeds it (its release
+            // and ceiling set each block, in the chain's blocks), gives the same samples bit for bit
+            vs::MasterChain chain;
+            chain.prepare (fs, 512);
+            const auto& style = vs::MasterChain::style (0);
+            auto cl = l, cr = r;
+            for (int s = 0; s < n; s += 512)
+            {
+                float* ch[2] { cl.data() + s, cr.data() + s };
+                juce::dsp::AudioBlock<float> b (ch, 2, (size_t) std::min (512, n - s));
+                chain.limiter.setCeilingDb (-1.0f);
+                chain.limiter.setReleaseMs (style.releaseMs, fs);
+                chain.limiter.process (b);
+            }
+            std::snprintf (name, sizeof (name), "limiter at %.1f kHz: the same samples as the chain's limiter stage", fs / 1000);
+            expect (name, cl == ol && cr == orr && chain.limiter.getLatency() == lim.getLatency());
+        }
+
+        // one channel: the same as two identical channels
+        const double fs = 48000;
+        auto x = noise (48000, 41, 1.5f);
+        vs::TruePeakLimiter mono, stereo;
+        mono.prepare (fs, 4096); stereo.prepare (fs, 4096);
+        mono.setCeilingDb (-0.5f); stereo.setCeilingDb (-0.5f);
+        auto m = x, a = x, b = x;
+        for (int s = 0; s < 48000; s += 4096)
+        {
+            const size_t k = (size_t) std::min (4096, 48000 - s);
+            float* c1[1] { m.data() + s };
+            float* c2[2] { a.data() + s, b.data() + s };
+            juce::dsp::AudioBlock<float> b1 (c1, 1, k), b2 (c2, 2, k);
+            mono.process (b1);
+            stereo.process (b2);
+        }
+        expect ("limiter: one channel limits as two identical ones", m == a && a == b);
     }
 
     // ---------- vocal EQ
@@ -379,10 +627,11 @@ namespace
         int d = 0;
         for (int s = 0; s < n; s += block)
         {
-            std::vector<float> buf (in.begin() + s, in.begin() + s + block);
-            ab.takeOriginal (buf.data(), nullptr, block);
+            const int m = std::min (block, n - s);
+            std::vector<float> buf (in.begin() + s, in.begin() + s + m);
+            ab.takeOriginal (buf.data(), nullptr, m);
             for (auto& v : buf) { const float y = delayLine[(size_t) d] * 0.5f; delayLine[(size_t) d] = v; d = (d + 1) % latency; v = y; }
-            ab.mix (buf.data(), nullptr, block);
+            ab.mix (buf.data(), nullptr, m);
             std::copy (buf.begin(), buf.end(), out.begin() + s);
         }
         // after the meters fill (3 s) and the gain glides (0.5 s), the original plays 6 dB down, in line
@@ -411,6 +660,8 @@ int main()
     devices();
     vocalEq();
     compare();
+    dsd();
+    limiter();
     std::printf ("%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
     return failures == 0 ? 0 : 1;
 }
