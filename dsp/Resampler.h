@@ -11,6 +11,14 @@
 
 namespace vs
 {
+    // The sample rate an MP3 of a song at songRate is made at: 48 kHz for the
+    // 48 kHz family (and 32 kHz), else 44.1 kHz (MPEG audio carries only
+    // these rates and their halves; the nearer family keeps the conversion simple)
+    inline double mp3Rate (double songRate)
+    {
+        return std::fmod (songRate, 48000.0) == 0.0 || songRate == 32000.0 ? 48000.0 : 44100.0;
+    }
+
     // Streaming resampler: reads the input at a position that moves stepAt (pos)
     // input samples per output sample (constant for a sample rate change or a
     // speed fix, varying for a wow fix). Windowed sinc (the shared SincTable),

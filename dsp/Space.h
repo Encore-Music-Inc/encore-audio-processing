@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "JuceInclude.h"
 #include <cmath>
 #include <vector>
@@ -16,6 +18,19 @@ namespace vs
     class Space
     {
     public:
+        // The delay's times: a fixed slapback, or a note value at the song's
+        // tempo (kept to 30 .. 300 BPM)
+        enum DelayTime { slap = 0, sixteenth, eighth, dottedEighth, quarter, half, numDelayTimes };
+        static constexpr float slapSeconds = 0.095f;
+
+        static float delaySeconds (int time, double bpm)
+        {
+            static constexpr float beats[numDelayTimes] { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f, 2.0f };
+            const int t = std::clamp (time, 0, (int) numDelayTimes - 1);
+            if (t == slap) return slapSeconds;
+            return (float) (60.0 / std::clamp (bpm, 30.0, 300.0)) * beats[t];
+        }
+
         void prepare (const juce::dsp::ProcessSpec& spec)
         {
             fs = spec.sampleRate;

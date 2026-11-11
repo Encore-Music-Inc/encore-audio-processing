@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "JuceInclude.h"
 #include <array>
 #include <atomic>
@@ -31,6 +33,12 @@ namespace vs
         static constexpr float workingLufs = -18.0f;
 
         enum Style { universal = 0, fire, clarity, tape, natural, spatial, cinematic, punch };
+
+        // The loudness targets a master is made for, quietest first (the product names them)
+        struct Target { const char* id; float lufs; };
+        static constexpr int numTargets = 3;
+        static constexpr Target targets[numTargets] { { "streaming", -14.0f }, { "balanced", -11.0f }, { "loud", -9.0f } };
+        static float targetLufs (int i) { return targets[std::clamp (i, 0, numTargets - 1)].lufs; }
 
         struct StyleDef
         {

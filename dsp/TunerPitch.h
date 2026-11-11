@@ -64,4 +64,49 @@ namespace vs
             return r;
         }
     };
+
+    // Following a tuner's pitch readings, one per estimate: a reading close
+    // to the last (within closeRatio) is smoothed into it, a new note jumps;
+    // after more than clearAfter readings with no pitch the note clears.
+    // steady() counts how many readings in a row a string has held within a
+    // tolerance (the product decides the tolerance and when that is "in tune").
+    class TunerFollow
+    {
+    public:
+        struct Settings { float closeRatio = 0.03f, keep = 0.6f, take = 0.4f; int clearAfter = 8; };
+
+        TunerFollow() = default;
+        explicit TunerFollow (Settings s) : set (s) {}
+
+        // An estimate (0 for no pitch); returns the pitch to show, 0 for none
+        float push (float hz)
+        {
+            if (hz > 0.0f)
+            {
+                quiet = 0;
+                smoothed = (smoothed > 0.0f && std::abs (hz / smoothed - 1.0f) < set.closeRatio) ? smoothed * set.keep + hz * set.take : hz;
+                return smoothed;
+            }
+            if (++quiet > set.clearAfter) { smoothed = 0.0f; steadyCount = 0; lastString = -1; }
+            return smoothed;
+        }
+
+        // After a reading: how many readings in a row the same string has
+        // stayed within toleranceCents (0 when it hasn't)
+        int steady (const TunerReading& r, float toleranceCents)
+        {
+            if (r.string >= 0 && std::abs (r.cents) <= toleranceCents && r.string == lastString) ++steadyCount;
+            else steadyCount = 0;
+            lastString = r.string;
+            return steadyCount;
+        }
+
+        bool hasNote() const { return smoothed > 0.0f; }
+        void reset() { smoothed = 0.0f; quiet = 0; steadyCount = 0; lastString = -1; }
+
+    private:
+        Settings set;
+        float smoothed = 0.0f;
+        int quiet = 0, steadyCount = 0, lastString = -1;
+    };
 }
