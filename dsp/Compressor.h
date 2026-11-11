@@ -41,6 +41,22 @@ namespace vs
             rel = onePole (relMs, fs);
 
             makeupDb = std::max (0.0f, -12.0f - thresholdDb) * (1.0f - 1.0f / ratio) * 0.7f;
+            rmsDetect = style == smooth;
+        }
+
+        // The same compressor set by hand, as a general-purpose one: where it
+        // starts (dB), how hard (ratio), how fast it cuts and lets go (ms), the
+        // gain after it (dB), and whether it hears the level as RMS (smooth)
+        // or peak (punchy)
+        struct Detail { float thresholdDb = -18.0f, ratio = 3.0f, attackMs = 10.0f, releaseMs = 120.0f, makeupDb = 0.0f; bool rms = false; };
+        void setDetail (const Detail& d)
+        {
+            thresholdDb = d.thresholdDb;
+            ratio = std::max (1.0f, d.ratio);
+            atk = onePole (std::max (0.05f, d.attackMs), fs);
+            rel = onePole (std::max (1.0f, d.releaseMs), fs);
+            makeupDb = d.makeupDb;
+            rmsDetect = d.rms;
         }
 
         void process (float* const* ch, int numCh, int numSamples)
@@ -57,7 +73,7 @@ namespace vs
                 }
 
                 rms += rmsCoef * (sq - rms);
-                const float levelDb = style == smooth ? powerToDb (rms) + 3.0f : ampToDb (peak);
+                const float levelDb = rmsDetect ? powerToDb (rms) + 3.0f : ampToDb (peak);
 
                 const float target = dynamics::compressedDb (levelDb, thresholdDb, ratio, kneeDb) - levelDb; // <= 0
                 followEnvelope (grDb, target, rel, atk); // the cut deepens at the attack rate
@@ -82,5 +98,6 @@ namespace vs
         float thresholdDb = -18.0f, ratio = 3.0f, makeupDb = 0.0f;
         float atk = 0.0f, rel = 0.0f, rmsCoef = 0.0f;
         float rms = 0.0f, grDb = 0.0f;
+        bool rmsDetect = true;
     };
 }

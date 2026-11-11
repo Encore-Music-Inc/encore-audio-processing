@@ -26,6 +26,7 @@
 #include "Music.h"
 #include "Random.h"
 #include "Channels.h"
+#include "Oscillator.h"
 
 namespace vs::drumsynth
 {
@@ -53,18 +54,12 @@ namespace vs::drumsynth
     {
         Buffer x ((size_t) n);
         const double dt = hz / sr;
-        auto blep = [dt] (double t)
-        {
-            if (t < dt) { t /= dt; return t + t - t * t - 1; }
-            if (t > 1 - dt) { t = (t - 1) / dt; return t * t + t + t + 1; }
-            return 0.0;
-        };
         double t = phase0;
         for (int i = 0; i < n; ++i)
         {
             double v = t < 0.5 ? 1 : -1;
-            v += blep (t);
-            v -= blep (std::fmod (t + 0.5, 1.0));
+            v += polyBlep (t, dt);
+            v -= polyBlep (std::fmod (t + 0.5, 1.0), dt);
             x[(size_t) i] = (float) v;
             t += dt;
             if (t >= 1) t -= 1;
