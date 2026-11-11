@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <random>
+#include <tuple>
 #include <vector>
 #include "dsp/AbCompare.h"
 #include "dsp/Channels.h"
@@ -101,6 +102,55 @@ namespace
             };
             const auto a = run ({ 30000 }), b = run ({ 1, 777, 4096, 13 });
             expect ("the resampler's output is the same however the input is cut", a == b, "(%.0f samples)", (double) a.size());
+        }
+        // a constant step summed by lines (whole numbers), by phases (other
+        // ratios) and tap by tap (a step function) gives the same samples
+        {
+            const int n = 30000;
+            auto x = noise (n, 3), x2 = noise (n, 4);
+            auto run = [&] (vs::Resampler& r, std::vector<int> blocks)
+            {
+                std::vector<float> out[2];
+                size_t b = 0;
+                for (int s = 0; s < n;)
+                {
+                    const int m = std::min (blocks[b++ % blocks.size()], n - s);
+                    const float* in[2] { x.data() + s, x2.data() + s };
+                    const int k = r.push (in, m);
+                    for (int c = 0; c < 2; ++c) out[c].insert (out[c].end(), r.output (c), r.output (c) + k);
+                    s += m;
+                }
+                const int k = r.flush();
+                for (int c = 0; c < 2; ++c) out[c].insert (out[c].end(), r.output (c), r.output (c) + k);
+                out[0].insert (out[0].end(), out[1].begin(), out[1].end());
+                return out[0];
+            };
+            for (double step : { 2.0, 4.0, 6.0, 44100.0 / 48000.0, 96000.0 / 44100.0 })
+            {
+                vs::Resampler fixed (step, 2), cut (step, 2), any ([step] (double) { return step; }, std::max (1.0, step), 2);
+                const auto a = run (fixed, { 30000 }), b = run (cut, { 1, 777, 4096, 13, 512 }), c = run (any, { 8192 });
+                double worst = 0;
+                for (size_t i = 0; i < std::min (a.size(), c.size()); ++i) worst = std::max (worst, (double) std::abs (a[i] - c[i]));
+                const bool whole = step == std::floor (step);
+                char name[96];
+                std::snprintf (name, sizeof name, "a step of %.4f: the same however cut, %s a step function", step, whole ? "exactly as" : "within rounding of");
+                expect (name, a == b && a.size() == c.size() && (whole ? worst == 0 : worst < 1e-6), "(%.0f samples, largest difference %.2g)", (double) a.size(), worst);
+            }
+        }
+        // a ratio of whole numbers keeps its position exact: as many samples
+        // as the length says, however long (an added step drifts by then)
+        {
+            for (const auto& [fsIn, fsOut, seconds] : { std::tuple { 96000.0, 44100.0, 10 }, { 48000.0, 44100.0, 10 }, { 44100.0, 48000.0, 30 } })
+            {
+                const int n = (int) (fsIn * seconds);
+                const std::vector<float> x ((size_t) n, 0.0f);
+                vs::Resampler r (fsIn / fsOut, 1);
+                const float* in[1] { x.data() };
+                const int made = r.push (in, n) + r.flush();
+                char name[96];
+                std::snprintf (name, sizeof name, "%.1f to %.1f kHz for %d s makes exactly the resampled length", fsIn / 1000, fsOut / 1000, seconds);
+                expect (name, made == vs::resampledLength (n, fsIn, fsOut), "(%.0f samples, %.0f expected)", made, vs::resampledLength (n, fsIn, fsOut));
+            }
         }
         // a varying step (a wow fix) reads the input where it says: step 1 is a copy
         {
@@ -379,10 +429,11 @@ namespace
         int d = 0;
         for (int s = 0; s < n; s += block)
         {
-            std::vector<float> buf (in.begin() + s, in.begin() + s + block);
-            ab.takeOriginal (buf.data(), nullptr, block);
+            const int m = std::min (block, n - s);
+            std::vector<float> buf (in.begin() + s, in.begin() + s + m);
+            ab.takeOriginal (buf.data(), nullptr, m);
             for (auto& v : buf) { const float y = delayLine[(size_t) d] * 0.5f; delayLine[(size_t) d] = v; d = (d + 1) % latency; v = y; }
-            ab.mix (buf.data(), nullptr, block);
+            ab.mix (buf.data(), nullptr, m);
             std::copy (buf.begin(), buf.end(), out.begin() + s);
         }
         // after the meters fill (3 s) and the gain glides (0.5 s), the original plays 6 dB down, in line
