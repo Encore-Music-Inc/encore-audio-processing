@@ -135,7 +135,7 @@ namespace vs::tempo
     // What the tempo finder hears.
     struct TempoEstimate
     {
-        bool valid = false;      // false until a few seconds have been heard
+        bool valid = false;      // false until a few seconds have been heard, and when nothing in them starts (silence)
         double bpm = 0.0;
         double confidence = 0.0; // 0 to 1: how sure it is
         double strength = 0.0;   // how far the winning tempo stands above a typical one
@@ -175,7 +175,8 @@ namespace vs::tempo
             tail.erase (tail.begin(), tail.begin() + (std::ptrdiff_t) std::min (pos, tail.size()));
         }
 
-        // The tempo, how sure, and half and double, once 4 seconds are in.
+        // The tempo, how sure, and half and double, once 4 seconds are in and
+        // something in them starts (no rhythm, such as silence: not valid).
         TempoEstimate estimate (double minBpm = 60, double maxBpm = 200) const
         {
             TempoEstimate out;
@@ -190,6 +191,8 @@ namespace vs::tempo
                 acc += env[(size_t) i] - (i >= w ? env[(size_t) (i - w)] : 0.0);
                 e[(size_t) i] = std::max (0.0, env[(size_t) i] - acc / std::min (i + 1, w));
             }
+            // no starts at all: every tempo scores 0, so none is the tempo
+            if (std::none_of (e.begin(), e.end(), [] (double v) { return v > 0.0; })) return out;
             // score every spacing on a fine grid, at its best phase, with all the beats of the song
             auto score = [&] (double period)
             {

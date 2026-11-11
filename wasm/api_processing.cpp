@@ -1,7 +1,8 @@
 // The browser's processing pieces (pr_*): sample rate conversion, fractional
 // delays, decimation, float to integer with dither, channel maps, trims,
-// fades and normalizing, the playback device filters, the vocal EQ and the
-// loudness-matched "hear the original". Plain C functions; audio passes
+// fades and normalizing, the playback device filters, the vocal EQ, the
+// loudness-matched "hear the original", DSD to PCM and the mastering chain's
+// true-peak limiter on its own. Plain C functions; audio passes
 // through float buffers in the module's memory. Where a function takes several
 // channels at once (chans), it is an array of that many float pointers.
 // Built with the other wasm/api_*.cpp files into master.wasm by wasm/build.sh.
@@ -12,7 +13,9 @@
 #include "dsp/Channels.h"
 #include "dsp/DeviceSim.h"
 #include "dsp/Dither.h"
+#include "dsp/Dsd.h"
 #include "dsp/FracDelay.h"
+#include "dsp/Loudness.h"
 #include "dsp/Resampler.h"
 #include "dsp/VocalEq.h"
 
@@ -28,6 +31,11 @@ namespace
     struct Device { vs::DeviceSim sim; Buffers io; };
     struct Vocal { vs::VocalEq eq; Buffers io; };
     struct Ab { vs::AbCompare ab; Buffers original, processed; };
+    struct Dsd { vs::dsd::Decoder d; std::vector<std::vector<std::uint8_t>> in; };
+    struct Limiter { vs::TruePeakLimiter lim; int channels; };
+
+    // The limiter runs in blocks of at most this many frames
+    constexpr int limiterBlock = 4096;
 
     std::vector<const float*> pointers (const Buffers& b)
     {
@@ -244,4 +252,64 @@ extern "C"
         a->ab.mix (a->processed[0].data(), a->processed[1].data(), n);
     }
     EMSCRIPTEN_KEEPALIVE float pr_ab_match_db (void* p) { return static_cast<Ab*> (p)->ab.matchGainDb(); }
+
+    // ---- DSD to PCM (vs::dsd::Decoder), streaming. Fill pr_dsd_input (h, c)
+    // with each channel's next n bytes (time order, most significant bit
+    // first: DSDIFF's order; a DSF file's bytes reversed), pr_dsd_push (h, n),
+    // then read pr_dsd_output (h, c) (as many samples as it returned) at
+    // pr_dsd_rate (h). Null for a DSD rate it can't read.
+    EMSCRIPTEN_KEEPALIVE void* pr_dsd_create (double dsdRate, int channels, int maxBytes)
+    {
+        auto* d = new Dsd { vs::dsd::Decoder (dsdRate, channels), {} };
+        if (! d->d.ok()) { delete d; return nullptr; }
+        d->in.assign ((size_t) channels, std::vector<std::uint8_t> ((size_t) maxBytes, 0));
+        return d;
+    }
+    EMSCRIPTEN_KEEPALIVE void pr_dsd_destroy (void* p) { delete static_cast<Dsd*> (p); }
+    EMSCRIPTEN_KEEPALIVE double pr_dsd_rate (void* p) { return static_cast<Dsd*> (p)->d.outputSampleRate(); }
+    EMSCRIPTEN_KEEPALIVE std::uint8_t* pr_dsd_input (void* p, int c) { return static_cast<Dsd*> (p)->in[(size_t) c].data(); }
+    EMSCRIPTEN_KEEPALIVE int pr_dsd_push (void* p, int n)
+    {
+        auto* d = static_cast<Dsd*> (p);
+        std::vector<const std::uint8_t*> in;
+        for (auto& c : d->in) in.push_back (c.data());
+        return d->d.push (in.data(), n);
+    }
+    EMSCRIPTEN_KEEPALIVE const float* pr_dsd_output (void* p, int c) { return static_cast<Dsd*> (p)->d.output (c); }
+    EMSCRIPTEN_KEEPALIVE void pr_dsd_reset (void* p) { static_cast<Dsd*> (p)->d.reset(); }
+    // The PCM rate a DSD rate becomes, or 0 for one it can't read
+    EMSCRIPTEN_KEEPALIVE double pr_dsd_output_rate (double dsdRate)
+    {
+        return vs::dsd::bytesPerSample (dsdRate) > 0 ? vs::dsd::outputRate (dsdRate) : 0.0;
+    }
+
+    // ---- The mastering chain's true-peak limiter on its own (vs::TruePeakLimiter
+    // and its 4x detector, nothing else), for one or two channels; null for
+    // another count. It holds the true peak under ceilingDb, with the release
+    // it starts with (the Balanced style's) until pr_limiter_release. chans:
+    // that many float pointers, any number of frames, processed in place; the
+    // output is pr_limiter_latency (h) frames behind the input.
+    EMSCRIPTEN_KEEPALIVE void* pr_limiter_create (double sampleRate, int channels, float ceilingDb)
+    {
+        if (channels < 1 || channels > 2) return nullptr;
+        auto* l = new Limiter { {}, channels };
+        l->lim.prepare (sampleRate, limiterBlock);
+        l->lim.setCeilingDb (ceilingDb);
+        return l;
+    }
+    EMSCRIPTEN_KEEPALIVE void pr_limiter_destroy (void* p) { delete static_cast<Limiter*> (p); }
+    EMSCRIPTEN_KEEPALIVE int pr_limiter_latency (void* p) { return static_cast<Limiter*> (p)->lim.getLatency(); }
+    EMSCRIPTEN_KEEPALIVE void pr_limiter_reset (void* p) { static_cast<Limiter*> (p)->lim.reset(); }
+    // The release, ms (the chain sets its style's)
+    EMSCRIPTEN_KEEPALIVE void pr_limiter_release (void* p, float ms) { static_cast<Limiter*> (p)->lim.setReleaseMs (ms, 0.0); }
+    EMSCRIPTEN_KEEPALIVE void pr_limiter_process (void* p, float* const* chans, int frames)
+    {
+        auto* l = static_cast<Limiter*> (p);
+        for (int s = 0; s < frames; s += limiterBlock)
+        {
+            float* ch[2] { chans[0] + s, l->channels > 1 ? chans[1] + s : nullptr };
+            juce::dsp::AudioBlock<float> block (ch, (size_t) l->channels, (size_t) std::min (limiterBlock, frames - s));
+            l->lim.process (block);
+        }
+    }
 }

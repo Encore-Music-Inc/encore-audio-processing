@@ -82,6 +82,10 @@ TOLERANCES = {
                   "why": "A processed signal's peak: as proc-sum."},
     "proc-lufs": {"abs": 0.005, "rel": 0,
                   "why": "A processed signal's integrated loudness, LUFS: as proc-sum."},
+    "box": {"abs": 1e-6, "rel": 1e-6,
+            "why": "A block averaged down (the tuner's): double sums of a few samples rounded to float, which compilers may order differently, so a value can move by a float step."},
+    "dsd": {"abs": 1e-6, "rel": 1e-6,
+            "why": "DSD to PCM: the low-pass is designed in double with sin and cos, which maths libraries round differently in the last place, so its float tables can differ in the last place, and a sample (a sum of up to 512 of them) by a few float steps."},
 }
 
 # which tolerance each result of an op uses (by its name's last part)
@@ -151,8 +155,14 @@ def rule(op, name):
         return "seconds"
     if op == "music":
         return "music-math" if stem in ("hzToMidi", "midiToHz") else "exact"
-    if op == "scale-library":
+    if op in ("scale-library", "meter"):
         return "exact"
+    if op == "downsample":
+        return "box"
+    if op == "dsd":
+        return "exact" if last == "rate" else "lufs" if last == "lufs" else "dsd"
+    if op == "limiter":
+        return {"sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs", "truePeak": "proc-peak"}[last]
     raise SystemExit(f"tools/reference.py: no tolerance for {op} result {name}")
 
 
@@ -388,6 +398,49 @@ case("processing/vocal-eq/vox", "vocal-eq", VOX, block=512, lowCutHz=90, lowDb=-
      freqs=[60, 200, 3000, 12000])
 case("processing/ab/vox", "ab", VOX, block=512)
 case("processing/ab/song-latency", "ab", SONG, block=1024, latency=64)
+
+# ---- the tuner's block averaging (tp_downsample)
+
+case("pitch/downsample/voice", "downsample", signal(48000, 0.5, 1, voiced(220, 0.4, SUNG, vibHz=5, vibDepth=0.01), noise(201, 0.01)),
+     strides=[1, 2, 3, 4, 6], at=[0, 100, 1000, 3999])
+
+# ---- the beat grid's meter maths (rh_* meters, sd_clean_settings)
+
+CLEAN_DEFAULT = [120, 4, 4, 1, 50, 0, 0, 3, 0, 4, 4, 0, 80, 4, 4, 120, 0, 5]
+
+
+def clean(changes, **lists):
+    s = list(CLEAN_DEFAULT)
+    for k, v in changes.items():
+        s[k] = v
+    return dict(s=s, **lists)
+
+
+case("rhythm/meter", "meter", tops=list(range(1, 18)), bottoms=[2, 4, 8, 16],
+     parse=[["3+2+2", 7], ["2 2 3", 7], ["3+3", 7], ["0+7", 7], ["", 4], ["4", 4], ["3.5+3.5", 7], ["x3y4", 7], ["9" * 400, 9]],
+     swings=[50, 60, 66.7, 75, 90, 0],
+     bpms=[10, 24, 39.99, 50, 65.9, 66, 100, 119.99, 120, 175, 200, 399],
+     clean=[clean({}),
+            clean({1: 7, 2: 8}, groups=[3, 2, 2], accents=[3, 1, 1, 2, 1, 2, 1], sub="16"),
+            clean({0: 500, 1: 20, 2: 3, 3: 2, 4: 80, 5: 150, 7: 0, 9: 0, 10: -2}, groups=[], accents=[], sub="x"),
+            clean({0: 10, 1: 6, 2: 8, 3: 3, 6: 1, 7: 17, 8: 1, 11: 2}, groups=[3, 3], sub="8"),
+            clean({1: 5, 2: 8, 3: 2}, groups=[2, 2], accents=[9, -1, 2, 2, 2], sub="3")])
+
+# ---- DSD to PCM (pr_dsd_*): a sine through a one-bit modulator, and random bytes, at each output rate
+
+case("processing/dsd/dsd64-sine", "dsd", signal(2822400, 0.25, 2, tone(1000, 0.5, 0.25)), kind="sine", block=4096,
+     at=[0, 500, 10000, 22000])
+case("processing/dsd/dsd128-sine", "dsd", signal(5644800, 0.1, 1, tone(10000, 0.4)), kind="sine", block=1000, at=[300, 8000])
+case("processing/dsd/dsd256-sine", "dsd", signal(11289600, 0.1, 2, tone(997, 0.3), tone(15000, 0.1, 0.2)), kind="sine", block=8192,
+     at=[300, 17000])
+case("processing/dsd/dsd64-random", "dsd", signal(2822400, 0.05, 2, noise(211, 1, 1)), kind="sign", block=777, at=[200, 1000])
+
+# ---- the mastering chain's true-peak limiter on its own (pr_limiter_*): hot mixes held to the ceiling
+
+HOT = [voiced(110, 0.9, REED, decay=14, every=0.5), noise(221, 0.5, 0.4, lowpass=1), tone(5000, 0.3, 0.35, phase=0.1)]
+for rate in (44100, 48000, 96000):
+    case(f"processing/limiter/hot-{rate // 1000}k", "limiter", signal(rate, 3, 2, *HOT), ceiling=-1, block=1024)
+case("processing/limiter/mono-slow-release", "limiter", signal(48000, 3, 1, *HOT), ceiling=-0.3, release=150, block=512)
 
 # ---- music: note names, keys, spelling (the scale library is data/scales.json in the browser, so natively only)
 

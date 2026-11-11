@@ -43,6 +43,27 @@ namespace
     }
 
     std::string text;   // the last name handed out
+
+    // The sequencer's settings as they cross (sd_engine_set lists them):
+    // whole numbers rounded half up, NaN as 0. groups and accents are left at
+    // the 4/4 defaults when their count is 0 (sd_engine_set) or below 0.
+    vs::metronome::MetronomeSettings readSettings (const double* s, const int* groups, int nGroups, const int* accents, int nAccents, const char* sub)
+    {
+        using namespace vs::metronome;
+        auto i = [] (double v) { return std::isnan (v) ? 0 : (int) roundHalfUp (v); };
+        MetronomeSettings m;
+        m.bpm = s[0]; m.top = i (s[1]); m.bottom = i (s[2]); m.units = i (s[3]);
+        m.swing = s[4]; m.randomMute = s[5];
+        m.poly = { s[6] != 0, i (s[7]) };
+        m.gap = { s[8] != 0, i (s[9]), i (s[10]) };
+        m.trainer.mode = s[11] == 1 ? TrainerMode::steps : s[11] == 2 ? TrainerMode::ramp : TrainerMode::off;
+        m.trainer.from = s[12]; m.trainer.step = s[13]; m.trainer.every = s[14]; m.trainer.to = s[15];
+        m.trainer.loop = s[16] != 0; m.trainer.minutes = s[17];
+        if (nGroups > 0) m.groups.assign (groups, groups + nGroups);
+        if (nAccents > 0) m.accents.assign (accents, accents + nAccents);
+        m.sub = sub;
+        return m;
+    }
 }
 
 extern "C"
@@ -159,20 +180,36 @@ extern "C"
     // fit the meter). sub: the subdivision id.
     EMSCRIPTEN_KEEPALIVE void sd_engine_set (ClickEngineHandle* h, const double* s, const int* groups, int nGroups, const int* accents, int nAccents, const char* sub)
     {
+        h->engine.set (readSettings (s, groups, nGroups, accents, nAccents, sub), { s[18], s[19], s[20], s[21] });
+    }
+
+    // A settings object mended as the engine plays it (cleanSettings: a bad
+    // preset or old save can't break the clock). s: the first 18 numbers of
+    // sd_engine_set. groups and accents: nGroups and nAccents ints, a count
+    // below 0 for a settings object without them (the 4/4 defaults); 0 is
+    // an empty list, which cleanSettings replaces. out: the same 18 numbers
+    // mended, then the grouping's length, the accents' length, and the
+    // subdivision's place in the list (0 none, 1 "8", 2 "3", 3 "16", 4 "5",
+    // 5 "6"). The grouping and the accents go to outGroups and outAccents,
+    // room for 16 each (a bar has at most 16 counts).
+    EMSCRIPTEN_KEEPALIVE void sd_clean_settings (const double* s, const int* groups, int nGroups, const int* accents, int nAccents, const char* sub,
+                                                 double* out, int* outGroups, int* outAccents)
+    {
         using namespace vs::metronome;
-        auto i = [] (double v) { return std::isnan (v) ? 0 : (int) roundHalfUp (v); };
-        MetronomeSettings m;
-        m.bpm = s[0]; m.top = i (s[1]); m.bottom = i (s[2]); m.units = i (s[3]);
-        m.swing = s[4]; m.randomMute = s[5];
-        m.poly = { s[6] != 0, i (s[7]) };
-        m.gap = { s[8] != 0, i (s[9]), i (s[10]) };
-        m.trainer.mode = s[11] == 1 ? TrainerMode::steps : s[11] == 2 ? TrainerMode::ramp : TrainerMode::off;
-        m.trainer.from = s[12]; m.trainer.step = s[13]; m.trainer.every = s[14]; m.trainer.to = s[15];
-        m.trainer.loop = s[16] != 0; m.trainer.minutes = s[17];
-        if (nGroups > 0) m.groups.assign (groups, groups + nGroups);
-        if (nAccents > 0) m.accents.assign (accents, accents + nAccents);
-        m.sub = sub;
-        h->engine.set (m, { s[18], s[19], s[20], s[21] });
+        auto m = readSettings (s, groups, nGroups, accents, nAccents, sub);
+        if (nGroups == 0) m.groups.clear();
+        if (nAccents == 0) m.accents.clear();
+        m = cleanSettings (m);
+        const double mode = m.trainer.mode == TrainerMode::steps ? 1 : m.trainer.mode == TrainerMode::ramp ? 2 : 0;
+        int place = 0;
+        while (place < (int) std::size (subdivisions) && m.sub != subdivisions[place].id) ++place;
+        const double v[] { m.bpm, (double) m.top, (double) m.bottom, (double) m.units, m.swing, m.randomMute,
+                           m.poly.on ? 1.0 : 0.0, (double) m.poly.n, m.gap.on ? 1.0 : 0.0, (double) m.gap.play, (double) m.gap.mute,
+                           mode, m.trainer.from, m.trainer.step, m.trainer.every, m.trainer.to, m.trainer.loop ? 1.0 : 0.0, m.trainer.minutes,
+                           (double) m.groups.size(), (double) m.accents.size(), (double) place };
+        std::memcpy (out, v, sizeof (v));
+        std::copy (m.groups.begin(), m.groups.end(), outGroups);
+        std::copy (m.accents.begin(), m.accents.end(), outAccents);
     }
 
     // Starts at frame (the first count there, after a count-in bar when
