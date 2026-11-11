@@ -151,7 +151,9 @@ namespace
                 const std::vector<float> x ((size_t) n, 0.0f);
                 vs::Resampler r (fsIn, fsOut, 1);
                 const float* in[1] { x.data() };
-                const int made = r.push (in, n) + r.flush();
+                // push, then flush: in one expression the order isn't fixed (MSVC flushes first)
+                int made = r.push (in, n);
+                made += r.flush();
                 char name[96];
                 std::snprintf (name, sizeof name, "%.1f to %.1f kHz for %d s makes exactly the resampled length", fsIn / 1000, fsOut / 1000, seconds);
                 expect (name, made == vs::resampledLength (n, fsIn, fsOut), "(%.0f samples, %.0f expected)", made, vs::resampledLength (n, fsIn, fsOut));
