@@ -488,7 +488,10 @@ namespace
             std::vector<double> x ((size_t) n);
             for (int i = 0; i < n; ++i) x[(size_t) i] = 0.4 * std::sin (twoPi * 60000 * i / rate);
             const auto pcm = toPcm (modulate (x).data(), n / 8, rate);
-            const double a = amplitudeAt (pcm.data() + 8820, 17640, 88200, 88200 - 60000);   // 60 kHz folds to 28.2 kHz at 88.2 kHz
+            // from 0.1 s to the end of what came out (the filter holds back its first samples, so
+            // there are fewer than 0.3 s of them); 60 kHz folds to 28.2 kHz at 88.2 kHz
+            const int from = 8820, len = (int) pcm.size() - from;
+            const double a = amplitudeAt (pcm.data() + from, len, 88200, 88200 - 60000);
             expect ("DSD64: a 60 kHz tone is gone (more than 60 dB down)", 20 * std::log10 (a / 0.4 + 1e-12) < -60, "(%.1f dB)", 20 * std::log10 (a / 0.4 + 1e-12));
         }
         expect ("nothing comes out until the filter has its bytes", toPcm (std::vector<std::uint8_t> (127, 0x69).data(), 127, 2822400).empty()
