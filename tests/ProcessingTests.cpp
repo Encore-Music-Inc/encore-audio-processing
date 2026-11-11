@@ -647,6 +647,15 @@ namespace
         const int ramp = (int) std::floor (0.03 * fs);
         expect ("switching back fades over 30 ms", ones[0] < 0.01f && ones[(size_t) ramp / 2] > 0.4f && ones[(size_t) ramp / 2] < 0.6f && ones[(size_t) ramp] == 1.0f,
                 "(%.3f halfway)", ones[(size_t) ramp / 2]);
+
+        // with no latency (Strum), the original is the input sample for sample
+        vs::AbCompare now;
+        now.setHearOriginal (true);
+        now.prepare (fs, block, 0);
+        std::vector<float> x (in.begin(), in.begin() + block), y = x;
+        now.takeOriginal (x.data(), nullptr, block);
+        now.mix (y.data(), nullptr, block);
+        expect ("with no latency the original is not delayed", y == x, "");
     }
 }
 

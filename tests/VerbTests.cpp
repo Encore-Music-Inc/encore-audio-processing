@@ -218,6 +218,21 @@ int main()
         std::printf ("INFO CPU (one core, 48 kHz stereo): %s\n", detail.toRawUTF8());
     }
 
+    // The early reflections a picture draws are the ones the engine plays
+    {
+        using E = vs::ReverbEngine;
+        const auto room = E::earlyReflections (E::room, 0.5f), hall = E::earlyReflections (E::hall, 0.5f);
+        const auto huge = E::earlyReflections (E::huge, 1.0f), plate = E::earlyReflections (E::plate, 0.5f);
+        const auto spring = E::earlyReflections (E::spring, 0.5f);
+        float longest = 0.0f;
+        for (auto& t : huge.taps) longest = std::max (longest, t.ms);
+        expect ("reflections: Huge has them, later than Hall's; Plate and Spring have none",
+                huge.level > 0.0f && huge.taps[0].ms > hall.taps[0].ms && hall.taps[0].ms > room.taps[0].ms
+                    && plate.level == 0.0f && spring.level == 0.0f,
+                juce::String (huge.taps[0].ms, 2) + " ms first in Huge");
+        expect ("reflections: none later than the engine plays them", longest <= E::maxReflectionSec * 1000.0f, juce::String (longest, 1) + " ms");
+    }
+
     std::printf ("\n%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
     return failures == 0 ? 0 : 1;
 }
