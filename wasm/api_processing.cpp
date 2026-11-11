@@ -312,4 +312,7 @@ extern "C"
             l->lim.process (block);
         }
     }
+
+    // ---- The sample rate an MP3 of a song at songRate is made at
+    EMSCRIPTEN_KEEPALIVE double pr_mp3_rate (double songRate) { return vs::mp3Rate (songRate); }
 }

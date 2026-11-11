@@ -80,6 +80,8 @@ TOLERANCES = {
                  "why": "A processed signal's sum of |x|: filters, envelopes, oversampling and pitch shifting in float, which compilers order and fuse differently, over seconds of audio; 1e-3 is 0.009 dB, far below any audible or setting change."},
     "proc-peak": {"abs": 0, "rel": 1e-3,
                   "why": "A processed signal's peak: as proc-sum."},
+    "vocoder-peak": {"abs": 0, "rel": 0.1,
+                     "why": "A pitch-shifted signal's single loudest sample: the phase vocoder adds up phases over the whole stretch, and float rounding (which compilers order differently) moves where the waves line up, so one sample's height can move a few per cent while the signal's sum and loudness hold to proc-sum and proc-lufs."},
     "proc-lufs": {"abs": 0.005, "rel": 0,
                   "why": "A processed signal's integrated loudness, LUFS: as proc-sum."},
     "box": {"abs": 1e-6, "rel": 1e-6,
@@ -118,7 +120,9 @@ def rule(op, name):
     stem = last.rstrip("0123456789")
     if last in EXACT_WORDS or stem in ("pad", "midi", "trim"):
         return "exact"
-    if op in ("processor", "fades", "channels", "resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab"):
+    if op in ("processor", "fades", "channels", "resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument"):
+        if op == "vocoder" and last == "peak":
+            return "vocoder-peak"
         if last in ("sum", "peak", "lufs"):
             return {"sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}[last]
         if op == "processor" and parts[0] == "curve":
@@ -402,6 +406,16 @@ case("processing/vocal-eq/vox", "vocal-eq", VOX, block=512, lowCutHz=90, lowDb=-
      freqs=[60, 200, 3000, 12000])
 case("processing/ab/vox", "ab", VOX, block=512)
 case("processing/ab/song-latency", "ab", SONG, block=1024, latency=64)
+
+# ---- the effects and instruments every product offers
+for fx, params in (("chorus", dict(depthMs=4, speedHz=0.8, width=0.6, mix=0.5)), ("phaser", dict(depth=5, rate=0.5, feedback=0.6)),
+                   ("filter", dict(type=4, hz=900, q=0.7071, slope=1)), ("comp", dict(threshold=-24, ratio=4, attackMs=5, releaseMs=120, makeup=3)),
+                   ("delay", dict(amount=0.5, time=3, bpm=128, feedback=0.4)), ("reverb", dict(mode=3, decay=2.2, mix=0.35))):
+    case(f"effects/{fx}/song", "effect", SONG, block=1024, fx=fx, **params)
+case("effects/pitch/vox-up-octave", "vocoder", VOX, block=512, fx="pitch", semitones=12)
+case("effects/pitch/vox-down-fifth", "vocoder", VOX, block=1024, fx="pitch", semitones=-7)
+case("instruments/synth/phrase", "instrument", None, rate=48000, block=512, instrument="synth", seconds=2.5)
+case("instruments/sampler/vox", "instrument", VOX, block=512, instrument="sampler", seconds=2.5)
 
 # ---- the tuner's block averaging (tp_downsample)
 

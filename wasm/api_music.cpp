@@ -12,6 +12,7 @@
 #include <cstring>
 #include <string>
 #include <emscripten/emscripten.h>
+#include "dsp/NoteEdit.h"
 #include "dsp/Music.h"
 
 namespace
@@ -159,4 +160,22 @@ extern "C"
 
     // The nine-pad kit's slot (1..9) that plays a General MIDI note no pad has, or 0
     EMSCRIPTEN_KEEPALIVE int mu_pad_for_note (int note) { return vs::music::padForNote (note); }
+
+    // ---- Note editing: the grid sizes (id and beats), snapping, transposing, velocities
+    EMSCRIPTEN_KEEPALIVE int mu_grid_count() { return (int) vs::noteedit::grids.size(); }
+    EMSCRIPTEN_KEEPALIVE const char* mu_grid_id (int i) { return vs::noteedit::grids[(size_t) std::clamp (i, 0, (int) vs::noteedit::grids.size() - 1)].id; }
+    EMSCRIPTEN_KEEPALIVE double mu_grid_beats (int i) { return vs::noteedit::grids[(size_t) std::clamp (i, 0, (int) vs::noteedit::grids.size() - 1)].beats; }
+    EMSCRIPTEN_KEEPALIVE double mu_quantize (double beat, double grid) { return vs::noteedit::quantize (beat, grid); }
+    EMSCRIPTEN_KEEPALIVE double mu_floor_to_grid (double beat, double grid) { return vs::noteedit::floorToGrid (beat, grid); }
+    EMSCRIPTEN_KEEPALIVE int mu_transpose (int note, int semitones) { return vs::noteedit::transpose (note, semitones); }
+    EMSCRIPTEN_KEEPALIVE int mu_velocity (int current, int to, int delta) { return vs::noteedit::velocity (current, to, delta); }
+    // A drum hit's velocities: 0 accent, 1 normal, 2 soft, 3 ghost; 4 where an accent starts
+    EMSCRIPTEN_KEEPALIVE int mu_hit_velocity (int which)
+    {
+        namespace ne = vs::noteedit;
+        switch (which) { case 0: return ne::accentVelocity; case 2: return ne::softVelocity; case 3: return ne::ghostVelocity; case 4: return ne::accentFrom; default: return ne::normalVelocity; }
+    }
+    // A step grid: how many steps a clip of `beats` beats has, and a hit's length
+    EMSCRIPTEN_KEEPALIVE int mu_steps (double beats, double grid) { return vs::noteedit::StepGrid { grid, 0.0 }.steps (beats); }
+    EMSCRIPTEN_KEEPALIVE double mu_hit_length (double grid) { return vs::noteedit::StepGrid { grid, 0.0 }.hitLength(); }
 }

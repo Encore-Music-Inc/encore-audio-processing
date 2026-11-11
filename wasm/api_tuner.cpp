@@ -37,4 +37,17 @@ extern "C"
         const auto r = vs::TunerReading::of (hz, a4, std::vector<int> (strings, strings + std::max (0, nStrings)), o, root);
         out[0] = (float) r.note; out[1] = (float) r.string; out[2] = r.cents; out[3] = r.targetHz;
     }
+
+    // ---- Following the readings: tp_follow_push (h, hz) after each estimate
+    // returns the pitch to show (0 for none); tp_follow_steady (h, string,
+    // cents, tolerance) how many readings in a row that string has held
+    EMSCRIPTEN_KEEPALIVE void* tp_follow_create() { return new vs::TunerFollow(); }
+    EMSCRIPTEN_KEEPALIVE void tp_follow_destroy (void* p) { delete static_cast<vs::TunerFollow*> (p); }
+    EMSCRIPTEN_KEEPALIVE float tp_follow_push (void* p, float hz) { return static_cast<vs::TunerFollow*> (p)->push (hz); }
+    EMSCRIPTEN_KEEPALIVE int tp_follow_steady (void* p, int string, float cents, float toleranceCents)
+    {
+        vs::TunerReading r; r.string = string; r.cents = cents;
+        return static_cast<vs::TunerFollow*> (p)->steady (r, toleranceCents);
+    }
+    EMSCRIPTEN_KEEPALIVE void tp_follow_reset (void* p) { static_cast<vs::TunerFollow*> (p)->reset(); }
 }

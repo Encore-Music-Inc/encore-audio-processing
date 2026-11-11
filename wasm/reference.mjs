@@ -457,6 +457,91 @@ function runMore(c, sig, out) {
       return true;
     }
 
+    // ---- the effects: each one over the input in blocks (stereo out)
+    case 'effect':
+    case 'vocoder': {
+      const fx = c.fx;
+      const res = [Float32Array.from(sig.l), Float32Array.from(stereo ? sig.r : sig.l)];
+      const g = (k, d) => c[k] ?? d;
+      let h, left, right, run;
+      if (fx === 'chorus') {
+        h = X.fx_chorus_create(fs, block); X.fx_chorus_settings(h, g('depthMs', 3), g('speedHz', 1), g('width', 0.5), g('mix', 0.5));
+        left = X.fx_chorus_left; right = X.fx_chorus_right; run = (k) => X.fx_chorus_process(h, k, 1);
+      } else if (fx === 'phaser') {
+        h = X.fx_phaser_create(fs, block); X.fx_phaser_settings(h, g('depth', 5), g('rate', 0.4), g('feedback', 0.7));
+        left = X.fx_phaser_left; right = X.fx_phaser_right; run = (k) => X.fx_phaser_process(h, k, 1);
+      } else if (fx === 'filter') {
+        h = X.fx_filter_create(fs, block); X.fx_filter_settings(h, g('type', 4), g('hz', 1000), g('q', 0.7071), 0, g('slope', 0));
+        left = X.fx_filter_left; right = X.fx_filter_right; run = (k) => X.fx_filter_process(h, k, 1);
+      } else if (fx === 'pitch') {
+        h = X.fx_pitch_create(fs, 2, block); X.fx_pitch_semitones(h, g('semitones', 12));
+        out.push(['latency', X.fx_pitch_latency(h)]);
+        left = X.fx_pitch_left; right = X.fx_pitch_right; run = (k) => X.fx_pitch_process(h, k, 1);
+      } else if (fx === 'comp') {
+        h = X.fx_comp_create(fs, block); X.fx_comp_detail(h, g('threshold', -20), g('ratio', 4), g('attackMs', 5), g('releaseMs', 100), g('makeup', 0), g('rms', 0));
+        left = X.fx_comp_left; right = X.fx_comp_right; run = (k) => X.fx_comp_process(h, k, 1);
+      } else if (fx === 'delay') {
+        h = X.fx_delay_create(fs, block); X.fx_delay_settings(h, g('amount', 0.4), X.fx_delay_seconds(g('time', 2), g('bpm', 120)), g('feedback', 0.35));
+        left = X.fx_delay_left; right = X.fx_delay_right; run = (k) => X.fx_delay_process(h, k);
+      } else if (fx === 'reverb') {
+        h = X.fx_reverb_create(fs, block);
+        X.fx_reverb_settings(h, g('mode', 3), 20, g('decay', 2), 0.5, 8000, 150, 1, 0.3, 0, 0, g('mix', 0.3));
+        left = X.fx_reverb_left; right = X.fx_reverb_right; run = (k) => X.fx_reverb_process(h, k, 1);
+      } else return false;
+      blocks(n, block, (s, k) => {
+        f32(left(h), k).set(res[0].subarray(s, s + k));
+        f32(right(h), k).set(res[1].subarray(s, s + k));
+        run(k);
+        res[0].set(f32(left(h), k), s);
+        res[1].set(f32(right(h), k), s);
+      });
+      X[`fx_${fx}_destroy`](h);
+      fingerprintAudio(out, '', res, fs);
+      return true;
+    }
+
+    // ---- the instruments: a fixed phrase of notes, rendered in blocks
+    case 'instrument': {
+      const len = Math.trunc((c.seconds ?? 3) * fs), beat = Math.trunc(0.25 * fs);
+      const res = [new Float32Array(len), new Float32Array(len)];
+      const phrase = [[0, 48, 0.9, 1], [0, 55, 0.7, 1], [beat, 60, 0.8, 1], [2 * beat, 60, 0, 0], [3 * beat, 64, 0.6, 1], [4 * beat, 48, 0, 0],
+                      [4 * beat, 55, 0, 0], [6 * beat, 64, 0, 0], [6 * beat, 36, 1, 1], [7 * beat, 36, 0, 0]];
+      const synth = c.instrument === 'synth';
+      let h;
+      if (synth) {
+        h = X.in_synth_create(fs, block);
+        X.in_synth_osc(h, 0, 1, 2, 0, 0, -6, 0.5, 3, 12, 0.5, 0);
+        X.in_synth_osc(h, 1, 1, 4, -12, 0, -10, 0.5, 1, 12, 0.5, 0);
+        X.in_synth_filter(h, 1, 0, 1200, 1.5, 0.5, 24, 0);
+        X.in_synth_lfo(h, 0, 0, 5, 0.15, 1);
+      } else {
+        h = X.in_sampler_create(fs, block);
+        const m = Math.min(n, Math.trunc(fs));
+        f32(X.in_sampler_load_left(h, m), m).set(sig.l.subarray(0, m));
+        if (stereo) f32(X.in_sampler_load_right(h, m), m).set(sig.r.subarray(0, m));
+        X.in_sampler_add(h, stereo ? 1 : 0, fs, 60, 30, 90, 0, 0.25, 0, 0, 0.05);
+      }
+      const P = synth ? 'in_synth_' : 'in_sampler_';
+      let next = 0;
+      blocks(len, block, (s, k) => {
+        for (let i = 0; i < k;) {
+          while (next < phrase.length && phrase[next][0] <= s + i) {
+            const [, note, vel, on] = phrase[next++];
+            if (on) X[P + 'note_on'](h, note, vel); else X[P + 'note_off'](h, note);
+          }
+          const until = next < phrase.length ? Math.min(k, phrase[next][0] - s) : k;
+          const m = Math.max(1, until - i);
+          X[P + 'render'](h, m);
+          res[0].set(f32(X[P + 'left'](h), m), s + i);
+          res[1].set(f32(X[P + 'right'](h), m), s + i);
+          i += m;
+        }
+      });
+      X[P + 'destroy'](h);
+      fingerprintAudio(out, '', res, fs);
+      return true;
+    }
+
     // ---- music
     case 'music': {
       for (let m = 0; m < 128; m++) out.push([`name${m}`, mtext((b, cap) => X.mu_note_name(m, 1, b, cap))]);

@@ -128,7 +128,7 @@ namespace vs
         }
 
         int channels = 1;
-        signalsmith::stretch::SignalsmithStretch<float> stretch;
+        signalsmith::stretch::SignalsmithStretch<float> stretch { 0x454e43L };   // a fixed seed: the same sound every run (it only draws numbers past 2x stretch)
         std::vector<const float*> in;
         std::vector<float*> out;
         std::vector<std::vector<float>> scratch;

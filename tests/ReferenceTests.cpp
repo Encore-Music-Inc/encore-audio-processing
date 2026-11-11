@@ -27,6 +27,12 @@
 #include <variant>
 #include <vector>
 #include "dsp/AbCompare.h"
+#include "dsp/Chorus.h"
+#include "dsp/Phaser.h"
+#include "dsp/Sampler.h"
+#include "dsp/Synth.h"
+#include "dsp/TimeStretch.h"
+#include "dsp/Mix.h"
 #include "dsp/Analysis.h"
 #include "dsp/Channels.h"
 #include "dsp/Compressor.h"
@@ -778,6 +784,111 @@ namespace
                 res[1].insert (res[1].end(), pr.begin(), pr.begin() + k);
             });
             out.push_back ({ "matchDb", (double) ab.matchGainDb() });
+            fingerprintAudio (out, "", res, fs);
+        }
+
+        // ---- the effects: each one over the input in blocks (stereo out)
+        else if (op == "effect" || op == "vocoder")   // vocoder: the pitch shifter, whose single loudest sample has its own tolerance
+        {
+            const std::string fx = c.text ("fx");
+            Channels res (2, std::vector<float> ((size_t) n, 0.0f));
+            for (std::int64_t i = 0; i < n; ++i) { res[0][(size_t) i] = in->l[(size_t) i]; res[1][(size_t) i] = stereo ? in->r[(size_t) i] : in->l[(size_t) i]; }
+            vs::Chorus chorus; vs::Phaser phaser; vs::EqBand band; vs::PitchShift pitch; vs::Compressor comp; vs::Space space;
+            vs::ReverbEngine reverb; vs::Ramp<false> mixAmount;
+            std::vector<float> wl ((size_t) block), wr ((size_t) block);
+            if (fx == "chorus") { chorus.prepare (fs); chorus.setSettings ({ (float) c.get ("depthMs", 3), (float) c.get ("speedHz", 1), (float) c.get ("width", 0.5), (float) c.get ("mix", 0.5) }); }
+            else if (fx == "phaser") { phaser.prepare (fs); phaser.setSettings ({ (float) c.get ("depth", 5), (float) c.get ("rate", 0.4), (float) c.get ("feedback", 0.7) }); }
+            else if (fx == "filter")
+            {
+                band.prepare (fs);
+                vs::EqBand::Settings b; b.type = (int) c.get ("type", vs::EqBand::highCut); b.freq = (float) c.get ("hz", 1000); b.q = (float) c.get ("q", 0.7071); b.slope = (int) c.get ("slope", 0);
+                band.setTarget (b);
+            }
+            else if (fx == "pitch") { pitch.prepare (fs, 2, block); pitch.setSemitones ((float) c.get ("semitones", 12)); out.push_back ({ "latency", (double) pitch.latency() }); }
+            else if (fx == "comp")
+            {
+                comp.prepare (fs);
+                comp.setDetail ({ (float) c.get ("threshold", -20), (float) c.get ("ratio", 4), (float) c.get ("attackMs", 5), (float) c.get ("releaseMs", 100), (float) c.get ("makeup", 0), c.get ("rms", 0) != 0 });
+            }
+            else if (fx == "delay")
+            {
+                space.prepare ({ fs, (std::uint32_t) block, 2u });
+                space.setParams (0.0f, 0.5f, (float) c.get ("amount", 0.4), vs::Space::delaySeconds ((int) c.get ("time", vs::Space::eighth), c.get ("bpm", 120)), (float) c.get ("feedback", 0.35));
+            }
+            else if (fx == "reverb")
+            {
+                reverb.prepare (fs, block);
+                vs::ReverbEngine::Settings rs; rs.mode = (int) c.get ("mode", vs::ReverbEngine::hall); rs.decaySec = (float) c.get ("decay", 2.0);
+                reverb.setSettings (rs);
+                mixAmount.reset (fs, 0.05); mixAmount.setCurrentAndTarget ((float) c.get ("mix", 0.3));
+            }
+            blocks (n, block, [&] (std::int64_t s, int k)
+            {
+                float* ch[2] { res[0].data() + s, res[1].data() + s };
+                if (fx == "chorus") chorus.process (ch, 2, k);
+                else if (fx == "phaser") phaser.process (ch, 2, k);
+                else if (fx == "filter") band.process (ch, 2, 0, k);
+                else if (fx == "pitch") pitch.process (ch, 2, k);
+                else if (fx == "comp") comp.process (ch, 2, k);
+                else if (fx == "delay") space.process (ch, k, true);
+                else if (fx == "reverb")
+                {
+                    reverb.process (ch[0], ch[1], wl.data(), wr.data(), k);
+                    vs::mix::sendMix (mixAmount, ch, 2, wl.data(), wr.data(), k);
+                }
+            });
+            fingerprintAudio (out, "", res, fs);
+        }
+
+        // ---- the instruments: a fixed phrase of notes, rendered in blocks
+        else if (op == "instrument")
+        {
+            const std::string what = c.text ("instrument");
+            const int len = (int) (c.get ("seconds", 3) * fs);
+            Channels res (2, std::vector<float> ((size_t) len, 0.0f));
+            vs::Synth synth; vs::Sampler sampler;
+            struct Ev { int at; int note; float vel; bool on; };
+            const int beat = (int) (0.25 * fs);
+            const std::vector<Ev> phrase { { 0, 48, 0.9f, true }, { 0, 55, 0.7f, true }, { beat, 60, 0.8f, true }, { 2 * beat, 60, 0, false },
+                                           { 3 * beat, 64, 0.6f, true }, { 4 * beat, 48, 0, false }, { 4 * beat, 55, 0, false }, { 6 * beat, 64, 0, false },
+                                           { 6 * beat, 36, 1.0f, true }, { 7 * beat, 36, 0, false } };
+            if (what == "synth")
+            {
+                synth.prepare (fs);
+                vs::Synth::Settings st;
+                st.osc[0].wave = vs::Oscillator::Wave::sawUp; st.osc[0].unison = 3; st.osc[0].detuneCents = 12;
+                st.osc[1] = st.osc[0]; st.osc[1].wave = vs::Oscillator::Wave::square; st.osc[1].semitones = -12; st.osc[1].levelDb = -10; st.osc[1].unison = 1;
+                st.filter.hz = 1200; st.filter.resonance = 1.5f; st.filter.envSemitones = 24; st.filter.keyTrack = 0.5f;
+                st.lfo[0] = { vs::Oscillator::Wave::sine, 5.0f, 0.15f, vs::Synth::LfoTarget::pitch };
+                synth.setSettings (st);
+            }
+            else
+            {
+                sampler.prepare (fs);
+                vs::Sampler::Sound snd;
+                snd.left.assign (in->l.begin(), in->l.begin() + std::min<std::int64_t> (n, (std::int64_t) fs));
+                if (stereo) snd.right.assign (in->r.begin(), in->r.begin() + std::min<std::int64_t> (n, (std::int64_t) fs));
+                snd.sampleRate = fs; snd.rootNote = 60; snd.lowNote = 30; snd.highNote = 90; snd.oneShot = false; snd.pan = 0.25f;
+                sampler.addSound (std::move (snd));
+            }
+            size_t next = 0;
+            blocks (len, block, [&] (std::int64_t s, int k)
+            {
+                for (int i = 0; i < k; )
+                {
+                    while (next < phrase.size() && phrase[next].at <= s + i)
+                    {
+                        const auto& e = phrase[next++];
+                        if (what == "synth") { if (e.on) synth.noteOn (e.note, e.vel); else synth.noteOff (e.note); }
+                        else { if (e.on) sampler.noteOn (e.note, e.vel); else sampler.noteOff (e.note); }
+                    }
+                    const int until = next < phrase.size() ? (int) std::min<std::int64_t> (k, phrase[next].at - s) : k;
+                    const int m = std::max (1, until - i);
+                    if (what == "synth") synth.render (res[0].data() + s + i, res[1].data() + s + i, m);
+                    else sampler.render (res[0].data() + s + i, res[1].data() + s + i, m);
+                    i += m;
+                }
+            });
             fingerprintAudio (out, "", res, fs);
         }
 

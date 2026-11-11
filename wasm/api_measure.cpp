@@ -11,6 +11,8 @@
 #include <emscripten/emscripten.h>
 #include <cstdint>
 #include <vector>
+#include "dsp/ResonanceFinder.h"
+#include "dsp/Meters.h"
 #include "dsp/Analysis.h"
 #include "dsp/LoudnessReport.h"
 #include "dsp/Spectrum.h"
@@ -423,5 +425,36 @@ extern "C"
         out[0] = runs; out[1] = longest; out[2] = (double) spots.size();
         for (int k = 0; k < (int) spots.size() && k < maxSpots; ++k) out[3 + k] = spots[(size_t) k].start;
         return (int) spots.size();
+    }
+
+    // ---- Meters on screen. which: 0 level, 1 gain reduction, 2 steady.
+    // ms_meter_step returns what the meter shows next frame.
+    EMSCRIPTEN_KEEPALIVE float ms_meter_step (float shown, float reading, int which)
+    {
+        const auto& b = which == 1 ? vs::meters::gainReduction : which == 2 ? vs::meters::steady : vs::meters::level;
+        vs::meters::step (shown, reading, b);
+        return shown;
+    }
+    EMSCRIPTEN_KEEPALIVE float ms_meter_position (float db, float bottomDb, float topDb, float curve) { return vs::meters::scalePosition (db, bottomDb, topDb, curve); }
+    EMSCRIPTEN_KEEPALIVE void* ms_peak_meter_create (float fallDbPerFrame, float holdMs, float clipDb)
+    {
+        return new vs::meters::PeakMeter ({ fallDbPerFrame, holdMs, clipDb, -100.0f });
+    }
+    EMSCRIPTEN_KEEPALIVE void ms_peak_meter_destroy (void* p) { delete static_cast<vs::meters::PeakMeter*> (p); }
+    // out: [level, hold, clipped]; returns 1 when what the meter shows changed
+    EMSCRIPTEN_KEEPALIVE int ms_peak_meter_step (void* p, float readingDb, double nowMs, float* out)
+    {
+        auto* m = static_cast<vs::meters::PeakMeter*> (p);
+        const bool changed = m->step (readingDb, (std::uint32_t) nowMs);
+        out[0] = m->level(); out[1] = m->hold(); out[2] = m->isClipped() ? 1.0f : 0.0f;
+        return changed ? 1 : 0;
+    }
+    EMSCRIPTEN_KEEPALIVE void ms_peak_meter_reset (void* p) { static_cast<vs::meters::PeakMeter*> (p)->reset(); }
+
+    // ---- The band that tames a resonance: out [freq, q, rangeDb, thresholdDb]
+    EMSCRIPTEN_KEEPALIVE void ms_resonance_band (float freq, float prominenceDb, float relDb, float* out)
+    {
+        const auto b = vs::bandFor ({ freq, prominenceDb, relDb });
+        out[0] = b.freq; out[1] = b.q; out[2] = b.rangeDb; out[3] = b.thresholdDb;
     }
 }
