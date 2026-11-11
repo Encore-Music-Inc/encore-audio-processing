@@ -4,6 +4,56 @@ Each release's notes, newest first. When a release is published, the release
 job puts its section on the GitHub release (see "Release notes" in
 `CLAUDE.md`).
 
+## v2.1.0
+
+Adds the browser functions the ENCORE. app still kept its own copies of, DSD
+to PCM, the true-peak limiter on its own and a much faster resampler, and
+fixes two defects. Nothing that worked before changes, except the two fixes.
+
+### What's new
+- Browser functions for the metronome's beat grid (groupings, accents, note
+  values, subdivisions, tempo names, mending settings), the tuner's block
+  averaging, spelled notes, and the major and minor key lists.
+- DSD to PCM (`dsp/Dsd.h`): one-bit SACD audio, from .dsf and .dff files, to
+  PCM, in the browser too.
+- The mastering chain's true-peak limiter on its own, for previews and stream
+  files.
+- The file analysis reports each channel's DC offset in dBFS.
+- The resampler is about ten times faster. Whole-number rate ratios (96 to
+  48 kHz, 88.2 to 44.1, 192 to 48) give exactly the same samples as before.
+  Other ratios (44.1 to 48 and the like) now keep exact time over long files,
+  where they drifted before, and end at exactly the expected length. A new
+  constructor takes the two sample rates.
+
+### What's fixed
+- The device previews (phone, laptop, earbuds) no longer add a bump where
+  their low and high cuts begin (it reached +1.75 dB near 500 Hz on the
+  phone).
+- The tempo finder reports no tempo for silence (it reported 60 BPM).
+
+### Downloads
+- `master.wasm`: the browser engine, with `master.wasm.sha256`.
+- `tunings.json`, `scales.json`: the tuner's instruments and tunings and the
+  scale library for the browser, each with its `.sha256`.
+- `reference.json`: the reference set, with `reference.json.sha256`.
+
+### Using it
+Pin `external/encore-audio-processing` to `v2.1.0`, then fetch its JUCE by
+path:
+
+```
+git -C external/encore-audio-processing submodule update --init --depth 1 external/JUCE
+```
+
+On Apple systems, link the Accelerate framework (JUCE products already do).
+Green Room pins `master.wasm`, `tunings.json`, `scales.json` and
+`reference.json` by their SHA-256 and runs `wasm/reference.mjs` on them.
+
+### Built on
+JUCE 9.0.5. `master.wasm` is built without JUCE, with Emscripten 6.0.13.
+
+Questions or problems: support@encoremusic.studio
+
 ## v2.0.0
 
 All of ENCORE.'s audio processing, in one place, for the desktop and the
