@@ -149,7 +149,7 @@ namespace
             {
                 const int n = (int) (fsIn * seconds);
                 const std::vector<float> x ((size_t) n, 0.0f);
-                vs::Resampler r (fsIn / fsOut, 1);
+                vs::Resampler r (fsIn, fsOut, 1);
                 const float* in[1] { x.data() };
                 const int made = r.push (in, n) + r.flush();
                 char name[96];

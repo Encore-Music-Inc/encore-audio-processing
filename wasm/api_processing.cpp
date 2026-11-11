@@ -52,7 +52,7 @@ extern "C"
     // (as many samples as it returned); pr_resampler_flush after the last block.
     EMSCRIPTEN_KEEPALIVE void* pr_resampler_create (double fsIn, double fsOut, int channels, int maxBlock)
     {
-        return new Resample { vs::Resampler (fsIn / fsOut, channels), buffers (channels, maxBlock) };
+        return new Resample { vs::Resampler (fsIn, fsOut, channels), buffers (channels, maxBlock) };
     }
     EMSCRIPTEN_KEEPALIVE void pr_resampler_destroy (void* p) { delete static_cast<Resample*> (p); }
     EMSCRIPTEN_KEEPALIVE float* pr_resampler_input (void* p, int c) { return static_cast<Resample*> (p)->in[(size_t) c].data(); }

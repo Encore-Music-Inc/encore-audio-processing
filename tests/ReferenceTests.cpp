@@ -614,7 +614,7 @@ namespace
         else if (op == "resample")
         {
             const double to = c.get ("to", 48000);
-            vs::Resampler r (fs / to, in->channels);
+            vs::Resampler r (fs, to, in->channels);
             Channels res ((size_t) in->channels);
             auto take = [&] (int got) { for (int ci = 0; ci < in->channels; ++ci) res[(size_t) ci].insert (res[(size_t) ci].end(), r.output (ci), r.output (ci) + got); };
             blocks (n, block, [&] (std::int64_t s, int k)

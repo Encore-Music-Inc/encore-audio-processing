@@ -61,22 +61,50 @@ namespace vs
         Resampler (double step, int channels)
             : Resampler ([step] (double) { return step; }, std::max (1.0, step), channels)
         {
-            // the smallest L with step M / L, while the table stays small. Compared to within
-            // 1e-12 of M rather than exactly: a compiler that turns m / l into m * (1 / l)
-            // (MSVC's /fp:fast) would otherwise miss every ratio and fall back to the slower
-            // path, whose position drifts. A step within 1e-12 of M / L is M / L for any
-            // recording (it moves a sample after 1e12 of them).
+            findPhases (step);
+        }
+
+        // A sample rate change from fsIn to fsOut. Whole-number rates give their ratio M / L
+        // exactly (by their greatest common divisor), whatever the compiler does to division;
+        // other rates go by the step.
+        Resampler (double fsIn, double fsOut, int channels)
+            : Resampler ([s = fsIn / fsOut] (double) { return s; }, std::max (1.0, fsIn / fsOut), channels)
+        {
+            const bool whole = fsIn >= 1 && fsOut >= 1 && fsIn <= 1e9 && fsOut <= 1e9
+                               && std::floor (fsIn) == fsIn && std::floor (fsOut) == fsOut;
+            if (whole)
+            {
+                const long long a = (long long) fsIn, b = (long long) fsOut, g = gcd (a, b);
+                const long long m = a / g, l = b / g;
+                if (l <= maxPhases && l * taps <= maxTable) usePhases (m, (int) l);
+                return;
+            }
+            findPhases (fsIn / fsOut);
+        }
+
+    private:
+        // The smallest L with step M / L, while the table stays small. Compared to within 1e-12
+        // of M rather than exactly: a step within that of M / L is M / L for any recording (it
+        // moves a sample after 1e12 of them). For a sample rate change, the constructor from the
+        // two rates finds M and L without floating point.
+        void findPhases (double step)
+        {
             for (int l = 1; l <= maxPhases && (long long) l * taps <= maxTable; ++l)
             {
                 const double m = std::round (step * l);
                 if (m >= 1.0 && m <= 1e9 && std::abs (step * l - m) <= 1e-12 * m)
                 {
-                    phases = l;
-                    advance = (long long) m;
-                    break;
+                    usePhases ((long long) m, l);
+                    return;
                 }
             }
-            if (phases == 0) return;
+        }
+
+        // Sums by the table of L phases (and, for a whole-number step, by lines): step M / L.
+        void usePhases (long long m, int l)
+        {
+            phases = l;
+            advance = m;
             // phase r reads sample ip - W + 1 + q with the kernel at (q - W + 1 - r / L) fc
             table.resize ((size_t) phases * (size_t) taps);
             for (int r = 0; r < phases; ++r)
@@ -94,6 +122,7 @@ namespace vs
             }
         }
 
+    public:
         // Takes the next n samples of each channel (a null channel repeats the first).
         int push (const float* const* chans, int n)
         {
@@ -126,6 +155,7 @@ namespace vs
         static constexpr long long maxLines = 16;      // whole-number steps summed by lines, M at most
         static constexpr int tile = 16;                // outputs summed side by side
 
+        static long long gcd (long long a, long long b) { while (b != 0) { const long long t = a % b; a = b; b = t; } return a; }
         static long long floorDiv (long long a, long long b) { return a >= 0 ? a / b : -((-a + b - 1) / b); }
         static long long floorMod (long long a, long long b) { return a - floorDiv (a, b) * b; }
 
@@ -275,7 +305,7 @@ namespace vs
             return;
         }
         for (int c = 0; c < numCh; ++c) std::fill (out[c], out[c] + want, 0.0f);
-        Resampler r (fsIn / fsOut, numCh);
+        Resampler r (fsIn, fsOut, numCh);
         int o = 0;
         auto put = [&] (int made)
         {
