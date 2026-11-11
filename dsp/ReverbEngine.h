@@ -1,6 +1,7 @@
 #pragma once
 
 #include "JuceInclude.h"
+#include <algorithm>
 #include <array>
 #include <vector>
 #include "DelayLine.h"
@@ -25,6 +26,39 @@ namespace vs
     {
     public:
         enum Mode { room = 0, chamber, plate, hall, huge, spring, numModes };
+
+        // One early reflection: its time after the pre-delay and its gain on each side
+        struct Reflection { float ms = 0.0f, gainL = 0.0f, gainR = 0.0f; };
+        static constexpr int numReflections = 12;
+        static constexpr float maxReflectionSec = 0.11f;
+
+        // The early reflections a mode plays at a size (0..1), for drawing
+        // them: each one's time (heard no later than maxReflectionSec) and
+        // gains, and the level they're mixed in at (0: the mode has none).
+        struct Reflections { std::array<Reflection, numReflections> taps {}; float level = 0.0f; };
+        static Reflections earlyReflections (int mode, float size01)
+        {
+            Reflections r;
+            const int m = std::clamp (mode, 0, (int) numModes - 1);
+            r.level = reflectionLevel (m);
+            const float scale = sizeScale (size01);
+            for (int t = 0; t < numReflections; ++t)
+            {
+                r.taps[(size_t) t] = reflection (m, scale, t);
+                r.taps[(size_t) t].ms = std::min (r.taps[(size_t) t].ms, maxReflectionSec * 1000.0f);
+            }
+            return r;
+        }
+
+        // How much a size (0..1) scales the room's delays
+        static float sizeScale (float size01) { return 0.55f + 0.9f * std::clamp (size01, 0.0f, 1.0f); }
+
+        // The level the early reflections are mixed in at, by mode
+        static float reflectionLevel (int m)
+        {
+            static const float level[5] { 0.7f, 0.5f, 0.0f, 0.35f, 0.15f };
+            return m >= 0 && m < 5 ? level[m] : 0.0f;
+        }
 
         struct Settings
         {
@@ -173,7 +207,7 @@ namespace vs
 
             if (modeChanged) activeMode = s.mode;
             const int m = juce::jlimit (0, (int) numModes - 1, activeMode);
-            const float scale = 0.55f + 0.9f * juce::jlimit (0.0f, 1.0f, s.size);
+            const float scale = sizeScale (s.size);
 
             static const float baseMs[5][numLines] {
                 { 11.3f, 13.7f, 16.1f, 18.9f, 21.7f, 24.3f, 27.1f, 29.9f },     // room
@@ -185,7 +219,6 @@ namespace vs
             static const float diffMs[4] { 4.7f, 3.6f, 12.7f, 9.3f };
             static const float diffGain[5] { 0.6f, 0.68f, 0.78f, 0.7f, 0.75f };
             static const float modDepthMs[5] { 0.25f, 0.35f, 0.3f, 0.6f, 1.6f };
-            static const float erLevel[5] { 0.7f, 0.5f, 0.0f, 0.35f, 0.15f };
 
             if (m != spring)
             {
@@ -199,7 +232,7 @@ namespace vs
                     diffSamples[i] = diffMs[i] * 0.001f * (0.6f + 0.6f * s.size) * (float) fs;
                 apGain = diffGain[m];
                 modDepth = s.mod * modDepthMs[m] * 0.001f * (float) fs;
-                erMix = erLevel[m];
+                erMix = reflectionLevel (m);
                 buildEarlyReflections (m, scale);
             }
             else
@@ -230,17 +263,24 @@ namespace vs
 
         void buildEarlyReflections (int m, float scale)
         {
-            // Hand-picked tap times (ms) for a box-shaped room, gains falling
-            // off with distance, alternating sides.
-            static const float tapMs[numTaps] { 3.1f, 5.3f, 7.9f, 10.7f, 13.9f, 17.3f, 21.1f, 25.7f, 30.3f, 35.9f, 41.3f, 47.9f };
-            const float roomScale = (m == hall ? 1.9f : m == chamber ? 1.3f : m == huge ? 2.2f : 0.8f) * scale;
             for (int t = 0; t < numTaps; ++t)
             {
-                taps[t].samples = std::min (tapMs[t] * roomScale * 0.001f * (float) fs, 0.11f * (float) fs);
-                const float g = 0.9f * std::pow (0.82f, (float) t);
-                taps[t].gl = (t % 2 == 0) ? g : g * 0.45f;
-                taps[t].gr = (t % 2 == 0) ? g * 0.45f : g;
+                const auto r = reflection (m, scale, t);
+                taps[t].samples = std::min (r.ms * 0.001f * (float) fs, maxReflectionSec * (float) fs);
+                taps[t].gl = r.gainL;
+                taps[t].gr = r.gainR;
             }
+        }
+
+        // Hand-picked tap times (ms) for a box-shaped room, scaled by the
+        // mode's room and the size; gains falling off with distance,
+        // alternating sides.
+        static Reflection reflection (int m, float scale, int t)
+        {
+            static const float tapMs[numTaps] { 3.1f, 5.3f, 7.9f, 10.7f, 13.9f, 17.3f, 21.1f, 25.7f, 30.3f, 35.9f, 41.3f, 47.9f };
+            const float roomScale = (m == hall ? 1.9f : m == chamber ? 1.3f : m == huge ? 2.2f : 0.8f) * scale;
+            const float g = 0.9f * std::pow (0.82f, (float) t);
+            return { tapMs[t] * roomScale, (t % 2 == 0) ? g : g * 0.45f, (t % 2 == 0) ? g * 0.45f : g };
         }
 
         static float allpass (Delay& d, float x, float delay, float g)
@@ -372,7 +412,7 @@ namespace vs
         }
 
         //======================================================================
-        static constexpr int numLines = 8, numTaps = 12, shimSize = 1 << 14;
+        static constexpr int numLines = 8, numTaps = numReflections, shimSize = 1 << 14;
 
         struct Tap { float samples = 1.0f, gl = 0.0f, gr = 0.0f; };
         struct Spring

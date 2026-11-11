@@ -31,8 +31,8 @@ namespace vs
             originalMeter.prepare (fs);
             processedMeter.prepare (fs);
             for (auto& o : original) o.assign ((size_t) std::max (1, maxBlock), 0.0f);
-            delayLen = std::max (1, latencySamples);
-            for (auto& d : delay) d.prepare (delayLen);
+            delayLen = std::max (0, latencySamples);
+            for (auto& d : delay) d.prepare (std::max (1, delayLen));
             matchGain.reset (fs, 0.5);
             mixRamp.reset (fs, 0.03);
             mixRamp.setCurrentAndTarget (hearOriginal ? 0.0f : 1.0f);
@@ -51,6 +51,8 @@ namespace vs
             for (int c = 0; c < 2; ++c)
                 for (int i = 0; i < n; ++i)
                 {
+                    // with no latency, the original is the input as it is
+                    if (delayLen == 0) { original[c][(size_t) i] = in[c][i]; continue; }
                     original[c][(size_t) i] = delay[c].at (delayLen);
                     delay[c].write (in[c][i]);
                 }
@@ -99,7 +101,7 @@ namespace vs
         LoudnessMeter originalMeter, processedMeter;
         std::vector<float> original[2];
         DelayLine delay[2];
-        int delayLen = 1;
+        int delayLen = 0;
         bool hearOriginal = false;
         Ramp<true> matchGain;
         Ramp<false> mixRamp;

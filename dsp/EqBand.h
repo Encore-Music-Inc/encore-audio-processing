@@ -205,6 +205,17 @@ namespace vs
 
         static float bandFreq (int k) { return 80.0f * std::pow (12000.0f / 80.0f, (float) k / (float) (numBands - 1)); }
 
+        // Each band's cut is a bell of this Q at this share of the band's gain
+        static constexpr double bellQ = 2.8;
+        static constexpr float bellShare = 0.8f;
+
+        // Band k's bell for a gain (dB, 0 or below), as the band applies it:
+        // for drawing the carve curve
+        static BiquadCoefs bandCurve (double sampleRate, int k, float gainDb)
+        {
+            return BiquadCoefs::peak (sampleRate, bandFreq (k), bellQ, gainDb * bellShare);
+        }
+
         void prepare (double sampleRate)
         {
             fs = sampleRate;
@@ -212,7 +223,7 @@ namespace vs
             {
                 det[k].c = BiquadCoefs::bandPass (fs, bandFreq (k), 3.0);
                 det[k].reset();
-                cut[k].prepare (fs, bandFreq (k), 2.8, -dynamics::noLimit, 0.8f); // the bell is 0.8 of the band's gain
+                cut[k].prepare (fs, bandFreq (k), bellQ, -dynamics::noLimit, bellShare);
                 env[k] = 1.0e-9f;
                 gainDb[k] = 0.0f;
             }
