@@ -72,5 +72,47 @@ namespace vs
             }
             return peak;
         }
+        // Pan laws: how a pan position (-1 left .. 0 centre .. 1 right) splits a
+        // gain between left and right. linear: the side away from the pan loses
+        // pan x gain and the side toward it gains it (centre is both at full
+        // gain). The others are equal-power sine laws, quieter in the centre by
+        // the amount in their name: sin of the position to each side, raised to
+        // the law's power (1 for 3 dB, 2.5 / 3 for 2.5 dB, 1.5 for 4.5 dB, 2 for
+        // 6 dB). These are the laws a mixer's pan knob offers, number for number
+        // as Tracktion Engine computes them, so songs saved with them sound the same.
+        enum class PanLaw { linear, centre3dB, centre2_5dB, centre4_5dB, centre6dB };
+
+        struct PanGains { float left, right; };
+
+        inline PanGains panGains (float gain, float pan, PanLaw law)
+        {
+            if (law == PanLaw::linear)
+            {
+                const float pv = pan * gain;
+                return { gain - pv, gain + pv };
+            }
+            constexpr float halfPi = 3.14159265358979323846f * 0.5f;
+            const float p = (pan + 1.0f) * 0.5f;
+            const float l = std::sin ((1.0f - p) * halfPi), r = std::sin (p * halfPi);
+            const float power = law == PanLaw::centre2_5dB ? 2.5f / 3.0f
+                              : law == PanLaw::centre4_5dB ? 1.5f
+                              : law == PanLaw::centre6dB   ? 2.0f
+                              : 1.0f;
+            return { std::pow (l, power) * gain, std::pow (r, power) * gain };
+        }
+
+        // n samples of each channel times a fixed gain (the gain stage with no ramp)
+        inline void applyGain (float gain, float* const* ch, int numCh, int n)
+        {
+            if (gain == 1.0f) return;
+            for (int c = 0; c < numCh; ++c)
+                for (int i = 0; i < n; ++i) ch[c][i] *= gain;
+        }
+
+        // n samples of src times a fixed gain added into dst
+        inline void addWithGain (const float* src, float* dst, int n, float gain)
+        {
+            for (int i = 0; i < n; ++i) dst[i] += gain * src[i];
+        }
     }
 }

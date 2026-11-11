@@ -300,6 +300,86 @@ namespace vs
         std::vector<long long> lineAt;
     };
 
+    // The same windowed sinc read live, for playback that converts as it
+    // plays (a clip recorded at another rate, or played faster or slower):
+    // each call gives the step (input samples per output sample, which may
+    // change from call to call), the input for the block and how many outputs
+    // to make. It keeps the last taps of input between calls, so the output
+    // is latency() input samples behind; prepare() and reset() don't run on
+    // the audio thread, process() never allocates. The kernel is the shared
+    // sinc's shape with fewer crossings (liveSincTable) so many clips can
+    // play at once, its cut-off lowered for a step above 1 as the streaming
+    // resampler's is.
+    inline const SincTable& liveSincTable()
+    {
+        static const SincTable table (16, 8.0, 4096);
+        return table;
+    }
+
+    class LiveResampler
+    {
+    public:
+        // maxStep: the largest step it will be given
+        void prepare (double maxStep = 1.0)
+        {
+            fc = 0.97 * std::min (1.0, 1.0 / std::max (1.0e-6, maxStep));
+            W = (int) std::ceil (k.halfWidth() / fc);
+            buf.assign ((size_t) (4 * W), 0.0f);
+            reset();
+        }
+
+        void reset()
+        {
+            std::fill (buf.begin(), buf.end(), 0.0f);
+            w = 2 * W;
+            pos = 1.0;
+        }
+
+        // How far behind the input the output runs, in input samples
+        int latency() const { return W; }
+
+        // Makes nOut samples into out (added times gain when adding, else
+        // written times gain), reading up to inAvailable samples of in; returns
+        // how many it read.
+        int process (double step, const float* in, int inAvailable, float* out, int nOut, float gain = 1.0f, bool adding = false)
+        {
+            int used = 0;
+            const int taps = 2 * W;
+            for (int i = 0; i < nOut; ++i)
+            {
+                while (pos >= 1.0)
+                {
+                    push (used < inAvailable ? in[used] : (used > 0 ? in[inAvailable - 1] : 0.0f));
+                    if (used < inAvailable) ++used;
+                    pos -= 1.0;
+                }
+                const float* x = buf.data() + (w - taps);
+                double sum = 0.0;
+                for (int q = 0; q < taps; ++q) sum += k.at (((double) (q - W + 1) - pos) * fc) * x[q];
+                const float y = (float) (sum * fc) * gain;
+                out[i] = adding ? out[i] + y : y;
+                pos += step;
+            }
+            return used;
+        }
+
+    private:
+        void push (float v)
+        {
+            if (w == (int) buf.size())
+            {
+                std::copy (buf.end() - 2 * W, buf.end(), buf.begin());
+                w = 2 * W;
+            }
+            buf[(size_t) w++] = v;
+        }
+
+        const SincTable& k = liveSincTable();
+        double fc = 0.97, pos = 1.0;
+        int W = 0, w = 0;
+        std::vector<float> buf;
+    };
+
     // A whole recording from fsIn to fsOut: round (n fsOut / fsIn) samples per
     // channel (zero where the resampler made fewer). out must hold that many.
     inline int resampledLength (int n, double fsIn, double fsOut) { return (int) roundHalfUp ((n * fsOut) / fsIn); }

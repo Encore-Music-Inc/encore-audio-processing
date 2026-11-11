@@ -26,6 +26,12 @@
 
 namespace vs::tempo
 {
+    // The tempos a song can have, in beats per minute (a typed or detected
+    // tempo outside them is not a tempo).
+    inline constexpr double minBpm = 20.0, maxBpm = 400.0;
+    inline bool isTempo (double bpm) { return bpm >= minBpm && bpm <= maxBpm; }
+    inline double clampTempo (double bpm) { return std::clamp (bpm, minBpm, maxBpm); }
+
     // A tempo fitted through a run of taps.
     struct TapFit
     {

@@ -33,6 +33,7 @@
 #include "dsp/Synth.h"
 #include "dsp/TimeStretch.h"
 #include "dsp/Mix.h"
+#include "dsp/Meters.h"
 #include "dsp/Analysis.h"
 #include "dsp/Channels.h"
 #include "dsp/Compressor.h"
@@ -577,6 +578,26 @@ namespace
             if (o.rms) stat ("rms", w.rms());
             if (o.bands) stat ("bands", w.bands());
         }
+        else if (op == "minmax")
+        {
+            // a DAW's waveform picture: added a block at a time, read in equal stretches
+            vs::waveform::MinMax mm;
+            mm.reset (in->channels, (int) c.get ("size", 256));
+            blocks (n, block, [&] (std::int64_t s, int k)
+            {
+                const float* ch[2] { in->l.data() + s, stereo ? in->r.data() + s : in->l.data() + s };
+                mm.add (ch, in->channels, k);
+            });
+            const int columns = (int) c.get ("columns", 50);
+            for (int ci = 0; ci < in->channels; ++ci)
+                for (int col = 0; col < columns; ++col)
+                {
+                    const auto r = mm.range (ci, n * col / columns, n * (col + 1) / columns);
+                    out.push_back ({ "c" + std::to_string (ci) + ".lo" + std::to_string (col), (double) r.lo });
+                    out.push_back ({ "c" + std::to_string (ci) + ".hi" + std::to_string (col), (double) r.hi });
+                }
+            out.push_back ({ "peak", (double) mm.peak() });
+        }
         else if (op == "block-peaks")
         {
             vs::waveform::BlockPeaks b ((int) c.get ("blockSize", 100));
@@ -631,6 +652,48 @@ namespace
             take (r.flush());
             out.push_back ({ "resampledLength", (double) vs::resampledLength ((int) n, fs, to) });
             fingerprintAudio (out, "", res, to);
+        }
+        else if (op == "live-resample")
+        {
+            // played live (a clip at another rate or speed): fixed steps fed a block at a time
+            const double step = c.get ("step", 1.0);
+            const int outBlock = (int) c.get ("block", 512);
+            Channels res ((size_t) in->channels);
+            std::vector<vs::LiveResampler> rs ((size_t) in->channels);
+            for (auto& r : rs) r.prepare (std::max (1.0, step));
+            out.push_back ({ "latency", (double) rs[0].latency() });
+            std::int64_t at = 0;
+            double owed = 0.0;
+            while (true)
+            {
+                owed += outBlock * step;
+                const int want = (int) owed;
+                if (at + want > n) break;
+                owed -= want;
+                for (int ci = 0; ci < in->channels; ++ci)
+                {
+                    const float* src = (ci == 0 ? in->l.data() : in->r.data()) + at;
+                    auto& o = res[(size_t) ci];
+                    o.resize (o.size() + (size_t) outBlock);
+                    rs[(size_t) ci].process (step, src, want, o.data() + o.size() - (size_t) outBlock, outBlock);
+                }
+                at += want;
+            }
+            fingerprintAudio (out, "", res, fs / step);
+        }
+        else if (op == "levels")
+        {
+            using namespace vs::channels;
+            const auto chans = copyOf (*in);
+            const auto src = constPointers (chans);
+            out.push_back ({ "rms", (double) rmsOf (in->l.data(), (int) n) });
+            out.push_back ({ "silent", isNearlySilent (in->l.data(), (int) n) ? 1.0 : 0.0 });
+            std::vector<float> quiet ((size_t) n, 0.0001f);
+            out.push_back ({ "quietSilent", isNearlySilent (quiet.data(), (int) n) ? 1.0 : 0.0 });
+            Channels mono (1, std::vector<float> ((size_t) n));
+            monoAverage (src.data(), in->channels, (int) n, mono[0].data());
+            fingerprintAudio (out, "mono", mono, fs);
+            out.push_back ({ "gainDb", (double) gainToPeakDb (peakOf (src.data(), in->channels, (int) n), -0.3f) });
         }
         else if (op == "fracdelay")
         {
@@ -1022,6 +1085,69 @@ namespace
                 out.push_back ({ p + "groups", joined (m.groups, "+") });
                 out.push_back ({ p + "accents", joined (m.accents, " ") });
                 out.push_back ({ p + "sub", m.sub });
+            }
+        }
+        else if (op == "laws")
+        {
+            // the mixer's laws: pan, the volume fader, fade shapes, automation curves, and the ranges and axes products draw with
+            // (results named by each value's place in its list)
+            const auto pans = nums (c, "pans"), positions = nums (c, "positions"), dbs = nums (c, "dbs"), ts = nums (c, "ts"),
+                       curves = nums (c, "curves"), xs = nums (c, "xs"), bpms = nums (c, "bpms"), hzs = nums (c, "hzs"), rates = nums (c, "rates");
+            auto at = [] (size_t i) { return std::to_string (i); };
+            static const char* const panLaws[] { "linear", "3dB", "2.5dB", "4.5dB", "6dB" };
+            for (int law = 0; law < 5; ++law)
+                for (size_t i = 0; i < pans.size(); ++i)
+                {
+                    const auto g = vs::mix::panGains (0.8f, (float) pans[i], (vs::mix::PanLaw) law);
+                    const auto name = std::string ("pan.") + panLaws[law] + "." + at (i);
+                    out.push_back ({ name + ".l", (double) g.left });
+                    out.push_back ({ name + ".r", (double) g.right });
+                }
+            for (size_t i = 0; i < positions.size(); ++i)
+            {
+                out.push_back ({ "fader.pos" + at (i) + ".db", (double) vs::meters::faderPositionToDb ((float) positions[i]) });
+                out.push_back ({ "fader.pos" + at (i) + ".gain", (double) vs::meters::faderPositionToGain ((float) positions[i]) });
+            }
+            for (size_t i = 0; i < dbs.size(); ++i)
+            {
+                out.push_back ({ "fader.db" + at (i) + ".pos", (double) vs::meters::dbToFaderPosition ((float) dbs[i]) });
+                out.push_back ({ "fader.db" + at (i) + ".fromGain", (double) vs::meters::gainToFaderPosition (vs::dbToGain ((float) dbs[i])) });
+            }
+            using vs::channels::FadeCurve;
+            for (int curve = 0; curve < 5; ++curve)
+                for (size_t i = 0; i < ts.size(); ++i)
+                {
+                    const auto name = "fade." + std::to_string (curve) + "." + at (i);
+                    out.push_back ({ name + ".gain", vs::channels::fadeGain ((FadeCurve) curve, ts[i]) });
+                    out.push_back ({ name + ".out", vs::channels::fadeOutGain ((FadeCurve) curve, ts[i]) });
+                    out.push_back ({ name + ".float", (double) vs::channels::fadeGainFloat ((FadeCurve) curve, ts[i]) });
+                }
+            for (size_t i = 0; i < ts.size(); ++i)
+            {
+                const auto g = vs::channels::crossfadeGains ((float) ts[i]);
+                out.push_back ({ "xfade." + at (i) + ".first", (double) g.first });
+                out.push_back ({ "xfade." + at (i) + ".second", (double) g.second });
+            }
+            for (size_t k = 0; k < curves.size(); ++k)
+                for (size_t i = 0; i < xs.size(); ++i)
+                {
+                    out.push_back ({ "curve.up." + at (k) + "." + at (i), (double) vs::curve::valueAt (xs[i], 0.0, 0.2f, (float) curves[k], 1.0, 0.9f) });
+                    out.push_back ({ "curve.down." + at (k) + "." + at (i), (double) vs::curve::valueAt (xs[i], 0.0, 0.9f, (float) curves[k], 1.0, 0.2f) });
+                }
+            out.push_back ({ "tempo.min", vs::tempo::minBpm });
+            out.push_back ({ "tempo.max", vs::tempo::maxBpm });
+            for (size_t i = 0; i < bpms.size(); ++i)
+            {
+                out.push_back ({ "tempo.clamp" + at (i), vs::tempo::clampTempo (bpms[i]) });
+                out.push_back ({ "tempo.is" + at (i), vs::tempo::isTempo (bpms[i]) ? 1.0 : 0.0 });
+            }
+            for (size_t i = 0; i < hzs.size(); ++i) out.push_back ({ "axis.hz" + at (i), (double) vs::axis::logPosition ((float) hzs[i]) });
+            for (size_t i = 0; i < positions.size(); ++i) out.push_back ({ "axis.at" + at (i), (double) vs::axis::logHz ((float) positions[i]) });
+            for (size_t i = 0; i < rates.size(); ++i)
+            {
+                const auto w = vs::TunerPitch::window (rates[i]);
+                out.push_back ({ "tuner.stride" + at (i), (double) w.stride });
+                out.push_back ({ "tuner.n" + at (i), (double) w.n });
             }
         }
         else if (op == "downsample")

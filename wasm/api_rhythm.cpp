@@ -322,4 +322,10 @@ extern "C"
         out[4] = q.mean;
         out[5] = q.spread;
     }
+
+    // ---- The tempos a song can have
+    EMSCRIPTEN_KEEPALIVE double rh_tempo_min() { return vs::tempo::minBpm; }
+    EMSCRIPTEN_KEEPALIVE double rh_tempo_max() { return vs::tempo::maxBpm; }
+    EMSCRIPTEN_KEEPALIVE double rh_clamp_tempo (double bpm) { return vs::tempo::clampTempo (bpm); }
+    EMSCRIPTEN_KEEPALIVE int rh_is_tempo (double bpm) { return vs::tempo::isTempo (bpm) ? 1 : 0; }
 }

@@ -90,9 +90,9 @@ The headers, by area (each header's top comment says more):
 | | `DelayLine.h` | the delay line and reading between samples |
 | | `FracDelay.h` | fixed fractional delays per channel |
 | | `Oversampler.h` | power-of-two oversampling |
-| | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes) and integer decimation |
-| | `Ramp.h` | a value ramping to a new target, linearly or by equal ratios |
-| | `Mix.h` | gain stages, crossfades and the dry/wet send law |
+| | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), its live form for playback, and integer decimation |
+| | `Ramp.h` | a value ramping to a new target, linearly or by equal ratios, and automation curves |
+| | `Mix.h` | gain stages, crossfades, the dry/wet send law and pan laws |
 | | `Oscillator.h`, `Envelope.h` | band-limited oscillators (the one polyBLEP), and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut, and the dynamic EQ bell |
 | | `Lpc.h` | linear prediction (gap and click repair, onsets, FLAC) |
@@ -103,10 +103,10 @@ The headers, by area (each header's top comment says more):
 | | `LoudnessReport.h` | a song's loudness report |
 | | `TruePeak.h` | the true-peak detector |
 | | `Analysis.h` | everything a release check measures on a finished song |
-| | `Spectrum.h` | the live analyser, the long-term spectrum, the encoder cliff, tonal balance |
+| | `Spectrum.h` | the live analyser, the long-term spectrum, the encoder cliff, tonal balance, drawing axes |
 | | `ResonanceFinder.h` | narrow resonances in a long-term spectrum |
-| | `Waveform.h` | waveform overviews for drawing |
-| | `Meters.h` | how a meter moves on screen: ballistics, peak hold, its scale |
+| | `Waveform.h` | waveform overviews for drawing, and a DAW's waveform picture (min and max per block) |
+| | `Meters.h` | how a meter moves on screen: ballistics, peak hold, its scale; the volume fader's law |
 | Processing and mastering | `EqBand.h` | one band of a parametric EQ |
 | | `VocalEq.h` | the vocal EQ (low cut and four bands) |
 | | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor, de-esser, gate and fader rider |
@@ -118,7 +118,7 @@ The headers, by area (each header's top comment says more):
 | | `MasterChain.h` | the one-knob mastering chain |
 | | `Mastering.h` | the one way to master a whole song with the chain |
 | | `Dither.h` | the one float to integer conversion, with dither |
-| | `Channels.h` | channel maps, trims, fades, peak and normalizing for whole files |
+| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence and normalizing |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
 | | `Dsd.h` | DSD (one-bit SACD audio, .dsf and .dff) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
@@ -129,10 +129,10 @@ The headers, by area (each header's top comment says more):
 | | `Tunings.h` | the tuner's list (written by `tools/tunings.py`) |
 | | `VoiceTracker.h` | following a singing voice and measuring it; played notes |
 | | `DrumPitch.h` | drum tuning |
-| Rhythm | `Tempo.h` | tap tempo and the tempo finder |
+| Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
 | | `TimingCheck.h` | latency and playing in time with a click |
-| | `Metronome.h` | the beat grid, sequencer, click sounds and click engine |
+| | `Metronome.h` | the beat grid, sequencer, click sounds, click engine and its voices for a host's timeline |
 | Sound | `Synth.h`, `Sampler.h` | the synth and the sampler |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |

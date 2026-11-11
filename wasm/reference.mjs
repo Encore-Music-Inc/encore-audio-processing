@@ -271,6 +271,22 @@ function runMore(c, sig, out) {
       X.ms_wf_destroy(w);
       return true;
     }
+    case 'minmax': {
+      const src = channelsOf(sig);
+      const m = X.ms_minmax_create(src.length, c.size ?? 256);
+      const two = X.malloc(8);
+      blocks(n, block, (s, k) => { const b = alloc(src.map((x) => x.subarray(s, s + k))); X.ms_minmax_add(m, b.table, src.length, k); b.free(); });
+      const columns = c.columns ?? 50;
+      for (let ci = 0; ci < src.length; ci++)
+        for (let col = 0; col < columns; col++) {
+          X.ms_minmax_range(m, ci, Math.trunc(n * col / columns), Math.trunc(n * (col + 1) / columns), two);
+          const r = f32(two, 2);
+          out.push([`c${ci}.lo${col}`, r[0]], [`c${ci}.hi${col}`, r[1]]);
+        }
+      out.push(['peak', X.ms_minmax_peak(m)]);
+      X.free(two); X.ms_minmax_destroy(m);
+      return true;
+    }
     case 'block-peaks': {
       const b = X.ms_wf_blocks_create(c.blockSize ?? 100, block);
       blocks(n, block, (s, k) => { f32(X.ms_wf_blocks_input(b), k).set(sig.l.subarray(s, s + k)); X.ms_wf_blocks_process(b, k); });
@@ -309,6 +325,46 @@ function runMore(c, sig, out) {
       X.pr_resampler_destroy(r);
       out.push(['resampledLength', X.pr_resampled_length(n, fs, to)]);
       fingerprintAudio(out, '', res.map((parts) => { const all = new Float32Array(parts.reduce((a, p) => a + p.length, 0)); let o = 0; for (const p of parts) { all.set(p, o); o += p.length; } return all; }), to);
+      return true;
+    }
+    case 'live-resample': {
+      const step = c.step ?? 1, outBlock = c.block ?? 512, src = channelsOf(sig);
+      const rs = src.map(() => X.pr_live_resampler_create(Math.max(1, step)));
+      out.push(['latency', X.pr_live_resampler_latency(rs[0])]);
+      const inP = X.malloc(4 * (Math.ceil(outBlock * step) + 8)), outP = X.malloc(4 * outBlock);
+      const res = src.map(() => []);
+      let at = 0, owed = 0;
+      while (true) {
+        owed += outBlock * step;
+        const want = Math.trunc(owed);
+        if (at + want > n) break;
+        owed -= want;
+        src.forEach((x, ci) => {
+          f32(inP, want).set(x.subarray(at, at + want));
+          X.pr_live_resampler_process(rs[ci], step, inP, want, outP, outBlock);
+          res[ci].push(f32(outP, outBlock).slice());
+        });
+        at += want;
+      }
+      X.free(inP); X.free(outP); rs.forEach((r) => X.pr_live_resampler_destroy(r));
+      fingerprintAudio(out, '', res.map((parts) => { const all = new Float32Array(parts.length * outBlock); parts.forEach((q, k) => all.set(q, k * outBlock)); return all; }), fs / step);
+      return true;
+    }
+    case 'levels': {
+      const src = channelsOf(sig);
+      const buf = alloc(src);
+      out.push(['rms', X.pr_rms(buf.ptrs[0], n)], ['silent', X.pr_nearly_silent(buf.ptrs[0], n)]);
+      const quiet = alloc([new Float32Array(n).fill(0.0001)]);
+      out.push(['quietSilent', X.pr_nearly_silent(quiet.ptrs[0], n)]);
+      quiet.free();
+      const mono = X.malloc(4 * n + 4);
+      X.pr_mono_average(buf.table, src.length, n, mono);
+      fingerprintAudio(out, 'mono', [f32(mono, n).slice()], fs);
+      X.free(mono);
+      let peak = 0;
+      for (const x of src) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(x[i]));
+      out.push(['gainDb', X.pr_gain_to_peak_db(peak, -0.3, -60, 24)]);
+      buf.free();
       return true;
     }
     case 'fracdelay': {
@@ -639,6 +695,31 @@ function runMore(c, sig, out) {
         [sp, gp, ap, subp].forEach((p) => X.free(p));
       });
       [buf, buf2, dbl].forEach((p) => X.free(p));
+      return true;
+    }
+    case 'laws': {
+      const two = X.malloc(8);
+      const laws = ['linear', '3dB', '2.5dB', '4.5dB', '6dB'];
+      laws.forEach((name, law) => (c.pans ?? []).forEach((pan, i) => {
+        X.pr_pan_gains(0.8, pan, law, two);
+        const g = f32(two, 2);
+        out.push([`pan.${name}.${i}.l`, g[0]], [`pan.${name}.${i}.r`, g[1]]);
+      }));
+      (c.positions ?? []).forEach((p, i) => out.push([`fader.pos${i}.db`, X.ms_fader_position_to_db(p)], [`fader.pos${i}.gain`, X.ms_fader_position_to_gain(p)]));
+      (c.dbs ?? []).forEach((db, i) => out.push([`fader.db${i}.pos`, X.ms_db_to_fader_position(db)],
+                                                [`fader.db${i}.fromGain`, X.ms_gain_to_fader_position(Math.fround(Math.pow(10, db * 0.05)))]));
+      for (let curve = 0; curve < 5; curve++)
+        (c.ts ?? []).forEach((t, i) => out.push([`fade.${curve}.${i}.gain`, X.pr_fade_gain(curve, t)], [`fade.${curve}.${i}.out`, X.pr_fade_out_gain(curve, t)],
+                                                [`fade.${curve}.${i}.float`, X.pr_fade_gain_float(curve, t)]));
+      (c.ts ?? []).forEach((t, i) => { X.pr_crossfade_gains(t, two); const g = f32(two, 2); out.push([`xfade.${i}.first`, g[0]], [`xfade.${i}.second`, g[1]]); });
+      (c.curves ?? []).forEach((amount, k) => (c.xs ?? []).forEach((x, i) => out.push(
+        [`curve.up.${k}.${i}`, X.pr_curve_value(x, 0, 0.2, amount, 1, 0.9)], [`curve.down.${k}.${i}`, X.pr_curve_value(x, 0, 0.9, amount, 1, 0.2)])));
+      out.push(['tempo.min', X.rh_tempo_min()], ['tempo.max', X.rh_tempo_max()]);
+      (c.bpms ?? []).forEach((bpm, i) => out.push([`tempo.clamp${i}`, X.rh_clamp_tempo(bpm)], [`tempo.is${i}`, X.rh_is_tempo(bpm)]));
+      (c.hzs ?? []).forEach((hz, i) => out.push([`axis.hz${i}`, X.ms_axis_log_position(hz, 20, 20000)]));
+      (c.positions ?? []).forEach((p, i) => out.push([`axis.at${i}`, X.ms_axis_log_hz(p, 20, 20000)]));
+      (c.rates ?? []).forEach((rate, i) => out.push([`tuner.stride${i}`, X.tp_window_stride(rate)], [`tuner.n${i}`, X.tp_window_length(rate)]));
+      X.free(two);
       return true;
     }
     case 'downsample': {

@@ -75,5 +75,31 @@ namespace vs
             const float x = std::clamp ((db - bottomDb) / (topDb - bottomDb), 0.0f, 1.0f);
             return std::pow (x, curve);
         }
+
+        // The volume fader: its position (0 at the bottom .. 1 at the top, +6 dB)
+        // and the level it sets, 20 dB for every factor of e in position, and
+        // silence (faderFloorDb) at the bottom. Songs store a fader's position,
+        // so this law is how a saved level is read back.
+        inline constexpr float faderTopDb = 6.0f, faderFloorDb = -100.0f;
+
+        inline float faderPositionToDb (float position)
+        {
+            return position > 0.0f ? 20.0f * std::log (position) + faderTopDb : faderFloorDb;
+        }
+
+        inline float dbToFaderPosition (float db)
+        {
+            return db > faderFloorDb ? std::exp ((db - faderTopDb) * (1.0f / 20.0f)) : 0.0f;
+        }
+
+        inline float faderPositionToGain (float position)
+        {
+            return position > 0.0f ? std::pow (10.0f, (20.0f * std::log (position) + faderTopDb) * (1.0f / 20.0f)) : 0.0f;
+        }
+
+        inline float gainToFaderPosition (float gain)
+        {
+            return gain > 0.0f ? std::exp ((20.0f * std::log10 (gain) - faderTopDb) * (1.0f / 20.0f)) : 0.0f;
+        }
     }
 }

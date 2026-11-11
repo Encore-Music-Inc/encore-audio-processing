@@ -30,11 +30,14 @@ themselves, under whichever of the two licences they choose.
   full terms are in `dsp/third_party/signalsmith/LICENSE-stretch.txt` and
   `dsp/third_party/signalsmith/signalsmith-linear/LICENSE.txt`.
 
-## Tracktion Engine (the effects and instruments rewritten from it)
+## Tracktion Engine (the effects, instruments and mixer laws taken from it)
 
 - What: the controls and behaviour of Tracktion Engine's chorus, phaser,
   4OSC synth and sampler, rewritten in `dsp/Chorus.h`, `dsp/Phaser.h`,
-  `dsp/Synth.h` and `dsp/Sampler.h` (no Tracktion code is copied).
+  `dsp/Synth.h` and `dsp/Sampler.h`; and, number for number so songs saved
+  with them play the same, its pan laws (`dsp/Mix.h`), volume fader law
+  (`dsp/Meters.h`), concave and S-curve fades (`dsp/Channels.h`) and
+  automation curves (`dsp/Ramp.h`), Copyright Tracktion Software Corporation.
 - Where: https://github.com/Tracktion/tracktion_engine
 - Licence: GNU GPLv3 (or Tracktion's commercial licence). GPLv3 code can be
   combined with this repository's AGPLv3 code.

@@ -23,6 +23,27 @@ namespace vs
             const auto& r = yin.analyse (x, n, sampleRate);
             return r.voiced ? (float) r.hz : 0.0f;
         }
+
+        // What a live tuner listens to at a device rate: the newest
+        // window x stride samples, averaged down by stride (boxDownsample) to
+        // about 24 kHz, which covers 25 Hz to 2.1 kHz and stays cheap.
+        struct Window { int stride, n; };
+        static Window window (double sampleRate)
+        {
+            return { std::max (1, (int) std::round (sampleRate / 24000.0)), 4096 };
+        }
+
+        // The pitch of the newest window of a live input (oldest first, at
+        // least window (sampleRate) stride x n samples): the tuner's whole
+        // reading of a stream.
+        static float estimateLatest (const float* x, int count, double sampleRate)
+        {
+            const auto w = window (sampleRate);
+            const int need = w.n * w.stride;
+            if (count < need) return 0.0f;
+            const auto down = boxDownsample (x + (count - need), need, w.stride);
+            return estimate (down.data(), w.n, sampleRate / w.stride);
+        }
     };
 
     // What a heard pitch means on the instrument: the string it's nearest

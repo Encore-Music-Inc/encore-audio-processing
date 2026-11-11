@@ -86,6 +86,8 @@ TOLERANCES = {
                   "why": "A processed signal's integrated loudness, LUFS: as proc-sum."},
     "box": {"abs": 1e-6, "rel": 1e-6,
             "why": "A block averaged down (the tuner's): double sums of a few samples rounded to float, which compilers may order differently, so a value can move by a float step."},
+    "law": {"abs": 1e-6, "rel": 1e-6,
+            "why": "Gains and positions from the pan, fader, fade and automation laws and the drawing axes: float sin, cos, pow, exp and log, which maths libraries round differently in the last place."},
     "dsd": {"abs": 1e-6, "rel": 1e-6,
             "why": "DSD to PCM: the low-pass is designed in double with sin and cos, which maths libraries round differently in the last place, so its float tables can differ in the last place, and a sample (a sum of up to 512 of them) by a few float steps."},
 }
@@ -120,7 +122,11 @@ def rule(op, name):
     stem = last.rstrip("0123456789")
     if last in EXACT_WORDS or stem in ("pad", "midi", "trim"):
         return "exact"
-    if op in ("processor", "fades", "channels", "resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument"):
+    if op == "laws":
+        return "exact" if parts[0] in ("tempo", "tuner") else "law"
+    if op == "levels":
+        return {"rms": "level", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
+    if op in ("processor", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument"):
         if op == "vocoder" and last == "peak":
             return "vocoder-peak"
         if last in ("sum", "peak", "lufs"):
@@ -153,6 +159,8 @@ def rule(op, name):
         return "spectrum"
     if op == "tonal-balance":
         return "spectrum-db"
+    if op == "minmax":
+        return "exact"
     if op in ("waveform", "block-peaks"):
         return "exact" if parts[0] == "shape" else "level"
     if op == "clip-runs":
@@ -389,12 +397,19 @@ HIGH = signal(96000, 1, 1, tone(1000, 0.3), tone(30000, 0.2), noise(151, 0.02))
 case("processing/resample/48k-to-44k", "resample", VOX, block=4096, to=44100)
 case("processing/resample/44k-to-48k", "resample", SONG, block=4096, to=48000)
 case("processing/resample/96k-to-48k", "resample", HIGH, block=1000, to=48000)
+case("processing/live-resample/44k-to-48k", "live-resample", SONG, step=44100 / 48000, block=512)
+case("processing/live-resample/double-speed", "live-resample", SONG, step=2.0, block=256)
+case("processing/levels/song", "levels", SONG)
+case("analysis/minmax/song", "minmax", SONG, size=256, columns=40, block=1000)
+case("processing/laws", "laws", pans=[-1, -0.5, 0, 0.3, 1], positions=[0, 0.05, 0.5, 1], dbs=[-100, -60, -12, 0, 6],
+     ts=[0, 0.25, 0.5, 0.9, 1], curves=[0, 0.25, -0.4, 0.5, 0.75, -0.9, 1], xs=[0.1, 0.5, 0.8],
+     bpms=[10, 20, 120, 400, 500], hzs=[20, 100, 1000, 20000], rates=[44100, 48000, 96000])
 case("processing/fracdelay/song", "fracdelay", SONG, block=4096, delays=[0.5, 2.25])
 case("processing/decimate/by-2", "decimate", HIGH, block=4096, factor=2)
 case("processing/decimate/by-4", "decimate", HIGH, block=999, factor=4)
 for bits, mode in ((16, 0), (16, 1), (16, 2), (24, 0)):
     case(f"processing/quantize/{bits}bit-{['auto', 'always', 'never'][mode]}", "quantize", SONG, block=4096, bits=bits, mode=mode, seed=7)
-for curve in range(3):
+for curve in range(5):
     case(f"processing/fades/seconds-curve{curve}", "fades", VOX, kind="seconds", curve=curve, **{"in": 0.5, "out": 1.2})
 for point in range(3):
     case(f"processing/fades/samples-point{point}", "fades", VOX, kind="samples", curve=point, point=point, **{"in": 4800, "out": 9600})

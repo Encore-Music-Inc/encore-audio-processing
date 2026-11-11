@@ -7,6 +7,8 @@
 // channels at once (chans), it is an array of that many float pointers.
 // Built with the other wasm/api_*.cpp files into master.wasm by wasm/build.sh.
 #include <emscripten/emscripten.h>
+#include "dsp/Ramp.h"
+#include "dsp/Mix.h"
 #include <cstdint>
 #include <vector>
 #include "dsp/AbCompare.h"
@@ -315,4 +317,51 @@ extern "C"
 
     // ---- The sample rate an MP3 of a song at songRate is made at
     EMSCRIPTEN_KEEPALIVE double pr_mp3_rate (double songRate) { return vs::mp3Rate (songRate); }
+
+    // ---- The mixer's laws: pan gains (out[0] left, out[1] right; law 0 linear,
+    // 1 3 dB, 2 2.5 dB, 3 4.5 dB, 4 6 dB in the centre), fade shapes (curve 0
+    // convex, 1 sine squared, 2 linear, 3 concave, 4 S-curve; the gain at t, the
+    // fade out's, and single precision), an equal-power crossfade (out[0] the
+    // first, out[1] the second) and an automation segment's value at x.
+    EMSCRIPTEN_KEEPALIVE void pr_pan_gains (float gain, float pan, int law, float* out)
+    {
+        const auto g = vs::mix::panGains (gain, pan, (vs::mix::PanLaw) law);
+        out[0] = g.left; out[1] = g.right;
+    }
+    EMSCRIPTEN_KEEPALIVE double pr_fade_gain (int curve, double t) { return vs::channels::fadeGain ((vs::channels::FadeCurve) curve, t); }
+    EMSCRIPTEN_KEEPALIVE double pr_fade_out_gain (int curve, double t) { return vs::channels::fadeOutGain ((vs::channels::FadeCurve) curve, t); }
+    EMSCRIPTEN_KEEPALIVE float pr_fade_gain_float (int curve, double t) { return vs::channels::fadeGainFloat ((vs::channels::FadeCurve) curve, t); }
+    EMSCRIPTEN_KEEPALIVE void pr_crossfade_gains (float t, float* out)
+    {
+        const auto g = vs::channels::crossfadeGains (t);
+        out[0] = g.first; out[1] = g.second;
+    }
+    EMSCRIPTEN_KEEPALIVE float pr_curve_value (double x, double x1, float y1, float curve, double x2, float y2)
+    {
+        return vs::curve::valueAt (x, x1, y1, curve, x2, y2);
+    }
+
+    // ---- Levels: one channel's RMS, whether a block is nearly silent, every
+    // channel averaged into out, and the gain in dB that brings a peak to targetDb.
+    EMSCRIPTEN_KEEPALIVE float pr_rms (const float* x, int n) { return vs::channels::rmsOf (x, n); }
+    EMSCRIPTEN_KEEPALIVE int pr_nearly_silent (const float* x, int n) { return vs::channels::isNearlySilent (x, n) ? 1 : 0; }
+    EMSCRIPTEN_KEEPALIVE void pr_mono_average (const float* const* chans, int numCh, int n, float* out) { vs::channels::monoAverage (chans, numCh, n, out); }
+    EMSCRIPTEN_KEEPALIVE float pr_gain_to_peak_db (float peak, float targetDb, float minDb, float maxDb) { return vs::channels::gainToPeakDb (peak, targetDb, minDb, maxDb); }
+
+    // ---- The live resampler, one channel: pr_live_resampler_process makes nOut
+    // samples into out from up to inAvailable of in at `step` input samples per
+    // output, and returns how many it read; the output runs latency() behind.
+    EMSCRIPTEN_KEEPALIVE void* pr_live_resampler_create (double maxStep)
+    {
+        auto* r = new vs::LiveResampler();
+        r->prepare (maxStep);
+        return r;
+    }
+    EMSCRIPTEN_KEEPALIVE void pr_live_resampler_destroy (void* p) { delete static_cast<vs::LiveResampler*> (p); }
+    EMSCRIPTEN_KEEPALIVE int pr_live_resampler_latency (void* p) { return static_cast<vs::LiveResampler*> (p)->latency(); }
+    EMSCRIPTEN_KEEPALIVE void pr_live_resampler_reset (void* p) { static_cast<vs::LiveResampler*> (p)->reset(); }
+    EMSCRIPTEN_KEEPALIVE int pr_live_resampler_process (void* p, double step, const float* in, int inAvailable, float* out, int nOut)
+    {
+        return static_cast<vs::LiveResampler*> (p)->process (step, in, inAvailable, out, nOut);
+    }
 }

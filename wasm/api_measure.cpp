@@ -457,4 +457,32 @@ extern "C"
         const auto b = vs::bandFor ({ freq, prominenceDb, relDb });
         out[0] = b.freq; out[1] = b.q; out[2] = b.rangeDb; out[3] = b.thresholdDb;
     }
+
+    // ---- The volume fader's law (position 0 .. 1, +6 dB at the top) and the
+    // drawing axes: a log frequency axis from 20 Hz to 20 kHz (0 .. 1) and back.
+    EMSCRIPTEN_KEEPALIVE float ms_fader_position_to_db (float position) { return vs::meters::faderPositionToDb (position); }
+    EMSCRIPTEN_KEEPALIVE float ms_db_to_fader_position (float db) { return vs::meters::dbToFaderPosition (db); }
+    EMSCRIPTEN_KEEPALIVE float ms_fader_position_to_gain (float position) { return vs::meters::faderPositionToGain (position); }
+    EMSCRIPTEN_KEEPALIVE float ms_gain_to_fader_position (float gain) { return vs::meters::gainToFaderPosition (gain); }
+    EMSCRIPTEN_KEEPALIVE float ms_axis_log_position (float hz, float loHz, float hiHz) { return vs::axis::logPosition (hz, loHz, hiHz); }
+    EMSCRIPTEN_KEEPALIVE float ms_axis_log_hz (float position, float loHz, float hiHz) { return vs::axis::logHz (position, loHz, hiHz); }
+
+    // ---- A DAW's waveform picture: the lowest and highest sample of every
+    // block per channel, added as audio arrives (ms_minmax_add takes chans, an
+    // array of numChans float pointers) and read for samples [from, to) of a
+    // channel into out[0] (lowest) and out[1] (highest).
+    EMSCRIPTEN_KEEPALIVE void* ms_minmax_create (int channels, int blockSize)
+    {
+        auto* m = new vs::waveform::MinMax();
+        m->reset (channels, blockSize);
+        return m;
+    }
+    EMSCRIPTEN_KEEPALIVE void ms_minmax_destroy (void* p) { delete static_cast<vs::waveform::MinMax*> (p); }
+    EMSCRIPTEN_KEEPALIVE void ms_minmax_add (void* p, const float* const* chans, int numChans, int n) { static_cast<vs::waveform::MinMax*> (p)->add (chans, numChans, n); }
+    EMSCRIPTEN_KEEPALIVE void ms_minmax_range (void* p, int channel, double from, double to, float* out)
+    {
+        const auto r = static_cast<vs::waveform::MinMax*> (p)->range (channel, (std::int64_t) from, (std::int64_t) to);
+        out[0] = r.lo; out[1] = r.hi;
+    }
+    EMSCRIPTEN_KEEPALIVE float ms_minmax_peak (void* p) { return static_cast<vs::waveform::MinMax*> (p)->peak(); }
 }

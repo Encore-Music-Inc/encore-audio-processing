@@ -72,9 +72,9 @@ CI fails if either differs from what the script writes.
 | | `DelayLine.h` | a delay line, read between samples |
 | | `FracDelay.h` | fixed fractional delays per channel |
 | | `Oversampler.h` | power-of-two oversampling |
-| | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), and decimation |
-| | `Ramp.h` | a value ramping to a new target |
-| | `Mix.h` | gain stages, crossfades and the dry/wet send law |
+| | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), its live form for playback, and decimation |
+| | `Ramp.h` | a value ramping to a new target, and how automation moves between its points |
+| | `Mix.h` | gain stages, crossfades, the dry/wet send law and pan laws |
 | | `Oscillator.h`, `Envelope.h` | band-limited oscillators, and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut and the dynamic EQ bell that turn a sound down by its level |
 | | `Lpc.h` | linear prediction |
@@ -85,10 +85,10 @@ CI fails if either differs from what the script writes.
 | | `LoudnessReport.h` | a song's loudness report |
 | | `TruePeak.h` | the true-peak detector |
 | | `Analysis.h` | everything a release check measures on a finished song |
-| | `Spectrum.h` | the live analyser, the long-term spectrum, the lossy-encoder cliff and tonal balance |
+| | `Spectrum.h` | the live analyser, the long-term spectrum, the lossy-encoder cliff, tonal balance and drawing axes |
 | | `ResonanceFinder.h` | narrow resonances in a long-term spectrum |
-| | `Waveform.h` | waveform overviews for drawing |
-| | `Meters.h` | how a meter moves on screen (ballistics, peak hold, its scale) |
+| | `Waveform.h` | waveform overviews for drawing, and a DAW's waveform picture at any zoom |
+| | `Meters.h` | how a meter moves on screen (ballistics, peak hold, its scale) and the volume fader's law |
 | Processing and mastering | `EqBand.h`, `VocalEq.h` | a parametric EQ band, and the vocal EQ |
 | | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor, de-esser, gate and fader rider |
 | | `Saturator.h` | preamp drive |
@@ -99,7 +99,7 @@ CI fails if either differs from what the script writes.
 | | `MasterChain.h` | the one-knob mastering chain |
 | | `Mastering.h` | mastering a whole song with the chain |
 | | `Dither.h` | float to integer samples, with dither |
-| | `Channels.h` | channel maps, trims, fades, peak and normalizing for whole files |
+| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence and normalizing |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
 | | `Dsd.h` | DSD (the one-bit audio of SACDs, .dsf and .dff files) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
@@ -109,10 +109,10 @@ CI fails if either differs from what the script writes.
 | | `TunerPitch.h`, `Tunings.h` | the tuner, and its instruments and tunings |
 | | `VoiceTracker.h` | following a singing voice and measuring it, and played notes |
 | | `DrumPitch.h` | drum tuning |
-| Rhythm | `Tempo.h` | tap tempo and the tempo finder |
+| Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
 | | `TimingCheck.h` | the speaker-to-mic latency and playing in time with a click |
-| | `Metronome.h` | the beat grid, the sequencer, the click sounds and the click engine |
+| | `Metronome.h` | the beat grid, the sequencer, the click sounds, the click engine and its voices for a host's own timeline |
 | Sound | `Synth.h` | the synth |
 | | `Sampler.h` | the sampler |
 | | `DrumSynth.h` | the drum synthesizer and its kits |

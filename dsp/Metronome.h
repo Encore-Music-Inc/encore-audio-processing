@@ -689,6 +689,65 @@ namespace vs::metronome
     // The four volume sliders, 0 to 100
     struct Volumes { double accent = 100, beat = 80, sub = 50, poly = 70; };
 
+    // The click engine's voices: each a sound starting at a frame with a
+    // gain, mixed into blocks until it ends. ClickEngine schedules them from
+    // its own beat grid; a host with its own timeline (a DAW's tempo map, its
+    // count-in) adds them where its beats fall and mixes them the same way.
+    class ClickVoices
+    {
+    public:
+        ClickVoices() { voices.reserve (64); }
+
+        void clear() { voices.clear(); }
+        bool empty() const { return voices.empty(); }
+
+        // A sound (kept alive by owner) starting at frame `at`, times gain; a gain of 0 adds nothing
+        void add (std::shared_ptr<const void> owner, const Buffer* buf, std::int64_t at, double gain)
+        {
+            if (gain > 0 && buf != nullptr) voices.push_back ({ std::move (owner), buf, at, gain });
+        }
+
+        void add (std::shared_ptr<const Buffer> sound, std::int64_t at, double gain)
+        {
+            const Buffer* b = sound.get();
+            add (std::shared_ptr<const void> (std::move (sound)), b, at, gain);
+        }
+
+        // Adds every voice's part of frames [frame0, frame0 + n) into out, and drops the ones that ended
+        void mix (float* out, int n, std::int64_t frame0)
+        {
+            const std::int64_t end = frame0 + n;
+            size_t keep = 0;
+            for (size_t vi = 0; vi < voices.size(); ++vi)
+            {
+                auto& v = voices[vi];
+                const auto len = (std::int64_t) v.buf->size();
+                if (v.at < end)
+                {
+                    const std::int64_t from = std::max (v.at, frame0), stop = std::min (end, v.at + len);
+                    for (std::int64_t f = from; f < stop; ++f)
+                        out[f - frame0] = (float) (out[f - frame0] + (double) (*v.buf)[(size_t) (f - v.at)] * v.gain);
+                }
+                if (v.at + len > end)
+                {
+                    if (keep != vi) voices[keep] = std::move (v);
+                    ++keep;
+                }
+            }
+            voices.erase (voices.begin() + (std::ptrdiff_t) keep, voices.end());
+        }
+
+    private:
+        struct Voice
+        {
+            std::shared_ptr<const void> owner;
+            const Buffer* buf;
+            std::int64_t at;
+            double gain;
+        };
+        std::vector<Voice> voices;
+    };
+
     class ClickEngine
     {
     public:
@@ -698,10 +757,7 @@ namespace vs::metronome
         bool running = false;
         struct Gains { double accent = 1, beat = 0.5, sub = 0.2, poly = 0.4; } gains;
 
-        explicit ClickEngine (double sampleRate, const MetronomeSettings& settings = {}) : sr (sampleRate), seq (sampleRate, settings)
-        {
-            voices.reserve (64);
-        }
+        explicit ClickEngine (double sampleRate, const MetronomeSettings& settings = {}) : sr (sampleRate), seq (sampleRate, settings) {}
 
         void setSounds (std::shared_ptr<const Sounds> s) { sounds = std::move (s); }
         void setSounds (Sounds s) { sounds = std::make_shared<const Sounds> (std::move (s)); }
@@ -752,41 +808,17 @@ namespace vs::metronome
                     for (const auto& p : ev.poly) voice (&snd.poly, roundHalfUp (ev.frame + p.frac * ev.len), g.poly);
                 }
             }
-            size_t keep = 0;
-            for (size_t vi = 0; vi < voices.size(); ++vi)
-            {
-                auto& v = voices[vi];
-                const auto len = (std::int64_t) v.buf->size();
-                if (v.at < end)
-                {
-                    const std::int64_t from = std::max (v.at, frame0), stop = std::min (end, v.at + len);
-                    for (std::int64_t f = from; f < stop; ++f)
-                        out[f - frame0] = (float) (out[f - frame0] + (double) (*v.buf)[(size_t) (f - v.at)] * v.gain);
-                }
-                if (v.at + len > end)
-                {
-                    if (keep != vi) voices[keep] = std::move (v);
-                    ++keep;
-                }
-            }
-            voices.erase (voices.begin() + (std::ptrdiff_t) keep, voices.end());
+            voices.mix (out, n, frame0);
             return events;
         }
 
     private:
-        struct Voice
-        {
-            std::shared_ptr<const Sounds> owner;
-            const Buffer* buf;
-            std::int64_t at;
-            double gain;
-        };
-        std::vector<Voice> voices;
+        ClickVoices voices;
         std::vector<CountEvent> events;
 
         void voice (const Buffer* buf, double at, double gain)
         {
-            if (gain > 0) voices.push_back ({ sounds, buf, (std::int64_t) at, gain });
+            voices.add (sounds, buf, (std::int64_t) at, gain);
         }
     };
 }

@@ -50,4 +50,10 @@ extern "C"
         return static_cast<vs::TunerFollow*> (p)->steady (r, toleranceCents);
     }
     EMSCRIPTEN_KEEPALIVE void tp_follow_reset (void* p) { static_cast<vs::TunerFollow*> (p)->reset(); }
+
+    // ---- What a live tuner reads at a device rate: the averaging stride and
+    // window length, and the pitch of the newest window of a stream (0: no note)
+    EMSCRIPTEN_KEEPALIVE int tp_window_stride (double sampleRate) { return vs::TunerPitch::window (sampleRate).stride; }
+    EMSCRIPTEN_KEEPALIVE int tp_window_length (double sampleRate) { return vs::TunerPitch::window (sampleRate).n; }
+    EMSCRIPTEN_KEEPALIVE float tp_estimate_latest (const float* x, int count, double sampleRate) { return vs::TunerPitch::estimateLatest (x, count, sampleRate); }
 }
