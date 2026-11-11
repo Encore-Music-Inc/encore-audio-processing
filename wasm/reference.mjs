@@ -671,6 +671,18 @@ function runMore(c, sig, out) {
         out.push([name, Array.from({ length: X.mu_key_count(minor) }, (_, i) => mtext((b, cap) => X.mu_key_tonic(minor, i, b, cap))).join(' ')]);
       return true;
     }
+    case 'theory': {
+      // each request's answer from th_call, named as the native results are
+      nums('requests').forEach((req, i) => {
+        const q = text(req);
+        let cap = 1 << 16, b = X.malloc(cap), n = X.th_call(q, b, cap);
+        if (n < 0) { X.free(b); cap = -n; b = X.malloc(cap); n = X.th_call(q, b, cap); }
+        out.push([`${JSON.parse(req).fn}.${i}`, cstr(b)]);
+        X.free(b);
+        X.free(q);
+      });
+      return true;
+    }
     case 'meter': {
       const cap = 1024, buf = X.malloc(4 * cap), buf2 = X.malloc(4 * cap), dbl = X.malloc(8 * 32);
       for (const top of nums('tops'))

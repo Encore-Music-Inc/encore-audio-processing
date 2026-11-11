@@ -67,6 +67,7 @@
 #include "dsp/Tempo.h"
 #include "dsp/TruePeak.h"
 #include "dsp/TunerPitch.h"
+#include "dsp/TheoryCalls.h"
 #include "dsp/VocalEq.h"
 #include "dsp/Waveform.h"
 #include "dsp/Yin.h"
@@ -1239,6 +1240,17 @@ namespace
             }
             tp.finish();
             out.push_back ({ "truePeak", (double) tp.truePeak (-1) });
+        }
+        else if (op == "theory")
+        {
+            // each request's answer, named by its function and its place in the list
+            const auto& requests = c.find ("requests")->items;
+            for (size_t i = 0; i < requests.size(); ++i)
+            {
+                const auto q = vs::theorycalls::parse (requests[i].str);
+                const auto* fn = q ? q->get ("fn") : nullptr;
+                out.push_back ({ (fn ? fn->s : std::string ("?")) + "." + std::to_string (i), vs::theorycalls::call (requests[i].str) });
+            }
         }
         else if (op == "scale-library")
         {

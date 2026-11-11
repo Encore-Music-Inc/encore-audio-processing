@@ -17,7 +17,10 @@ All the audio processing shared by ENCORE.'s products, as header-only C++20:
 - **Rhythm:** tap tempo and the tempo finder, note onsets, timing against a
   click, and the metronome.
 - **Sound:** the synth, the sampler, the drum synthesizer and the metronome's clicks.
-- **Music vocabulary:** note names, keys, Hz and MIDI, the scale library, and
+- **Music vocabulary:** note names, keys, Hz and MIDI, the scale library,
+  chords (naming notes, numerals, the chords of a key and the moves between
+  them, shapes on fretted instruments and the piano), scales (spelling, modes,
+  which scale fits a chord or a progression, patterns on a fretted neck), and
   editing notes on a beat grid.
 
 Each thing has one implementation here, and products use it rather than keep
@@ -47,6 +50,7 @@ dsp/lite/JuceLite.h   a small stand-in for the JUCE pieces the headers use, for 
 tools/tunings.py      the one list of the tuner's instruments, tunings, temperaments and
                       reference pitches; writes dsp/Tunings.h and data/tunings.json
 tools/scales.py       the one list of the scale library; writes dsp/ScaleLibrary.h and data/scales.json
+tools/chords.py       the one list of chord types; writes dsp/ChordTypes.h and data/chords.json
 tools/reference.py    the reference set: cases, tolerances and their reasons; writes data/reference.json
 data/*.json           those lists for the browser
 wasm/api_*.cpp        the browser engine: plain C functions, one file per area (below)
@@ -118,6 +122,11 @@ CI fails if either differs from what the script writes.
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library |
+| | `ChordTypes.h` | the chord types: formulas, symbols, numerals, families, the picker's groups |
+| | `Harmony.h` | chords: degrees, symbols, naming a set of notes, numerals, the map of a key, key changes, the moves between chords and the facts behind them, transposing |
+| | `Voicings.h` | chord shapes on fretted instruments (courses, fingerings, the shape search, capo choices) and the piano |
+| | `ScaleTheory.h` | scales on a root: spelling, steps, comparing, modes and parents, the chords they build, which scale fits a chord or a progression, the neck (box positions, notes per string) |
+| | `TheoryCalls.h` | the theory as JSON requests and answers, for the browser and the reference set |
 | | `Scales.h` | pitch correction's keys, scales and harmony intervals |
 | | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids |
 
@@ -137,8 +146,9 @@ CI fails if either differs from what the script writes.
 | `wasm/api_rhythm.cpp` | `rh_` | tempo, onsets, timing, the beat grid's meters (groupings, accents, note values, subdivisions, tempo names) |
 | `wasm/api_sound.cpp` | `sd_` | the drums and the metronome (its sounds, its click engine and mending its settings) |
 | `wasm/api_music.cpp` | `mu_` | note names, spelled notes and the sounds they make, keys and the key lists, Hz and MIDI, note editing on a grid |
+| `wasm/api_theory.cpp` | `th_` | the chord and scale theory: one function that answers a JSON request (`dsp/TheoryCalls.h` lists them) |
 
-The lists (tunings, scales, presets) are the `data/*.json` files, not functions.
+The lists (tunings, scales, presets, chord types) are the `data/*.json` files, not functions.
 
 ## Using it in a product
 

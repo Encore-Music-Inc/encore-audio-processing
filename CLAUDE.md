@@ -8,7 +8,8 @@ and mastering (EQ, dynamics, reverb, the mastering chain and whole-song
 mastering, dither, channel work), pitch (detection, correction, the tuner, voice
 tracking, drum tuning), rhythm (tempo, onsets, timing, the metronome), sound
 (the drum synthesizer and the clicks) and music vocabulary (note names, keys,
-the scale library). It returns numbers; the words people see are the products'.
+the scale library, chords and scales). It returns numbers; the words people
+see are the products'.
 
 ## What uses it
 
@@ -59,6 +60,7 @@ the scale library). It returns numbers; the words people see are the products'.
 | `dsp/lite/JuceLite.h` | stand-in for the JUCE pieces the headers use, for builds without JUCE. Don't delete it: the wasm build needs it |
 | `tools/tunings.py` | the one list of the tuner's instruments, tunings, temperaments and reference pitches; writes `dsp/Tunings.h` and `data/tunings.json` |
 | `tools/scales.py` | the one list of the scale library; writes `dsp/ScaleLibrary.h` and `data/scales.json` |
+| `tools/chords.py` | the one list of chord types (formulas, symbols, numerals, the picker's groups); writes `dsp/ChordTypes.h` and `data/chords.json` |
 | `tools/presets.py` | the one list of the chains' presets (Vox, Verb, Equalize, Master, Strum); writes `dsp/Presets.h` and `data/presets.json` |
 | `dsp/third_party/signalsmith` | Signalsmith Stretch and the part of its linear library it uses (MIT, vendored; THIRD-PARTY-NOTICES.md); its transforms run on `Fft.h` (`TimeStretch.h`), so don't call its own FFT |
 | `tools/reference.py`, `data/reference.json` | the reference set: the cases (inputs made by `dsp/ReferenceSignals.h` with integer arithmetic, so every build makes the same samples), each result's tolerance and its reason; it writes `data/reference.json` from this repository's own results |
@@ -137,6 +139,11 @@ The headers, by area (each header's top comment says more):
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library (written by `tools/scales.py`) |
+| | `ChordTypes.h` | the chord types (written by `tools/chords.py`) |
+| | `Harmony.h` | chords: naming notes, numerals, the map of a key, key changes, the moves between chords and their facts, transposing |
+| | `Voicings.h` | chord shapes on fretted instruments and the piano |
+| | `ScaleTheory.h` | scales on a root: spelling, modes, their chords, which scale fits a chord or a progression, the neck |
+| | `TheoryCalls.h` | the theory as JSON requests and answers (the browser's `th_call`, and the reference set) |
 | | `Scales.h` | pitch correction's keys, scales and harmony intervals |
 | | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids |
 
@@ -148,8 +155,9 @@ own (`pr_*`), `api_pitch.cpp` pitch (`pi_*`), `api_tuner.cpp` the tuner
 (`tp_*`), `api_rhythm.cpp` rhythm and the beat grid's meters (`rh_*`),
 `api_sound.cpp` sounds and the metronome's settings (`sd_*`), `api_music.cpp`
 music vocabulary and note editing (`mu_*`), `api_effects.cpp` the effects
-(`fx_*`), `api_instruments.cpp` the synth and the sampler (`in_*`). The lists
-(scales, tunings, presets) are `data/*.json`
+(`fx_*`), `api_instruments.cpp` the synth and the sampler (`in_*`),
+`api_theory.cpp` the chord and scale theory (`th_*`). The lists
+(scales, tunings, presets, chord types) are `data/*.json`
 files, not functions. A new area is a new file with its own prefix.
 
 ## Consumers

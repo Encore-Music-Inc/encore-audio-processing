@@ -177,7 +177,7 @@ def rule(op, name):
         # Subdivision fractions are divisions (3/5, 5/6): MSVC's /fp:fast rounds them in the
         # last place; every other meter result is a whole number or a word.
         return "music-math" if parts[0] == "sub" and stem == "f" else "exact"
-    if op == "scale-library":
+    if op in ("scale-library", "theory"):
         return "exact"
     if op == "downsample":
         return "box"
@@ -488,6 +488,74 @@ case("processing/limiter/mono-slow-release", "limiter", signal(48000, 3, 1, *HOT
 case("music/words", "music", parse=["F#", "Bb", "Cbb", "Gx", "H", "F# minor", "Bbm", "C#/Db major", "e"],
      hz=[27.5, 100, 440, 1000, 4186], midi=[21, 60, 69, 108])
 case("music/scale-library", "scale-library", native=True)
+
+# ---- the chord and scale theory: requests to dsp/TheoryCalls.h (th_call in the browser), each
+# answer as JSON text with its numbers rounded to nine decimals, so every build writes the same text
+
+GUITAR_COURSES = [{"midi": [m]} for m in (40, 45, 50, 55, 59, 64)]
+UKULELE_COURSES = [{"midi": [m]} for m in (67, 60, 64, 69)]
+BANJO_COURSES = [{"midi": [67], "start": 5}] + [{"midi": [m]} for m in (50, 55, 59, 62)]
+THEORY = [
+    {"fn": "degree", "d": "#11"}, {"fn": "above", "root": "Eb", "d": "b7"},
+    {"fn": "intervalBetween", "a": "C", "b": "F#"}, {"fn": "moveBy", "note": "Bb", "steps": 2, "semis": 4},
+    {"fn": "chordTones", "chord": "F#m7b5/C"}, {"fn": "chordSymbol", "chord": {"root": {"L": 6, "a": -1}, "type": "maj9#11", "bass": None}},
+    {"fn": "parseChord", "text": "C\u00b07"}, {"fn": "parseChord", "text": "H7"}, {"fn": "chordPcs", "chord": "E7#9"},
+    {"fn": "spellRoot", "pc": 6, "type": "min", "side": -1}, {"fn": "spellBass", "pc": 8, "root": "E", "keyTonic": "A", "side": 0},
+    {"fn": "nameNotes", "midis": [48, 52, 55, 58]}, {"fn": "nameNotes", "midis": [40, 55, 60, 64]},
+    {"fn": "nameNotes", "midis": [50, 54, 57, 60, 64], "keyTonic": "G"}, {"fn": "nameNotes", "midis": [48, 51]},
+    {"fn": "nameNotes", "midis": [61, 65, 68], "side": 1}, {"fn": "nameNotes", "midis": [60]},
+    {"fn": "numeralChord", "key": "C major", "rn": "vii\u00b07/V"}, {"fn": "numeralChord", "key": "A minor", "rn": "bVI"},
+    {"fn": "numeralChord", "key": "G major", "rn": "I/3"}, {"fn": "plainNumeral", "key": "C major", "chord": "F#m7b5"},
+    {"fn": "inversionPart", "chord": "C/Bb"}, {"fn": "numeralOf", "key": "C major", "chord": "C7", "next": "F"},
+    {"fn": "numeralOf", "key": "C major", "chord": "C7", "next": "G"},
+    {"fn": "keyPalette", "key": "C major"}, {"fn": "keyPalette", "key": "F# minor"}, {"fn": "keyPalette", "key": "Db major"},
+    {"fn": "modulations", "key": "Eb major"}, {"fn": "modulations", "key": "E minor"},
+    {"fn": "relate", "key": "C major", "from": "G7", "to": "C"}, {"fn": "relate", "key": "C major", "from": "G7", "to": "Am"},
+    {"fn": "relate", "key": "C major", "from": "F", "to": "Fm"}, {"fn": "relate", "key": "C major", "from": "Db7", "to": "C"},
+    {"fn": "relate", "key": "A minor", "from": "E7", "to": "Am"}, {"fn": "relate", "key": "C major", "from": "Bb7", "to": "C"},
+    {"fn": "nextMoves", "key": "C major", "from": "G7"}, {"fn": "nextMoves", "key": "B minor", "from": "Bm", "limit": 12},
+    {"fn": "keyInterval", "from": "C major", "to": "Ab major"}, {"fn": "transposeChord", "chord": "D7/F#", "steps": 2, "semis": 3},
+    {"fn": "keyBySemis", "key": "Eb minor", "semis": 5},
+    {"fn": "frettable", "name": "Guitar (6-string)", "part": "string", "tunings": [[40, 45, 50, 55, 59, 64]]},
+    {"fn": "frettable", "name": "Erhu", "part": "string", "tunings": [[62, 69]]},
+    {"fn": "coursesOf", "midi": [67, 50, 55, 59, 62], "name": "Banjo (5-string)"},
+    {"fn": "coursesOf", "midi": [55, 67, 62, 74, 69, 81, 76, 88], "courses": [2, 2, 2, 2], "name": "Mandolin"},
+    {"fn": "courseNotes", "courses": BANJO_COURSES, "course": 0, "fret": 3, "capo": 0},
+    {"fn": "shapeNotes", "courses": GUITAR_COURSES, "frets": [-1, 3, 2, 0, 1, 0], "capo": 2},
+    {"fn": "ascending", "courses": UKULELE_COURSES}, {"fn": "fingering", "frets": [1, 3, 3, 2, 1, 1]},
+    {"fn": "fretVoicings", "chord": "C", "courses": GUITAR_COURSES}, {"fn": "fretVoicings", "chord": "F#m7b5", "courses": GUITAR_COURSES, "limit": 8},
+    {"fn": "fretVoicings", "chord": "G/B", "courses": GUITAR_COURSES, "capo": 2, "limit": 6},
+    {"fn": "fretVoicings", "chord": "A7", "courses": UKULELE_COURSES}, {"fn": "fretVoicings", "chord": "D", "courses": BANJO_COURSES, "limit": 6},
+    {"fn": "shapeText", "frets": [-1, 10, 12, 12, 11, 10]}, {"fn": "pianoVoicing", "chord": "Cmaj7"},
+    {"fn": "pianoVoicing", "chord": "G7/B", "prev": [48, 60, 64, 67, 71]}, {"fn": "shapeFor", "chord": "Eb", "capo": 3},
+    {"fn": "capoOptions", "chords": ["Eb", "Ab", "Bb", "Cm"], "courses": GUITAR_COURSES},
+    {"fn": "spellScale", "scale": "harmonic_minor", "root": "G#"}, {"fn": "spellScale", "scale": "blues", "root": "Eb"},
+    {"fn": "spellScale", "scale": "whole_tone", "root": "Db"}, {"fn": "readCost", "scale": "ionian", "root": "C#"},
+    {"fn": "easyRoot", "scale": "aeolian", "pc": 3}, {"fn": "simplerRoot", "scale": "ionian", "root": "D#"},
+    {"fn": "stepSizes", "scale": "hungarian_minor"}, {"fn": "stepText", "scale": "hungarian_minor"},
+    {"fn": "compareScales", "a": "dorian", "b": "aeolian"}, {"fn": "compareScales", "a": "blues", "b": "minor_pent"},
+    {"fn": "scalesWithSemis", "semis": [0, 2, 3, 5, 7, 9, 10]}, {"fn": "familyOf", "scale": "altered"},
+    {"fn": "rotations", "scale": "major_pent", "root": "G"}, {"fn": "parentOf", "scale": "lydian_dominant", "root": "F"},
+    {"fn": "familyModes", "scale": "phrygian", "root": "E"}, {"fn": "familyModes", "scale": "blues", "root": "E"},
+    {"fn": "typeForSemis", "semis": [0, 3, 6, 9]}, {"fn": "scaleChords", "scale": "harmonic_minor", "root": "A"},
+    {"fn": "intervalDeg", "a": "C", "b": "A#"}, {"fn": "chordsInside", "scale": "minor_pent", "root": "A"},
+    {"fn": "readChord", "text": "Bb7alt"}, {"fn": "readChord", "text": "Am7/G"},
+    {"fn": "readProgression", "text": "Am7, D7 | Gmaj7 Xyz"},
+    {"fn": "fitOver", "scale": "ionian", "root": "C", "chord": "Cmaj7"}, {"fn": "fitOver", "scale": "altered", "root": "G", "chord": "G7alt"},
+    {"fn": "scalesForChord", "chord": "G7"}, {"fn": "scalesForChord", "chord": "Cm6", "limit": 4},
+    {"fn": "scalesForChord", "chord": "D7", "limit": 4, "context": [7, 9, 11, 0, 2, 4, 6]},
+    {"fn": "scalesForProgression", "chords": ["Am7", "D7", "Gmaj7"]}, {"fn": "scalesForProgression", "chords": ["C7", "F7", "C7", "G7"]},
+    {"fn": "scalesForProgression", "chords": ["Am", "G", "F", "E"]}, {"fn": "scalesForProgression", "chords": ["Bm7b5", "E7b9", "Am7"]},
+    {"fn": "neckNotes", "scale": "minor_pent", "root": "A", "courses": GUITAR_COURSES, "frets": 12},
+    {"fn": "boxPositions", "scale": "minor_pent", "root": "A", "courses": GUITAR_COURSES, "standard": True},
+    {"fn": "boxPositions", "scale": "dorian", "root": "D", "courses": GUITAR_COURSES, "capo": 2, "standard": True},
+    {"fn": "boxPositions", "scale": "ionian", "root": "C", "courses": UKULELE_COURSES},
+    {"fn": "perStringPatterns", "scale": "ionian", "root": "G", "courses": GUITAR_COURSES},
+    {"fn": "perStringPatterns", "scale": "major_pent", "root": "E", "courses": GUITAR_COURSES, "frets": 19},
+    {"fn": "isStandardSix", "courses": GUITAR_COURSES}, {"fn": "upAndDown", "scale": "ionian", "root": "C", "around": 52},
+    {"fn": "nope"}, {"fn": "chordSymbol", "chord": "H"},
+]
+case("music/theory", "theory", requests=[json.dumps(r, separators=(",", ":")) for r in THEORY])
 
 # ---- processors the browser build has no functions for: natively only ("native"; wasm/reference.mjs
 # skips them and says how many)
