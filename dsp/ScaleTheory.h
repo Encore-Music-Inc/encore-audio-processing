@@ -81,7 +81,7 @@ namespace vs::scaletheory
         for (auto r : music::spellings (pc))
         {
             const double c = readCost (scale, r) + (detail::odd (r) ? 3 : 0) + (r.acc != music::plainNote (pc).acc ? 0.1 : 0);
-            if (c < bestCost) { best = r; bestCost = c; }
+            if (harmony::lessScore (c, bestCost)) { best = r; bestCost = c; }
         }
         return best;
     }
@@ -542,7 +542,7 @@ namespace vs::scaletheory
             }
             out.push_back ({ (int) i, c.root, score, f, same });
         }
-        std::stable_sort (out.begin(), out.end(), [] (const ScaleChoice& a, const ScaleChoice& b) { return a.score < b.score; });
+        std::stable_sort (out.begin(), out.end(), [] (const ScaleChoice& a, const ScaleChoice& b) { return harmony::lessScore (a.score, b.score); });
         if ((int) out.size() > limit) out.resize ((size_t) limit);
         return out;
     }
@@ -595,7 +595,7 @@ namespace vs::scaletheory
         for (auto& [p, w] : weight) maxW = std::max (maxW, w);
         {
             auto sorted = weight;
-            std::stable_sort (sorted.begin(), sorted.end(), [] (const auto& a, const auto& b) { return b.second < a.second; });
+            std::stable_sort (sorted.begin(), sorted.end(), [] (const auto& a, const auto& b) { return harmony::lessScore (b.second, a.second); });
             r.tonic = sorted[0].first;
         }
         auto weightOf = [&] (int pc) { for (auto& [p, w] : weight) if (p == pc) return w; return 0.0; };
@@ -661,7 +661,7 @@ namespace vs::scaletheory
                 cands.push_back (ps);
             }
         }
-        std::stable_sort (cands.begin(), cands.end(), [] (const auto& a, const auto& b) { return a.score < b.score; });
+        std::stable_sort (cands.begin(), cands.end(), [] (const auto& a, const auto& b) { return harmony::lessScore (a.score, b.score); });
         std::vector<std::vector<int>> sets;
         for (const auto& c : cands)
         {
@@ -669,7 +669,7 @@ namespace vs::scaletheory
             for (int p : c.pcs) if (! detail::has (set, p)) set.push_back (p);
             std::sort (set.begin(), set.end());
             if (detail::has (sets, set)) continue;
-            if (! r.overall.empty() && c.score > r.overall[0].score + 3.5) break;
+            if (! r.overall.empty() && harmony::lessScore (r.overall[0].score + 3.5, c.score)) break;
             sets.push_back (set);
             r.overall.push_back (c);
             if ((int) r.overall.size() >= limit) break;

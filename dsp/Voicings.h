@@ -277,7 +277,7 @@ namespace vs::voicings
         }
         std::vector<Voicing> sorted;
         for (auto& [k, v] : found) sorted.push_back (v);
-        std::stable_sort (sorted.begin(), sorted.end(), [] (const Voicing& a, const Voicing& b) { return a.score < b.score; });
+        std::stable_sort (sorted.begin(), sorted.end(), [] (const Voicing& a, const Voicing& b) { return harmony::lessScore (a.score, b.score); });
         // no more than four shapes at any one position, so the list covers the neck
         std::map<int, int> perPos;
         std::vector<Voicing> out;
@@ -344,7 +344,7 @@ namespace vs::voicings
                     for (size_t k = 0; k < stack.size(); ++k) cost += std::abs (stack[k] - p[std::min (k, p.size() - 1)]);
                     cost += std::abs (centre - 64) * 0.1;
                 }
-                if (cost < bestCost) { bestCost = cost; best = stack; }
+                if (harmony::lessScore (cost, bestCost)) { bestCost = cost; best = stack; }
             }
         PianoVoicing v;
         v.bass = bass;
@@ -402,7 +402,7 @@ namespace vs::voicings
             for (const auto& c : chords) o.all.push_back (shapeFor (c, capo));
             out.push_back (o);
         }
-        std::stable_sort (out.begin(), out.end(), [] (const CapoOption& a, const CapoOption& b) { return a.score < b.score; });
+        std::stable_sort (out.begin(), out.end(), [] (const CapoOption& a, const CapoOption& b) { return harmony::lessScore (a.score, b.score); });
         return out;
     }
 }

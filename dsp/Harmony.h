@@ -117,6 +117,12 @@ namespace vs::harmony
         return music::noteText (c.root) + typeOf (c).sym + (c.bass ? "/" + music::noteText (*c.bass) : std::string());
     }
 
+    // Scores and costs are compared rounded to a millionth: they are sums of short
+    // decimals, so two that are equal by the rule tie on every build (compilers
+    // round the sums differently in the last place) and the order they were found decides.
+    inline long long scoreKey (double v) { return std::llround (v * 1e6); }
+    inline bool lessScore (double a, double b) { return scoreKey (a) < scoreKey (b); }
+
     namespace detail
     {
         // a note name at the start of s: a letter and up to two accidentals (as chord symbols write them)
@@ -213,7 +219,7 @@ namespace vs::harmony
             double cost = 0;
             for (const auto& t : chords::types[(size_t) type].tones) cost += detail::accCost (above (r, degreeOf (t)));
             if (! (r == plain)) cost += 0.05;
-            if (cost < bestCost) { best = r; bestCost = cost; }
+            if (lessScore (cost, bestCost)) { best = r; bestCost = cost; }
         }
         return best;
     }
@@ -478,20 +484,20 @@ namespace vs::harmony
             const std::string k = std::to_string (m.rootPc) + ":" + std::to_string (m.type) + ":" + (m.foreign ? "f" : "");
             auto it = std::find_if (best.begin(), best.end(), [&] (const auto& b) { return b.first == k; });
             if (it == best.end()) best.push_back ({ k, m });
-            else if (it->second.cost > m.cost) it->second = m;
+            else if (lessScore (m.cost, it->second.cost)) it->second = m;
         }
         std::vector<detail::Match> list;
         for (auto& b : best) list.push_back (b.second);
         std::stable_sort (list.begin(), list.end(), [] (const auto& a, const auto& b)
         {
-            if (a.cost != b.cost) return a.cost < b.cost;
+            if (scoreKey (a.cost) != scoreKey (b.cost)) return lessScore (a.cost, b.cost);
             return a.missing.size() < b.missing.size();
         });
         std::vector<std::string> seen;
         std::vector<NoteSetName> out;
         for (const auto& m : list)
         {
-            if (m.cost > list[0].cost + 3.6) break;
+            if (lessScore (list[0].cost + 3.6, m.cost)) break;
             auto r = detail::describe (m, keyTonic, side);
             if (detail::contains (seen, r.symbol)) continue;
             seen.push_back (r.symbol);
@@ -1073,7 +1079,7 @@ namespace vs::harmony
             seen.push_back (s);
             all.push_back ({ relate (key, from, e.chord, &p), e });
         }
-        std::stable_sort (all.begin(), all.end(), [] (const NextMove& x, const NextMove& y) { return y.relation.score < x.relation.score; });
+        std::stable_sort (all.begin(), all.end(), [] (const NextMove& x, const NextMove& y) { return lessScore (y.relation.score, x.relation.score); });
         std::vector<NextMove> out;
         int perRoot[12] {};
         for (const auto& m : all)
