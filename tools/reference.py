@@ -155,7 +155,11 @@ def rule(op, name):
         return "seconds"
     if op == "music":
         return "music-math" if stem in ("hzToMidi", "midiToHz") else "exact"
-    if op in ("scale-library", "meter"):
+    if op == "meter":
+        # Subdivision fractions are divisions (3/5, 5/6): MSVC's /fp:fast rounds them in the
+        # last place; every other meter result is a whole number or a word.
+        return "music-math" if parts[0] == "sub" and stem == "f" else "exact"
+    if op == "scale-library":
         return "exact"
     if op == "downsample":
         return "box"

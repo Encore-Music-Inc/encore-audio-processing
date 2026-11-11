@@ -61,11 +61,15 @@ namespace vs
         Resampler (double step, int channels)
             : Resampler ([step] (double) { return step; }, std::max (1.0, step), channels)
         {
-            // the smallest L with step exactly M / L, while the table stays small
+            // the smallest L with step M / L, while the table stays small. Compared to within
+            // 1e-12 of M rather than exactly: a compiler that turns m / l into m * (1 / l)
+            // (MSVC's /fp:fast) would otherwise miss every ratio and fall back to the slower
+            // path, whose position drifts. A step within 1e-12 of M / L is M / L for any
+            // recording (it moves a sample after 1e12 of them).
             for (int l = 1; l <= maxPhases && (long long) l * taps <= maxTable; ++l)
             {
                 const double m = std::round (step * l);
-                if (m >= 1.0 && m <= 1e9 && m / l == step)
+                if (m >= 1.0 && m <= 1e9 && std::abs (step * l - m) <= 1e-12 * m)
                 {
                     phases = l;
                     advance = (long long) m;
