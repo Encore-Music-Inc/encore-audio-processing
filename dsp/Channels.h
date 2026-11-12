@@ -232,7 +232,9 @@ namespace vs
                 for (int i = 0; i < n; ++i)
                 {
                     const float v = ch[c][i];
-                    if (v >= minAbs) { if (v > maxAbs) ch[c][i] = maxAbs; }
+                    // NaN first, by name: a fast-math build may assume no NaN and let it through the comparisons
+                    if (std::isnan (v)) ch[c][i] = 0.0f;
+                    else if (v >= minAbs) { if (v > maxAbs) ch[c][i] = maxAbs; }
                     else if (v <= -minAbs) { if (v < -maxAbs) ch[c][i] = -maxAbs; }
                     else ch[c][i] = 0.0f;
                 }
