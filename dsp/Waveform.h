@@ -160,6 +160,100 @@ namespace vs
             std::vector<double> out;
         };
 
+        // A DAW's waveform picture: the lowest and highest sample of every
+        // block of blockSize samples, per channel, added as audio arrives (a
+        // file read in the background, or a recording as it is made), and read
+        // back for any stretch of samples (a pixel's worth at any zoom) as the
+        // lowest and highest of the blocks it touches.
+        class MinMax
+        {
+        public:
+            struct Range { float lo = 0.0f, hi = 0.0f; };
+
+            void reset (int numChannels, int blockSize = 256, std::int64_t expectedSamples = 0)
+            {
+                size = std::max (1, blockSize);
+                ch = std::max (1, numChannels);
+                lows.assign ((size_t) ch, {});
+                highs.assign ((size_t) ch, {});
+                for (int c = 0; c < ch; ++c)
+                {
+                    lows[(size_t) c].reserve ((size_t) (expectedSamples / size + 1));
+                    highs[(size_t) c].reserve ((size_t) (expectedSamples / size + 1));
+                }
+                partLo.assign ((size_t) ch, 0.0f);
+                partHi.assign ((size_t) ch, 0.0f);
+                inBlock = 0;
+                total = 0;
+            }
+
+            // n more samples of each channel (a missing channel repeats the first)
+            void add (const float* const* chans, int numChans, int n)
+            {
+                for (int i = 0; i < n; ++i)
+                {
+                    for (int c = 0; c < ch; ++c)
+                    {
+                        const float v = chans[std::min (c, numChans - 1)][i];
+                        if (inBlock == 0) { partLo[(size_t) c] = v; partHi[(size_t) c] = v; }
+                        else { partLo[(size_t) c] = std::min (partLo[(size_t) c], v); partHi[(size_t) c] = std::max (partHi[(size_t) c], v); }
+                    }
+                    if (++inBlock == size)
+                    {
+                        for (int c = 0; c < ch; ++c) { lows[(size_t) c].push_back (partLo[(size_t) c]); highs[(size_t) c].push_back (partHi[(size_t) c]); }
+                        inBlock = 0;
+                    }
+                }
+                total += n;
+            }
+
+            int channels() const { return ch; }
+            int blockSize() const { return size; }
+            std::int64_t samples() const { return total; }
+
+            // The lowest and highest of channel c over samples [from, to)
+            Range range (int c, std::int64_t from, std::int64_t to) const
+            {
+                Range r;
+                if (c < 0 || c >= ch || to <= from) return r;
+                const auto& lo = lows[(size_t) c];
+                const auto& hi = highs[(size_t) c];
+                const std::int64_t full = (std::int64_t) lo.size();
+                std::int64_t b0 = std::max<std::int64_t> (0, from / size), b1 = (to - 1) / size;
+                bool any = false;
+                for (std::int64_t b = b0; b <= b1 && b < full; ++b)
+                {
+                    r.lo = any ? std::min (r.lo, lo[(size_t) b]) : lo[(size_t) b];
+                    r.hi = any ? std::max (r.hi, hi[(size_t) b]) : hi[(size_t) b];
+                    any = true;
+                }
+                if (b1 >= full && inBlock > 0)
+                {
+                    r.lo = any ? std::min (r.lo, partLo[(size_t) c]) : partLo[(size_t) c];
+                    r.hi = any ? std::max (r.hi, partHi[(size_t) c]) : partHi[(size_t) c];
+                }
+                return r;
+            }
+
+            // The largest |x| of every channel so far
+            float peak() const
+            {
+                float p = 0.0f;
+                for (int c = 0; c < ch; ++c)
+                {
+                    const auto r = range (c, 0, total);
+                    p = std::max ({ p, std::abs (r.lo), std::abs (r.hi) });
+                }
+                return p;
+            }
+
+        private:
+            int size = 256, ch = 1, inBlock = 0;
+            std::int64_t total = 0;
+            std::vector<std::vector<float>> lows, highs;
+            std::vector<float> partLo, partHi;
+        };
+
         // A song's shape in `points` bytes from its block peaks: each point
         // the largest peak of its stretch (blocks are repeated when there are
         // fewer than points), scaled so the loudest point is 255 (silence

@@ -83,8 +83,12 @@ namespace vs
         // Fade curves, as the gain at t from 0 (silent) to 1 (full level):
         // quarterSine sin (t pi / 2) (equal power: a fade out is cos (t pi / 2)),
         // sineSquared sin^2 (t pi / 2) (a Hann half, equal gain: out is cos^2),
-        // linear t (out is 1 - t).
-        enum class FadeCurve { quarterSine, sineSquared, linear };
+        // linear t (out is 1 - t), concave 1 - cos (t pi / 2) (slow start, fast
+        // finish), sCurve (1 - t)(1 - cos (t pi / 2)) + t sin (t pi / 2) (slow at
+        // both ends). Every fade out is the same curve read backwards, 1 - t.
+        // quarterSine is the convex curve (fast start, slow finish) a DAW offers
+        // beside linear, concave and S-curve.
+        enum class FadeCurve { quarterSine, sineSquared, linear, concave, sCurve };
 
         // Where in each sample the curve is read: sample k of a len-sample fade
         // (counted from the silent end) is at t = k / len (start: the silent
@@ -98,9 +102,37 @@ namespace vs
             {
                 case FadeCurve::sineSquared: { const double s = std::sin (t * 3.141592653589793 / 2); return s * s; }
                 case FadeCurve::linear:      return t;
+                case FadeCurve::concave:     return 1.0 - std::cos (t * 3.141592653589793 / 2);
+                case FadeCurve::sCurve:      return (1.0 - t) * (1.0 - std::cos (t * 3.141592653589793 / 2)) + t * std::sin (t * 3.141592653589793 / 2);
                 case FadeCurve::quarterSine: break;
             }
             return std::sin (t * 3.141592653589793 / 2);
+        }
+
+        // The same curves in single precision, number for number as Tracktion
+        // Engine renders a clip's fades and crossfades (the angle in double, the
+        // sine in float), so songs saved with them sound the same.
+        inline float fadeGainFloat (FadeCurve c, double t)
+        {
+            constexpr double halfPi = 0.5 * 3.141592653589793;
+            constexpr float halfPiF = 0.5f * 3.14159265358979323846f;
+            switch (c)
+            {
+                case FadeCurve::linear:      return (float) t;
+                case FadeCurve::concave:     return 1.0f - std::cos ((float) (t * halfPi));
+                case FadeCurve::sCurve:      { const float a = (float) t; return (1.0f - a) * (1.0f - std::cos (a * halfPiF)) + a * std::sin (a * halfPiF); }
+                case FadeCurve::sineSquared: { const float s = std::sin ((float) (t * halfPi)); return s * s; }
+                case FadeCurve::quarterSine: break;
+            }
+            return std::sin ((float) (t * halfPi));
+        }
+
+        // The two gains of an equal-power crossfade at t (0: all the first, 1:
+        // all the second), the convex curve each way.
+        struct CrossfadeGains { float first, second; };
+        inline CrossfadeGains crossfadeGains (float t)
+        {
+            return { fadeGainFloat (FadeCurve::quarterSine, t), fadeGainFloat (FadeCurve::quarterSine, 1.0f - t) };
         }
 
         // The other side of a crossfade at the same t: the gain of what fades out.
@@ -110,6 +142,8 @@ namespace vs
             {
                 case FadeCurve::sineSquared: { const double s = std::cos (t * 3.141592653589793 / 2); return s * s; }
                 case FadeCurve::linear:      return 1.0 - t;
+                case FadeCurve::concave:
+                case FadeCurve::sCurve:      return fadeGain (c, 1.0 - t);
                 case FadeCurve::quarterSine: break;
             }
             return std::cos (t * 3.141592653589793 / 2);
@@ -166,6 +200,72 @@ namespace vs
             for (int c = 0; c < numCh; ++c)
                 for (int i = 0; i < n; ++i) p = std::max (p, std::abs (ch[c][i]));
             return p;
+        }
+
+        // The RMS level of one channel's n samples (0 for none), every
+        // stride-th value for a channel interleaved with others.
+        inline float rmsOf (const float* x, int n, int stride = 1)
+        {
+            if (n <= 0) return 0.0f;
+            double sum = 0.0;
+            for (int i = 0; i < n; ++i) { const double v = x[(std::ptrdiff_t) i * stride]; sum += v * v; }
+            return (float) std::sqrt (sum / n);
+        }
+
+        // Whether a block is as good as silent: its first, middle and peak
+        // samples all within 1/8000 of zero (about -78 dB), the test a DAW makes
+        // before it skips work on a quiet block.
+        inline bool isNearlySilent (const float* x, int n)
+        {
+            if (n <= 0) return true;
+            constexpr float thresh = 1.0f / 8000.0f;
+            const float* one[1] { x };
+            return std::abs (x[0]) <= thresh && std::abs (x[n / 2]) <= thresh && peakOf (one, 1, n) <= thresh;
+        }
+
+        // A DAW's clean-up after a plugin, number for number as Tracktion Engine's:
+        // every sample closer to zero than minAbs (about -108 dBFS by default), and
+        // every NaN, becomes zero, and any sample beyond maxAbs is held at it.
+        inline void sanitise (float* const* ch, int numCh, int n, float maxAbs, float minAbs = 1.0f / 262144.0f)
+        {
+            for (int c = 0; c < numCh; ++c)
+                for (int i = 0; i < n; ++i)
+                {
+                    const float v = ch[c][i];
+                    // NaN first, by name: a fast-math build may assume no NaN and let it through the comparisons
+                    if (std::isnan (v)) ch[c][i] = 0.0f;
+                    else if (v >= minAbs) { if (v > maxAbs) ch[c][i] = maxAbs; }
+                    else if (v <= -minAbs) { if (v < -maxAbs) ch[c][i] = -maxAbs; }
+                    else ch[c][i] = 0.0f;
+                }
+        }
+
+        // Every NaN sample becomes zero (what a DAW does to each plugin's output)
+        inline void zeroNaN (float* const* ch, int numCh, int n)
+        {
+            for (int c = 0; c < numCh; ++c)
+                for (int i = 0; i < n; ++i)
+                    if (std::isnan (ch[c][i])) ch[c][i] = 0.0f;
+        }
+
+        // Every channel averaged into one (what a detector or an analyser listens to).
+        inline void monoAverage (const float* const* ch, int numCh, int n, float* out)
+        {
+            if (numCh <= 0) { std::fill (out, out + n, 0.0f); return; }
+            for (int i = 0; i < n; ++i)
+            {
+                float m = 0.0f;
+                for (int c = 0; c < numCh; ++c) m += ch[c][i];
+                out[i] = m / (float) numCh;
+            }
+        }
+
+        // The gain in dB that brings a sample peak to targetDb (0 for silence),
+        // kept within minDb .. maxDb.
+        inline float gainToPeakDb (float peak, float targetDb, float minDb = -60.0f, float maxDb = 24.0f)
+        {
+            if (! (peak > 0.00001f)) return 0.0f;
+            return std::clamp (targetDb - 20.0f * std::log10 (peak), minDb, maxDb);
         }
 
         // The running peak of |v|, NaN-aware as a browser's Math.max is: a NaN

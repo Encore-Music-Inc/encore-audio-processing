@@ -271,6 +271,22 @@ function runMore(c, sig, out) {
       X.ms_wf_destroy(w);
       return true;
     }
+    case 'minmax': {
+      const src = channelsOf(sig);
+      const m = X.ms_minmax_create(src.length, c.size ?? 256);
+      const two = X.malloc(8);
+      blocks(n, block, (s, k) => { const b = alloc(src.map((x) => x.subarray(s, s + k))); X.ms_minmax_add(m, b.table, src.length, k); b.free(); });
+      const columns = c.columns ?? 50;
+      for (let ci = 0; ci < src.length; ci++)
+        for (let col = 0; col < columns; col++) {
+          X.ms_minmax_range(m, ci, Math.trunc(n * col / columns), Math.trunc(n * (col + 1) / columns), two);
+          const r = f32(two, 2);
+          out.push([`c${ci}.lo${col}`, r[0]], [`c${ci}.hi${col}`, r[1]]);
+        }
+      out.push(['peak', X.ms_minmax_peak(m)]);
+      X.free(two); X.ms_minmax_destroy(m);
+      return true;
+    }
     case 'block-peaks': {
       const b = X.ms_wf_blocks_create(c.blockSize ?? 100, block);
       blocks(n, block, (s, k) => { f32(X.ms_wf_blocks_input(b), k).set(sig.l.subarray(s, s + k)); X.ms_wf_blocks_process(b, k); });
@@ -309,6 +325,69 @@ function runMore(c, sig, out) {
       X.pr_resampler_destroy(r);
       out.push(['resampledLength', X.pr_resampled_length(n, fs, to)]);
       fingerprintAudio(out, '', res.map((parts) => { const all = new Float32Array(parts.reduce((a, p) => a + p.length, 0)); let o = 0; for (const p of parts) { all.set(p, o); o += p.length; } return all; }), to);
+      return true;
+    }
+    case 'live-resample': {
+      const step = c.step ?? 1, outBlock = c.block ?? 512, src = channelsOf(sig);
+      const rs = src.map(() => X.pr_live_resampler_create(Math.max(1, step)));
+      out.push(['latency', X.pr_live_resampler_latency(rs[0])]);
+      const inP = X.malloc(4 * (Math.ceil(outBlock * step) + 8)), outP = X.malloc(4 * outBlock);
+      const res = src.map(() => []);
+      let at = 0, owed = 0;
+      while (true) {
+        owed += outBlock * step;
+        const want = Math.trunc(owed);
+        if (at + want > n) break;
+        owed -= want;
+        src.forEach((x, ci) => {
+          f32(inP, want).set(x.subarray(at, at + want));
+          X.pr_live_resampler_process(rs[ci], step, inP, want, outP, outBlock);
+          res[ci].push(f32(outP, outBlock).slice());
+        });
+        at += want;
+      }
+      X.free(inP); X.free(outP); rs.forEach((r) => X.pr_live_resampler_destroy(r));
+      fingerprintAudio(out, '', res.map((parts) => { const all = new Float32Array(parts.length * outBlock); parts.forEach((q, k) => all.set(q, k * outBlock)); return all; }), fs / step);
+      return true;
+    }
+    case 'lpc': {
+      const size = c.size ?? 4096, maxOrder = c.order ?? 12;
+      const wp = X.malloc(8 * size);
+      X.pr_tukey(size, 0.5, wp);
+      const w = f64(wp, size);
+      for (const t of [0, 0.25, 0.5, 0.9]) out.push([`tukey${Math.trunc(t * 100)}`, w[Math.trunc(t * (size - 1))]]);
+      X.free(wp);
+      const xp = X.malloc(4 * size), cp = X.malloc(8 * maxOrder * maxOrder), ep = X.malloc(8 * maxOrder);
+      let b = 0;
+      for (let at = 0; at + size <= n && b < (c.blocks ?? 3); at += size * 7, b++) {
+        const x = i32(xp, size);
+        for (let i = 0; i < size; i++) { const v = Math.fround(sig.l[at + i] * 32767); x[i] = v < 0 ? -Math.round(-v) : Math.round(v); }   // as lround: halves away from zero
+        const count = X.pr_lpc_predictors(xp, size, maxOrder, cp, ep);
+        const coefs = f64(cp, maxOrder * maxOrder), errs = f64(ep, maxOrder);
+        for (let o = 1; o <= count; o++) {
+          const p = `b${b}.o${o}`;
+          out.push([p + '.err', errs[o - 1]], [p + '.a1', coefs[(o - 1) * maxOrder]], [p + '.last', coefs[(o - 1) * maxOrder + o - 1]]);
+        }
+        out.push([`b${b}.orders`, count]);
+      }
+      X.free(xp); X.free(cp); X.free(ep);
+      return true;
+    }
+    case 'levels': {
+      const src = channelsOf(sig);
+      const buf = alloc(src);
+      out.push(['rms', X.pr_rms(buf.ptrs[0], n)], ['silent', X.pr_nearly_silent(buf.ptrs[0], n)]);
+      const quiet = alloc([new Float32Array(n).fill(0.0001)]);
+      out.push(['quietSilent', X.pr_nearly_silent(quiet.ptrs[0], n)]);
+      quiet.free();
+      const mono = X.malloc(4 * n + 4);
+      X.pr_mono_average(buf.table, src.length, n, mono);
+      fingerprintAudio(out, 'mono', [f32(mono, n).slice()], fs);
+      X.free(mono);
+      let peak = 0;
+      for (const x of src) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(x[i]));
+      out.push(['gainDb', X.pr_gain_to_peak_db(peak, -0.3, -60, 24)]);
+      buf.free();
       return true;
     }
     case 'fracdelay': {
@@ -457,6 +536,91 @@ function runMore(c, sig, out) {
       return true;
     }
 
+    // ---- the effects: each one over the input in blocks (stereo out)
+    case 'effect':
+    case 'vocoder': {
+      const fx = c.fx;
+      const res = [Float32Array.from(sig.l), Float32Array.from(stereo ? sig.r : sig.l)];
+      const g = (k, d) => c[k] ?? d;
+      let h, left, right, run;
+      if (fx === 'chorus') {
+        h = X.fx_chorus_create(fs, block); X.fx_chorus_settings(h, g('depthMs', 3), g('speedHz', 1), g('width', 0.5), g('mix', 0.5));
+        left = X.fx_chorus_left; right = X.fx_chorus_right; run = (k) => X.fx_chorus_process(h, k, 1);
+      } else if (fx === 'phaser') {
+        h = X.fx_phaser_create(fs, block); X.fx_phaser_settings(h, g('depth', 5), g('rate', 0.4), g('feedback', 0.7));
+        left = X.fx_phaser_left; right = X.fx_phaser_right; run = (k) => X.fx_phaser_process(h, k, 1);
+      } else if (fx === 'filter') {
+        h = X.fx_filter_create(fs, block); X.fx_filter_settings(h, g('type', 4), g('hz', 1000), g('q', 0.7071), 0, g('slope', 0));
+        left = X.fx_filter_left; right = X.fx_filter_right; run = (k) => X.fx_filter_process(h, k, 1);
+      } else if (fx === 'pitch') {
+        h = X.fx_pitch_create(fs, 2, block); X.fx_pitch_semitones(h, g('semitones', 12));
+        out.push(['latency', X.fx_pitch_latency(h)]);
+        left = X.fx_pitch_left; right = X.fx_pitch_right; run = (k) => X.fx_pitch_process(h, k, 1);
+      } else if (fx === 'comp') {
+        h = X.fx_comp_create(fs, block); X.fx_comp_detail(h, g('threshold', -20), g('ratio', 4), g('attackMs', 5), g('releaseMs', 100), g('makeup', 0), g('rms', 0));
+        left = X.fx_comp_left; right = X.fx_comp_right; run = (k) => X.fx_comp_process(h, k, 1);
+      } else if (fx === 'delay') {
+        h = X.fx_delay_create(fs, block); X.fx_delay_settings(h, g('amount', 0.4), X.fx_delay_seconds(g('time', 2), g('bpm', 120)), g('feedback', 0.35));
+        left = X.fx_delay_left; right = X.fx_delay_right; run = (k) => X.fx_delay_process(h, k);
+      } else if (fx === 'reverb') {
+        h = X.fx_reverb_create(fs, block);
+        X.fx_reverb_settings(h, g('mode', 3), 20, g('decay', 2), 0.5, 8000, 150, 1, 0.3, 0, 0, g('mix', 0.3));
+        left = X.fx_reverb_left; right = X.fx_reverb_right; run = (k) => X.fx_reverb_process(h, k, 1);
+      } else return false;
+      blocks(n, block, (s, k) => {
+        f32(left(h), k).set(res[0].subarray(s, s + k));
+        f32(right(h), k).set(res[1].subarray(s, s + k));
+        run(k);
+        res[0].set(f32(left(h), k), s);
+        res[1].set(f32(right(h), k), s);
+      });
+      X[`fx_${fx}_destroy`](h);
+      fingerprintAudio(out, '', res, fs);
+      return true;
+    }
+
+    // ---- the instruments: a fixed phrase of notes, rendered in blocks
+    case 'instrument': {
+      const len = Math.trunc((c.seconds ?? 3) * fs), beat = Math.trunc(0.25 * fs);
+      const res = [new Float32Array(len), new Float32Array(len)];
+      const phrase = [[0, 48, 0.9, 1], [0, 55, 0.7, 1], [beat, 60, 0.8, 1], [2 * beat, 60, 0, 0], [3 * beat, 64, 0.6, 1], [4 * beat, 48, 0, 0],
+                      [4 * beat, 55, 0, 0], [6 * beat, 64, 0, 0], [6 * beat, 36, 1, 1], [7 * beat, 36, 0, 0]];
+      const synth = c.instrument === 'synth';
+      let h;
+      if (synth) {
+        h = X.in_synth_create(fs, block);
+        X.in_synth_osc(h, 0, 1, 2, 0, 0, -6, 0.5, 3, 12, 0.5, 0);
+        X.in_synth_osc(h, 1, 1, 4, -12, 0, -10, 0.5, 1, 12, 0.5, 0);
+        X.in_synth_filter(h, 1, 0, 1200, 1.5, 0.5, 24, 0);
+        X.in_synth_lfo(h, 0, 0, 5, 0.15, 1);
+      } else {
+        h = X.in_sampler_create(fs, block);
+        const m = Math.min(n, Math.trunc(fs));
+        f32(X.in_sampler_load_left(h, m), m).set(sig.l.subarray(0, m));
+        if (stereo) f32(X.in_sampler_load_right(h, m), m).set(sig.r.subarray(0, m));
+        X.in_sampler_add(h, stereo ? 1 : 0, fs, 60, 30, 90, 0, 0.25, 0, 0, 0.05);
+      }
+      const P = synth ? 'in_synth_' : 'in_sampler_';
+      let next = 0;
+      blocks(len, block, (s, k) => {
+        for (let i = 0; i < k;) {
+          while (next < phrase.length && phrase[next][0] <= s + i) {
+            const [, note, vel, on] = phrase[next++];
+            if (on) X[P + 'note_on'](h, note, vel); else X[P + 'note_off'](h, note);
+          }
+          const until = next < phrase.length ? Math.min(k, phrase[next][0] - s) : k;
+          const m = Math.max(1, until - i);
+          X[P + 'render'](h, m);
+          res[0].set(f32(X[P + 'left'](h), m), s + i);
+          res[1].set(f32(X[P + 'right'](h), m), s + i);
+          i += m;
+        }
+      });
+      X[P + 'destroy'](h);
+      fingerprintAudio(out, '', res, fs);
+      return true;
+    }
+
     // ---- music
     case 'music': {
       for (let m = 0; m < 128; m++) out.push([`name${m}`, mtext((b, cap) => X.mu_note_name(m, 1, b, cap))]);
@@ -507,6 +671,18 @@ function runMore(c, sig, out) {
         out.push([name, Array.from({ length: X.mu_key_count(minor) }, (_, i) => mtext((b, cap) => X.mu_key_tonic(minor, i, b, cap))).join(' ')]);
       return true;
     }
+    case 'theory': {
+      // each request's answer from th_call, named as the native results are
+      nums('requests').forEach((req, i) => {
+        const q = text(req);
+        let cap = 1 << 16, b = X.malloc(cap), n = X.th_call(q, b, cap);
+        if (n < 0) { X.free(b); cap = -n; b = X.malloc(cap); n = X.th_call(q, b, cap); }
+        out.push([`${JSON.parse(req).fn}.${i}`, cstr(b)]);
+        X.free(b);
+        X.free(q);
+      });
+      return true;
+    }
     case 'meter': {
       const cap = 1024, buf = X.malloc(4 * cap), buf2 = X.malloc(4 * cap), dbl = X.malloc(8 * 32);
       for (const top of nums('tops'))
@@ -554,6 +730,33 @@ function runMore(c, sig, out) {
         [sp, gp, ap, subp].forEach((p) => X.free(p));
       });
       [buf, buf2, dbl].forEach((p) => X.free(p));
+      return true;
+    }
+    case 'laws': {
+      const two = X.malloc(8);
+      const laws = ['linear', '3dB', '2.5dB', '4.5dB', '6dB'];
+      laws.forEach((name, law) => (c.pans ?? []).forEach((pan, i) => {
+        X.pr_pan_gains(0.8, pan, law, two);
+        const g = f32(two, 2);
+        out.push([`pan.${name}.${i}.l`, g[0]], [`pan.${name}.${i}.r`, g[1]]);
+      }));
+      (c.positions ?? []).forEach((p, i) => out.push([`fader.pos${i}.db`, X.ms_fader_position_to_db(p)], [`fader.pos${i}.gain`, X.ms_fader_position_to_gain(p)]));
+      (c.dbs ?? []).forEach((db, i) => out.push([`fader.db${i}.pos`, X.ms_db_to_fader_position(db)],
+                                                [`fader.db${i}.fromGain`, X.ms_gain_to_fader_position(Math.fround(Math.pow(10, db * 0.05)))]));
+      for (let curve = 0; curve < 5; curve++)
+        (c.ts ?? []).forEach((t, i) => out.push([`fade.${curve}.${i}.gain`, X.pr_fade_gain(curve, t)], [`fade.${curve}.${i}.out`, X.pr_fade_out_gain(curve, t)],
+                                                [`fade.${curve}.${i}.float`, X.pr_fade_gain_float(curve, t)]));
+      (c.ts ?? []).forEach((t, i) => { X.pr_crossfade_gains(t, two); const g = f32(two, 2); out.push([`xfade.${i}.first`, g[0]], [`xfade.${i}.second`, g[1]]); });
+      (c.curves ?? []).forEach((amount, k) => (c.xs ?? []).forEach((x, i) => out.push(
+        [`curve.up.${k}.${i}`, X.pr_curve_value(x, 0, 0.2, amount, 1, 0.9)], [`curve.down.${k}.${i}`, X.pr_curve_value(x, 0, 0.9, amount, 1, 0.2)])));
+      out.push(['tempo.min', X.rh_tempo_min()], ['tempo.max', X.rh_tempo_max()]);
+      (c.bpms ?? []).forEach((bpm, i) => out.push([`tempo.clamp${i}`, X.rh_clamp_tempo(bpm)], [`tempo.is${i}`, X.rh_is_tempo(bpm)]));
+      (c.hzs ?? []).forEach((hz, i) => out.push([`axis.hz${i}`, X.ms_axis_log_position(hz, 20, 20000)]));
+      (c.positions ?? []).forEach((p, i) => out.push([`axis.at${i}`, X.ms_axis_log_hz(p, 20, 20000)]));
+      const pb = c.playback ?? [];
+      for (let i = 0; i + 3 < pb.length; i += 4) out.push([`playback${i / 4}`, X.ms_playback_gain(pb[i], pb[i + 1], pb[i + 2], pb[i + 3], -1)]);
+      (c.rates ?? []).forEach((rate, i) => out.push([`tuner.stride${i}`, X.tp_window_stride(rate)], [`tuner.n${i}`, X.tp_window_length(rate)]));
+      X.free(two);
       return true;
     }
     case 'downsample': {

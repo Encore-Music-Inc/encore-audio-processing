@@ -11,6 +11,8 @@
 #include <emscripten/emscripten.h>
 #include <cstdint>
 #include <vector>
+#include "dsp/ResonanceFinder.h"
+#include "dsp/Meters.h"
 #include "dsp/Analysis.h"
 #include "dsp/LoudnessReport.h"
 #include "dsp/Spectrum.h"
@@ -423,5 +425,70 @@ extern "C"
         out[0] = runs; out[1] = longest; out[2] = (double) spots.size();
         for (int k = 0; k < (int) spots.size() && k < maxSpots; ++k) out[3 + k] = spots[(size_t) k].start;
         return (int) spots.size();
+    }
+
+    // ---- Meters on screen. which: 0 level, 1 gain reduction, 2 steady.
+    // ms_meter_step returns what the meter shows next frame.
+    EMSCRIPTEN_KEEPALIVE float ms_meter_step (float shown, float reading, int which)
+    {
+        const auto& b = which == 1 ? vs::meters::gainReduction : which == 2 ? vs::meters::steady : vs::meters::level;
+        vs::meters::step (shown, reading, b);
+        return shown;
+    }
+    EMSCRIPTEN_KEEPALIVE float ms_meter_position (float db, float bottomDb, float topDb, float curve) { return vs::meters::scalePosition (db, bottomDb, topDb, curve); }
+    EMSCRIPTEN_KEEPALIVE void* ms_peak_meter_create (float fallDbPerFrame, float holdMs, float clipDb)
+    {
+        return new vs::meters::PeakMeter ({ fallDbPerFrame, holdMs, clipDb, -100.0f });
+    }
+    EMSCRIPTEN_KEEPALIVE void ms_peak_meter_destroy (void* p) { delete static_cast<vs::meters::PeakMeter*> (p); }
+    // out: [level, hold, clipped]; returns 1 when what the meter shows changed
+    EMSCRIPTEN_KEEPALIVE int ms_peak_meter_step (void* p, float readingDb, double nowMs, float* out)
+    {
+        auto* m = static_cast<vs::meters::PeakMeter*> (p);
+        const bool changed = m->step (readingDb, (std::uint32_t) nowMs);
+        out[0] = m->level(); out[1] = m->hold(); out[2] = m->isClipped() ? 1.0f : 0.0f;
+        return changed ? 1 : 0;
+    }
+    EMSCRIPTEN_KEEPALIVE void ms_peak_meter_reset (void* p) { static_cast<vs::meters::PeakMeter*> (p)->reset(); }
+
+    // ---- The band that tames a resonance: out [freq, q, rangeDb, thresholdDb]
+    EMSCRIPTEN_KEEPALIVE void ms_resonance_band (float freq, float prominenceDb, float relDb, float* out)
+    {
+        const auto b = vs::bandFor ({ freq, prominenceDb, relDb });
+        out[0] = b.freq; out[1] = b.q; out[2] = b.rangeDb; out[3] = b.thresholdDb;
+    }
+
+    // ---- The volume fader's law (position 0 .. 1, +6 dB at the top) and the
+    // drawing axes: a log frequency axis from 20 Hz to 20 kHz (0 .. 1) and back.
+    EMSCRIPTEN_KEEPALIVE float ms_fader_position_to_db (float position) { return vs::meters::faderPositionToDb (position); }
+    EMSCRIPTEN_KEEPALIVE float ms_db_to_fader_position (float db) { return vs::meters::dbToFaderPosition (db); }
+    EMSCRIPTEN_KEEPALIVE float ms_fader_position_to_gain (float position) { return vs::meters::faderPositionToGain (position); }
+    EMSCRIPTEN_KEEPALIVE float ms_gain_to_fader_position (float gain) { return vs::meters::gainToFaderPosition (gain); }
+    EMSCRIPTEN_KEEPALIVE float ms_axis_log_position (float hz, float loHz, float hiHz) { return vs::axis::logPosition (hz, loHz, hiHz); }
+    EMSCRIPTEN_KEEPALIVE float ms_axis_log_hz (float position, float loHz, float hiHz) { return vs::axis::logHz (position, loHz, hiHz); }
+
+    // ---- A DAW's waveform picture: the lowest and highest sample of every
+    // block per channel, added as audio arrives (ms_minmax_add takes chans, an
+    // array of numChans float pointers) and read for samples [from, to) of a
+    // channel into out[0] (lowest) and out[1] (highest).
+    EMSCRIPTEN_KEEPALIVE void* ms_minmax_create (int channels, int blockSize)
+    {
+        auto* m = new vs::waveform::MinMax();
+        m->reset (channels, blockSize);
+        return m;
+    }
+    EMSCRIPTEN_KEEPALIVE void ms_minmax_destroy (void* p) { delete static_cast<vs::waveform::MinMax*> (p); }
+    EMSCRIPTEN_KEEPALIVE void ms_minmax_add (void* p, const float* const* chans, int numChans, int n) { static_cast<vs::waveform::MinMax*> (p)->add (chans, numChans, n); }
+    EMSCRIPTEN_KEEPALIVE void ms_minmax_range (void* p, int channel, double from, double to, float* out)
+    {
+        const auto r = static_cast<vs::waveform::MinMax*> (p)->range (channel, (std::int64_t) from, (std::int64_t) to);
+        out[0] = r.lo; out[1] = r.hi;
+    }
+    EMSCRIPTEN_KEEPALIVE float ms_minmax_peak (void* p) { return static_cast<vs::waveform::MinMax*> (p)->peak(); }
+
+    // ---- The gain (dB) a streaming service applies (vs::loudness::playbackGainDb)
+    EMSCRIPTEN_KEEPALIVE double ms_playback_gain (double lufs, double truePeakDb, double refLufs, int turnsUp, double ceilingDb)
+    {
+        return vs::loudness::playbackGainDb (lufs, truePeakDb, refLufs, turnsUp != 0, ceilingDb);
     }
 }

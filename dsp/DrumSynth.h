@@ -26,6 +26,7 @@
 #include "Music.h"
 #include "Random.h"
 #include "Channels.h"
+#include "Oscillator.h"
 
 namespace vs::drumsynth
 {
@@ -53,18 +54,12 @@ namespace vs::drumsynth
     {
         Buffer x ((size_t) n);
         const double dt = hz / sr;
-        auto blep = [dt] (double t)
-        {
-            if (t < dt) { t /= dt; return t + t - t * t - 1; }
-            if (t > 1 - dt) { t = (t - 1) / dt; return t * t + t + t + 1; }
-            return 0.0;
-        };
         double t = phase0;
         for (int i = 0; i < n; ++i)
         {
             double v = t < 0.5 ? 1 : -1;
-            v += blep (t);
-            v -= blep (std::fmod (t + 0.5, 1.0));
+            v += polyBlep (t, dt);
+            v -= polyBlep (std::fmod (t + 0.5, 1.0), dt);
             x[(size_t) i] = (float) v;
             t += dt;
             if (t >= 1) t -= 1;
@@ -520,14 +515,42 @@ namespace vs::drumsynth
         return nullptr;
     }
 
+    // The kind of drum a General MIDI note is, for standing in: a missing drum
+    // is played by the nearest drum of the same kind, never by whatever
+    // shares its pad
+    enum class DrumKind { none, kick, snare, clap, closedHat, openHat, tom, cymbal, percussion };
+    inline DrumKind drumKind (int note)
+    {
+        switch (note)
+        {
+            case 35: case 36: return DrumKind::kick;
+            case 38: case 40: return DrumKind::snare;
+            case 39: return DrumKind::clap;
+            case 42: case 44: return DrumKind::closedHat;
+            case 46: return DrumKind::openHat;
+            case 41: case 43: case 45: case 47: case 48: case 50: return DrumKind::tom;
+            case 49: case 51: case 52: case 53: case 55: case 57: case 59: return DrumKind::cymbal;
+            case 37: case 54: case 56: return DrumKind::percussion;
+            default: return DrumKind::none;
+        }
+    }
+
     // The sound a kit plays for a General MIDI note: the pad with that note,
-    // else the pad padForNote() stands in with; nullptr for none
+    // else the pad of the same kind of drum nearest in note (the lower on a
+    // tie); nullptr when the kit has none of that kind
     inline const char* kitSound (const Kit& kit, int note)
     {
         for (const auto& p : kit.pads) if (p.note == note) return p.sound;
-        if (const int slot = music::padForNote (note); slot > 0)
-            for (const auto& p : kit.pads) if (p.slot == slot) return p.sound;
-        return nullptr;
+        const auto kind = drumKind (note);
+        if (kind == DrumKind::none) return nullptr;
+        const KitPad* best = nullptr;
+        for (const auto& p : kit.pads)
+            if (drumKind (p.note) == kind && p.sound[0] != 0)
+            {
+                const int d = std::abs (p.note - note), bd = best ? std::abs (best->note - note) : 1000;
+                if (d < bd || (d == bd && best != nullptr && p.note < best->note)) best = &p;
+            }
+        return best != nullptr ? best->sound : nullptr;
     }
 
     // A sound's name for a list: the kit's name and the drum's (the ENCORE.

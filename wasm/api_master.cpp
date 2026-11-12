@@ -111,4 +111,9 @@ extern "C"
         for (int k = 0; k < 3; ++k) l.bandLevelDb[k] = b[k];
         static_cast<Instance*> (p)->chain.lockLearned (l);
     }
+
+    // ---- The loudness targets: how many, each one's id and LUFS
+    EMSCRIPTEN_KEEPALIVE int mc_target_count() { return vs::MasterChain::numTargets; }
+    EMSCRIPTEN_KEEPALIVE const char* mc_target_id (int i) { return vs::MasterChain::targets[std::clamp (i, 0, vs::MasterChain::numTargets - 1)].id; }
+    EMSCRIPTEN_KEEPALIVE float mc_target_lufs (int i) { return vs::MasterChain::targetLufs (i); }
 }

@@ -24,16 +24,21 @@ namespace vs
         return lerp (a, b, f);
     }
 
-    // 4-point cubic (Hermite) interpolation: smoother than a straight line
-    // for a delay that keeps moving.
+    // 4-point cubic (Hermite) interpolation at t (0..1) between x0 and x1
+    inline float hermite (float xm1, float x0, float x1, float x2, float t)
+    {
+        const float c1 = 0.5f * (x1 - xm1), c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2, c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
+        return ((c3 * t + c2) * t + c1) * t + x0;
+    }
+
+    // The same reading a ring at pos: smoother than a straight line for a
+    // delay that keeps moving.
     inline float readHermite (const float* buf, std::int64_t mask, double pos)
     {
         const int i0 = (int) std::floor (pos);
         const float t = (float) (pos - i0);
         auto at = [buf, mask] (std::int64_t i) { return buf[(size_t) (i & mask)]; };
-        const float xm1 = at (i0 - 1), x0 = at (i0), x1 = at (i0 + 1), x2 = at (i0 + 2);
-        const float c1 = 0.5f * (x1 - xm1), c2 = xm1 - 2.5f * x0 + 2.0f * x1 - 0.5f * x2, c3 = 0.5f * (x2 - xm1) + 1.5f * (x0 - x1);
-        return ((c3 * t + c2) * t + c1) * t + x0;
+        return hermite (at (i0 - 1), at (i0), at (i0 + 1), at (i0 + 2), t);
     }
 
     // A delay line: a power-of-two ring of floats and its write position.

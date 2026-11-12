@@ -305,8 +305,14 @@ namespace
                 d::soundName ("boomKick") == "Boom: Kick" && d::soundName ("kick") == "Kick" && d::soundName ("studioFloorTom") == "Studio: Low floor tom"
                     && d::soundName ("rim") == "Side stick" && d::soundName ("shaker") == "Shaker");
         const auto* encore = d::findKit ("encore");
-        expect ("a note without a pad plays the pad standing in for it (ride on the crash)", encore && std::string (d::kitSound (*encore, 51)) == "crash"
+        expect ("a note without a pad plays the nearest drum of its kind (ride on the crash)", encore && std::string (d::kitSound (*encore, 51)) == "crash"
                                                                                            && d::kitSound (*encore, 81) == nullptr);
+        const auto* club = d::findKit ("club");
+        const auto* boom = d::findKit ("boom");
+        expect ("a stand-in is always the same kind of drum (a tom for a tom, no cymbal from a cowbell)",
+                club && boom && std::string (d::kitSound (*club, 41)) == "clubTom" && std::string (d::kitSound (*club, 45)) == "clubTom"
+                    && d::kitSound (*boom, 49) == nullptr && d::kitSound (*boom, 51) == nullptr
+                    && std::string (d::kitSound (*encore, 41)) == "lowTom" && std::string (d::kitSound (*encore, 45)) == "lowTom");
     }
 
     struct DrumPrint { const char* id; int length; double absSum; };

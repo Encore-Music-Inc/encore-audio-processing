@@ -27,6 +27,14 @@
 #include <variant>
 #include <vector>
 #include "dsp/AbCompare.h"
+#include "dsp/Chorus.h"
+#include "dsp/Phaser.h"
+#include "dsp/Sampler.h"
+#include "dsp/Synth.h"
+#include "dsp/TimeStretch.h"
+#include "dsp/Mix.h"
+#include "dsp/Lpc.h"
+#include "dsp/Meters.h"
 #include "dsp/Analysis.h"
 #include "dsp/Channels.h"
 #include "dsp/Compressor.h"
@@ -59,6 +67,7 @@
 #include "dsp/Tempo.h"
 #include "dsp/TruePeak.h"
 #include "dsp/TunerPitch.h"
+#include "dsp/TheoryCalls.h"
 #include "dsp/VocalEq.h"
 #include "dsp/Waveform.h"
 #include "dsp/Yin.h"
@@ -571,6 +580,26 @@ namespace
             if (o.rms) stat ("rms", w.rms());
             if (o.bands) stat ("bands", w.bands());
         }
+        else if (op == "minmax")
+        {
+            // a DAW's waveform picture: added a block at a time, read in equal stretches
+            vs::waveform::MinMax mm;
+            mm.reset (in->channels, (int) c.get ("size", 256));
+            blocks (n, block, [&] (std::int64_t s, int k)
+            {
+                const float* ch[2] { in->l.data() + s, stereo ? in->r.data() + s : in->l.data() + s };
+                mm.add (ch, in->channels, k);
+            });
+            const int columns = (int) c.get ("columns", 50);
+            for (int ci = 0; ci < in->channels; ++ci)
+                for (int col = 0; col < columns; ++col)
+                {
+                    const auto r = mm.range (ci, n * col / columns, n * (col + 1) / columns);
+                    out.push_back ({ "c" + std::to_string (ci) + ".lo" + std::to_string (col), (double) r.lo });
+                    out.push_back ({ "c" + std::to_string (ci) + ".hi" + std::to_string (col), (double) r.hi });
+                }
+            out.push_back ({ "peak", (double) mm.peak() });
+        }
         else if (op == "block-peaks")
         {
             vs::waveform::BlockPeaks b ((int) c.get ("blockSize", 100));
@@ -625,6 +654,71 @@ namespace
             take (r.flush());
             out.push_back ({ "resampledLength", (double) vs::resampledLength ((int) n, fs, to) });
             fingerprintAudio (out, "", res, to);
+        }
+        else if (op == "live-resample")
+        {
+            // played live (a clip at another rate or speed): fixed steps fed a block at a time
+            const double step = c.get ("step", 1.0);
+            const int outBlock = (int) c.get ("block", 512);
+            Channels res ((size_t) in->channels);
+            std::vector<vs::LiveResampler> rs ((size_t) in->channels);
+            for (auto& r : rs) r.prepare (std::max (1.0, step));
+            out.push_back ({ "latency", (double) rs[0].latency() });
+            std::int64_t at = 0;
+            double owed = 0.0;
+            while (true)
+            {
+                owed += outBlock * step;
+                const int want = (int) owed;
+                if (at + want > n) break;
+                owed -= want;
+                for (int ci = 0; ci < in->channels; ++ci)
+                {
+                    const float* src = (ci == 0 ? in->l.data() : in->r.data()) + at;
+                    auto& o = res[(size_t) ci];
+                    o.resize (o.size() + (size_t) outBlock);
+                    rs[(size_t) ci].process (step, src, want, o.data() + o.size() - (size_t) outBlock, outBlock);
+                }
+                at += want;
+            }
+            fingerprintAudio (out, "", res, fs / step);
+        }
+        else if (op == "lpc")
+        {
+            // a lossless encoder's predictors: blocks of the first channel as 16-bit whole numbers, Tukey (0.5)
+            const int size = (int) c.get ("size", 4096), maxOrder = (int) c.get ("order", 12);
+            const auto w = vs::windows::tukey (size, 0.5);
+            for (double t : { 0.0, 0.25, 0.5, 0.9 }) out.push_back ({ "tukey" + std::to_string ((int) (t * 100)), w[(size_t) (t * (size - 1))] });
+            int b = 0;
+            for (std::int64_t at = 0; at + size <= n && b < (int) c.get ("blocks", 3); at += size * 7, ++b)
+            {
+                std::vector<std::int32_t> x ((size_t) size);
+                for (int i = 0; i < size; ++i) x[(size_t) i] = (std::int32_t) std::lround (in->l[(size_t) (at + i)] * 32767.0f);
+                int count = 0;
+                vs::lpc::blockPredictors (x.data(), size, w.data(), maxOrder, [&] (int order, const double* a, double err)
+                {
+                    const auto p = "b" + std::to_string (b) + ".o" + std::to_string (order);
+                    out.push_back ({ p + ".err", err });
+                    out.push_back ({ p + ".a1", a[1] });
+                    out.push_back ({ p + ".last", a[order] });
+                    count = order;
+                });
+                out.push_back ({ "b" + std::to_string (b) + ".orders", (double) count });
+            }
+        }
+        else if (op == "levels")
+        {
+            using namespace vs::channels;
+            const auto chans = copyOf (*in);
+            const auto src = constPointers (chans);
+            out.push_back ({ "rms", (double) rmsOf (in->l.data(), (int) n) });
+            out.push_back ({ "silent", isNearlySilent (in->l.data(), (int) n) ? 1.0 : 0.0 });
+            std::vector<float> quiet ((size_t) n, 0.0001f);
+            out.push_back ({ "quietSilent", isNearlySilent (quiet.data(), (int) n) ? 1.0 : 0.0 });
+            Channels mono (1, std::vector<float> ((size_t) n));
+            monoAverage (src.data(), in->channels, (int) n, mono[0].data());
+            fingerprintAudio (out, "mono", mono, fs);
+            out.push_back ({ "gainDb", (double) gainToPeakDb (peakOf (src.data(), in->channels, (int) n), -0.3f) });
         }
         else if (op == "fracdelay")
         {
@@ -781,6 +875,111 @@ namespace
             fingerprintAudio (out, "", res, fs);
         }
 
+        // ---- the effects: each one over the input in blocks (stereo out)
+        else if (op == "effect" || op == "vocoder")   // vocoder: the pitch shifter, whose single loudest sample has its own tolerance
+        {
+            const std::string fx = c.text ("fx");
+            Channels res (2, std::vector<float> ((size_t) n, 0.0f));
+            for (std::int64_t i = 0; i < n; ++i) { res[0][(size_t) i] = in->l[(size_t) i]; res[1][(size_t) i] = stereo ? in->r[(size_t) i] : in->l[(size_t) i]; }
+            vs::Chorus chorus; vs::Phaser phaser; vs::EqBand band; vs::PitchShift pitch; vs::Compressor comp; vs::Space space;
+            vs::ReverbEngine reverb; vs::Ramp<false> mixAmount;
+            std::vector<float> wl ((size_t) block), wr ((size_t) block);
+            if (fx == "chorus") { chorus.prepare (fs); chorus.setSettings ({ (float) c.get ("depthMs", 3), (float) c.get ("speedHz", 1), (float) c.get ("width", 0.5), (float) c.get ("mix", 0.5) }); }
+            else if (fx == "phaser") { phaser.prepare (fs); phaser.setSettings ({ (float) c.get ("depth", 5), (float) c.get ("rate", 0.4), (float) c.get ("feedback", 0.7) }); }
+            else if (fx == "filter")
+            {
+                band.prepare (fs);
+                vs::EqBand::Settings b; b.type = (int) c.get ("type", vs::EqBand::highCut); b.freq = (float) c.get ("hz", 1000); b.q = (float) c.get ("q", 0.7071); b.slope = (int) c.get ("slope", 0);
+                band.setTarget (b);
+            }
+            else if (fx == "pitch") { pitch.prepare (fs, 2, block); pitch.setSemitones ((float) c.get ("semitones", 12)); out.push_back ({ "latency", (double) pitch.latency() }); }
+            else if (fx == "comp")
+            {
+                comp.prepare (fs);
+                comp.setDetail ({ (float) c.get ("threshold", -20), (float) c.get ("ratio", 4), (float) c.get ("attackMs", 5), (float) c.get ("releaseMs", 100), (float) c.get ("makeup", 0), c.get ("rms", 0) != 0 });
+            }
+            else if (fx == "delay")
+            {
+                space.prepare ({ fs, (std::uint32_t) block, 2u });
+                space.setParams (0.0f, 0.5f, (float) c.get ("amount", 0.4), vs::Space::delaySeconds ((int) c.get ("time", vs::Space::eighth), c.get ("bpm", 120)), (float) c.get ("feedback", 0.35));
+            }
+            else if (fx == "reverb")
+            {
+                reverb.prepare (fs, block);
+                vs::ReverbEngine::Settings rs; rs.mode = (int) c.get ("mode", vs::ReverbEngine::hall); rs.decaySec = (float) c.get ("decay", 2.0);
+                reverb.setSettings (rs);
+                mixAmount.reset (fs, 0.05); mixAmount.setCurrentAndTarget ((float) c.get ("mix", 0.3));
+            }
+            blocks (n, block, [&] (std::int64_t s, int k)
+            {
+                float* ch[2] { res[0].data() + s, res[1].data() + s };
+                if (fx == "chorus") chorus.process (ch, 2, k);
+                else if (fx == "phaser") phaser.process (ch, 2, k);
+                else if (fx == "filter") band.process (ch, 2, 0, k);
+                else if (fx == "pitch") pitch.process (ch, 2, k);
+                else if (fx == "comp") comp.process (ch, 2, k);
+                else if (fx == "delay") space.process (ch, k, true);
+                else if (fx == "reverb")
+                {
+                    reverb.process (ch[0], ch[1], wl.data(), wr.data(), k);
+                    vs::mix::sendMix (mixAmount, ch, 2, wl.data(), wr.data(), k);
+                }
+            });
+            fingerprintAudio (out, "", res, fs);
+        }
+
+        // ---- the instruments: a fixed phrase of notes, rendered in blocks
+        else if (op == "instrument")
+        {
+            const std::string what = c.text ("instrument");
+            const int len = (int) (c.get ("seconds", 3) * fs);
+            Channels res (2, std::vector<float> ((size_t) len, 0.0f));
+            vs::Synth synth; vs::Sampler sampler;
+            struct Ev { int at; int note; float vel; bool on; };
+            const int beat = (int) (0.25 * fs);
+            const std::vector<Ev> phrase { { 0, 48, 0.9f, true }, { 0, 55, 0.7f, true }, { beat, 60, 0.8f, true }, { 2 * beat, 60, 0, false },
+                                           { 3 * beat, 64, 0.6f, true }, { 4 * beat, 48, 0, false }, { 4 * beat, 55, 0, false }, { 6 * beat, 64, 0, false },
+                                           { 6 * beat, 36, 1.0f, true }, { 7 * beat, 36, 0, false } };
+            if (what == "synth")
+            {
+                synth.prepare (fs);
+                vs::Synth::Settings st;
+                st.osc[0].wave = vs::Oscillator::Wave::sawUp; st.osc[0].unison = 3; st.osc[0].detuneCents = 12;
+                st.osc[1] = st.osc[0]; st.osc[1].wave = vs::Oscillator::Wave::square; st.osc[1].semitones = -12; st.osc[1].levelDb = -10; st.osc[1].unison = 1;
+                st.filter.hz = 1200; st.filter.resonance = 1.5f; st.filter.envSemitones = 24; st.filter.keyTrack = 0.5f;
+                st.lfo[0] = { vs::Oscillator::Wave::sine, 5.0f, 0.15f, vs::Synth::LfoTarget::pitch };
+                synth.setSettings (st);
+            }
+            else
+            {
+                sampler.prepare (fs);
+                vs::Sampler::Sound snd;
+                snd.left.assign (in->l.begin(), in->l.begin() + std::min<std::int64_t> (n, (std::int64_t) fs));
+                if (stereo) snd.right.assign (in->r.begin(), in->r.begin() + std::min<std::int64_t> (n, (std::int64_t) fs));
+                snd.sampleRate = fs; snd.rootNote = 60; snd.lowNote = 30; snd.highNote = 90; snd.oneShot = false; snd.pan = 0.25f;
+                sampler.addSound (std::move (snd));
+            }
+            size_t next = 0;
+            blocks (len, block, [&] (std::int64_t s, int k)
+            {
+                for (int i = 0; i < k; )
+                {
+                    while (next < phrase.size() && phrase[next].at <= s + i)
+                    {
+                        const auto& e = phrase[next++];
+                        if (what == "synth") { if (e.on) synth.noteOn (e.note, e.vel); else synth.noteOff (e.note); }
+                        else { if (e.on) sampler.noteOn (e.note, e.vel); else sampler.noteOff (e.note); }
+                    }
+                    const int until = next < phrase.size() ? (int) std::min<std::int64_t> (k, phrase[next].at - s) : k;
+                    const int m = std::max (1, until - i);
+                    if (what == "synth") synth.render (res[0].data() + s + i, res[1].data() + s + i, m);
+                    else sampler.render (res[0].data() + s + i, res[1].data() + s + i, m);
+                    i += m;
+                }
+            });
+            fingerprintAudio (out, "", res, fs);
+        }
+
         // ---- music
         else if (op == "music")
         {
@@ -913,6 +1112,72 @@ namespace
                 out.push_back ({ p + "sub", m.sub });
             }
         }
+        else if (op == "laws")
+        {
+            // the mixer's laws: pan, the volume fader, fade shapes, automation curves, and the ranges and axes products draw with
+            // (results named by each value's place in its list)
+            const auto pans = nums (c, "pans"), positions = nums (c, "positions"), dbs = nums (c, "dbs"), ts = nums (c, "ts"),
+                       curves = nums (c, "curves"), xs = nums (c, "xs"), bpms = nums (c, "bpms"), hzs = nums (c, "hzs"), rates = nums (c, "rates");
+            auto at = [] (size_t i) { return std::to_string (i); };
+            static const char* const panLaws[] { "linear", "3dB", "2.5dB", "4.5dB", "6dB" };
+            for (int law = 0; law < 5; ++law)
+                for (size_t i = 0; i < pans.size(); ++i)
+                {
+                    const auto g = vs::mix::panGains (0.8f, (float) pans[i], (vs::mix::PanLaw) law);
+                    const auto name = std::string ("pan.") + panLaws[law] + "." + at (i);
+                    out.push_back ({ name + ".l", (double) g.left });
+                    out.push_back ({ name + ".r", (double) g.right });
+                }
+            for (size_t i = 0; i < positions.size(); ++i)
+            {
+                out.push_back ({ "fader.pos" + at (i) + ".db", (double) vs::meters::faderPositionToDb ((float) positions[i]) });
+                out.push_back ({ "fader.pos" + at (i) + ".gain", (double) vs::meters::faderPositionToGain ((float) positions[i]) });
+            }
+            for (size_t i = 0; i < dbs.size(); ++i)
+            {
+                out.push_back ({ "fader.db" + at (i) + ".pos", (double) vs::meters::dbToFaderPosition ((float) dbs[i]) });
+                out.push_back ({ "fader.db" + at (i) + ".fromGain", (double) vs::meters::gainToFaderPosition (vs::dbToGain ((float) dbs[i])) });
+            }
+            using vs::channels::FadeCurve;
+            for (int curve = 0; curve < 5; ++curve)
+                for (size_t i = 0; i < ts.size(); ++i)
+                {
+                    const auto name = "fade." + std::to_string (curve) + "." + at (i);
+                    out.push_back ({ name + ".gain", vs::channels::fadeGain ((FadeCurve) curve, ts[i]) });
+                    out.push_back ({ name + ".out", vs::channels::fadeOutGain ((FadeCurve) curve, ts[i]) });
+                    out.push_back ({ name + ".float", (double) vs::channels::fadeGainFloat ((FadeCurve) curve, ts[i]) });
+                }
+            for (size_t i = 0; i < ts.size(); ++i)
+            {
+                const auto g = vs::channels::crossfadeGains ((float) ts[i]);
+                out.push_back ({ "xfade." + at (i) + ".first", (double) g.first });
+                out.push_back ({ "xfade." + at (i) + ".second", (double) g.second });
+            }
+            for (size_t k = 0; k < curves.size(); ++k)
+                for (size_t i = 0; i < xs.size(); ++i)
+                {
+                    out.push_back ({ "curve.up." + at (k) + "." + at (i), (double) vs::curve::valueAt (xs[i], 0.0, 0.2f, (float) curves[k], 1.0, 0.9f) });
+                    out.push_back ({ "curve.down." + at (k) + "." + at (i), (double) vs::curve::valueAt (xs[i], 0.0, 0.9f, (float) curves[k], 1.0, 0.2f) });
+                }
+            out.push_back ({ "tempo.min", vs::tempo::minBpm });
+            out.push_back ({ "tempo.max", vs::tempo::maxBpm });
+            for (size_t i = 0; i < bpms.size(); ++i)
+            {
+                out.push_back ({ "tempo.clamp" + at (i), vs::tempo::clampTempo (bpms[i]) });
+                out.push_back ({ "tempo.is" + at (i), vs::tempo::isTempo (bpms[i]) ? 1.0 : 0.0 });
+            }
+            for (size_t i = 0; i < hzs.size(); ++i) out.push_back ({ "axis.hz" + at (i), (double) vs::axis::logPosition ((float) hzs[i]) });
+            for (size_t i = 0; i < positions.size(); ++i) out.push_back ({ "axis.at" + at (i), (double) vs::axis::logHz ((float) positions[i]) });
+            const auto playback = nums (c, "playback");   // lufs, peak, ref, up in fours
+            for (size_t i = 0; i + 3 < playback.size(); i += 4)
+                out.push_back ({ "playback" + at (i / 4), vs::loudness::playbackGainDb (playback[i], playback[i + 1], playback[i + 2], playback[i + 3] != 0) });
+            for (size_t i = 0; i < rates.size(); ++i)
+            {
+                const auto w = vs::TunerPitch::window (rates[i]);
+                out.push_back ({ "tuner.stride" + at (i), (double) w.stride });
+                out.push_back ({ "tuner.n" + at (i), (double) w.n });
+            }
+        }
         else if (op == "downsample")
         {
             for (double stride : nums (c, "strides"))
@@ -975,6 +1240,51 @@ namespace
             }
             tp.finish();
             out.push_back ({ "truePeak", (double) tp.truePeak (-1) });
+        }
+        else if (op == "host-mix")
+        {
+            // what a DAW does around a hosted plugin and a rack: the ramps, the dry/wet
+            // rule, the clean-up, and a compressor keyed by the other channel
+            const int len = (int) n;
+            auto rampFirst = copyOf (*in);
+            for (auto& c : rampFirst) vs::mix::applyGainRampStepFirst (c.data(), len, 0.2f, 0.9f);
+            fingerprintAudio (out, "rampStepFirst", rampFirst, fs);
+            auto added = copyOf (*in);
+            if (added.size() > 1) vs::mix::addWithGainRamp (added[1].data(), added[0].data(), len, 1.0f, 0.25f);
+            fingerprintAudio (out, "addWithRamp", added, fs);
+            auto wet = copyOf (*in);
+            auto wp = pointers (wet);
+            vs::mix::hostWetGain (0.5f, wp.data(), (int) wet.size(), len);
+            fingerprintAudio (out, "hostWet", wet, fs);
+            auto clean = copyOf (*in);
+            auto cp = pointers (clean);
+            vs::channels::sanitise (cp.data(), (int) clean.size(), len, 0.3f);
+            fingerprintAudio (out, "sanitise", clean, fs);
+            Channels keyed (1, in->l);
+            float* kp[] { keyed[0].data() };
+            const float* key[] { in->channels > 1 ? in->r.data() : in->l.data() };
+            vs::Compressor comp;
+            comp.prepare (fs);
+            comp.setDetail ({ -24.0f, 6.0f, 2.0f, 80.0f, 0.0f, false });
+            for (int s = 0; s < len; s += block)
+            {
+                const int k = std::min (block, len - s);
+                float* bp[] { kp[0] + s };
+                const float* bk[] { key[0] + s };
+                comp.process (bp, 1, k, bk, 1, 0.8f);
+            }
+            fingerprintAudio (out, "keyedCompressor", keyed, fs);
+        }
+        else if (op == "theory")
+        {
+            // each request's answer, named by its function and its place in the list
+            const auto& requests = c.find ("requests")->items;
+            for (size_t i = 0; i < requests.size(); ++i)
+            {
+                const auto q = vs::theorycalls::parse (requests[i].str);
+                const auto* fn = q ? q->get ("fn") : nullptr;
+                out.push_back ({ (fn ? fn->s : std::string ("?")) + "." + std::to_string (i), vs::theorycalls::call (requests[i].str) });
+            }
         }
         else if (op == "scale-library")
         {

@@ -80,10 +80,16 @@ TOLERANCES = {
                  "why": "A processed signal's sum of |x|: filters, envelopes, oversampling and pitch shifting in float, which compilers order and fuse differently, over seconds of audio; 1e-3 is 0.009 dB, far below any audible or setting change."},
     "proc-peak": {"abs": 0, "rel": 1e-3,
                   "why": "A processed signal's peak: as proc-sum."},
+    "vocoder-peak": {"abs": 0, "rel": 0.1,
+                     "why": "A pitch-shifted signal's single loudest sample: the phase vocoder adds up phases over the whole stretch, and float rounding (which compilers order differently) moves where the waves line up, so one sample's height can move a few per cent while the signal's sum and loudness hold to proc-sum and proc-lufs."},
     "proc-lufs": {"abs": 0.005, "rel": 0,
                   "why": "A processed signal's integrated loudness, LUFS: as proc-sum."},
     "box": {"abs": 1e-6, "rel": 1e-6,
             "why": "A block averaged down (the tuner's): double sums of a few samples rounded to float, which compilers may order differently, so a value can move by a float step."},
+    "law": {"abs": 1e-6, "rel": 1e-6,
+            "why": "Gains and positions from the pan, fader, fade and automation laws and the drawing axes: float sin, cos, pow, exp and log, which maths libraries round differently in the last place."},
+    "lpc": {"abs": 1e-7, "rel": 1e-7,
+            "why": "Linear prediction's coefficients and errors: double-precision sums and a cosine window, which maths libraries and compilers round differently in the last places, and the recursion through the orders magnifies that on a block whose predictors are nearly ill-conditioned (MSVC's /fp:fast moves them by about 1e-8). An encoder quantizes the coefficients far more coarsely than this."},
     "dsd": {"abs": 1e-6, "rel": 1e-6,
             "why": "DSD to PCM: the low-pass is designed in double with sin and cos, which maths libraries round differently in the last place, so its float tables can differ in the last place, and a sample (a sum of up to 512 of them) by a few float steps."},
 }
@@ -116,9 +122,17 @@ def rule(op, name):
     parts = name.split(".")
     last = parts[-1]
     stem = last.rstrip("0123456789")
+    if op == "lpc":
+        return "exact" if last == "orders" else "lpc"
     if last in EXACT_WORDS or stem in ("pad", "midi", "trim"):
         return "exact"
-    if op in ("processor", "fades", "channels", "resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab"):
+    if op == "laws":
+        return "exact" if parts[0] in ("tempo", "tuner") else "law"
+    if op == "levels":
+        return {"rms": "level", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
+    if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument"):
+        if op == "vocoder" and last == "peak":
+            return "vocoder-peak"
         if last in ("sum", "peak", "lufs"):
             return {"sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}[last]
         if op == "processor" and parts[0] == "curve":
@@ -149,6 +163,8 @@ def rule(op, name):
         return "spectrum"
     if op == "tonal-balance":
         return "spectrum-db"
+    if op == "minmax":
+        return "exact"
     if op in ("waveform", "block-peaks"):
         return "exact" if parts[0] == "shape" else "level"
     if op == "clip-runs":
@@ -159,7 +175,7 @@ def rule(op, name):
         # Subdivision fractions are divisions (3/5, 5/6): MSVC's /fp:fast rounds them in the
         # last place; every other meter result is a whole number or a word.
         return "music-math" if parts[0] == "sub" and stem == "f" else "exact"
-    if op == "scale-library":
+    if op in ("scale-library", "theory"):
         return "exact"
     if op == "downsample":
         return "box"
@@ -385,12 +401,21 @@ HIGH = signal(96000, 1, 1, tone(1000, 0.3), tone(30000, 0.2), noise(151, 0.02))
 case("processing/resample/48k-to-44k", "resample", VOX, block=4096, to=44100)
 case("processing/resample/44k-to-48k", "resample", SONG, block=4096, to=48000)
 case("processing/resample/96k-to-48k", "resample", HIGH, block=1000, to=48000)
+case("processing/live-resample/44k-to-48k", "live-resample", SONG, step=44100 / 48000, block=512)
+case("processing/live-resample/double-speed", "live-resample", SONG, step=2.0, block=256)
+case("processing/levels/song", "levels", SONG)
+case("analysis/minmax/song", "minmax", SONG, size=256, columns=40, block=1000)
+case("processing/laws", "laws", pans=[-1, -0.5, 0, 0.3, 1], positions=[0, 0.05, 0.5, 1], dbs=[-100, -60, -12, 0, 6],
+     ts=[0, 0.25, 0.5, 0.9, 1], curves=[0, 0.25, -0.4, 0.5, 0.75, -0.9, 1], xs=[0.1, 0.5, 0.8],
+     bpms=[10, 20, 120, 400, 500], hzs=[20, 100, 1000, 20000], rates=[44100, 48000, 96000],
+     playback=[-8, -0.5, -14, 1, -18, -3, -14, 1, -18, -3, -14, 0, -20, -1.5, -16, 1, -14, -1, -14, 1])
+case("processing/lpc/song", "lpc", SONG, size=4096, order=12, blocks=3)
 case("processing/fracdelay/song", "fracdelay", SONG, block=4096, delays=[0.5, 2.25])
 case("processing/decimate/by-2", "decimate", HIGH, block=4096, factor=2)
 case("processing/decimate/by-4", "decimate", HIGH, block=999, factor=4)
 for bits, mode in ((16, 0), (16, 1), (16, 2), (24, 0)):
     case(f"processing/quantize/{bits}bit-{['auto', 'always', 'never'][mode]}", "quantize", SONG, block=4096, bits=bits, mode=mode, seed=7)
-for curve in range(3):
+for curve in range(5):
     case(f"processing/fades/seconds-curve{curve}", "fades", VOX, kind="seconds", curve=curve, **{"in": 0.5, "out": 1.2})
 for point in range(3):
     case(f"processing/fades/samples-point{point}", "fades", VOX, kind="samples", curve=point, point=point, **{"in": 4800, "out": 9600})
@@ -402,6 +427,16 @@ case("processing/vocal-eq/vox", "vocal-eq", VOX, block=512, lowCutHz=90, lowDb=-
      freqs=[60, 200, 3000, 12000])
 case("processing/ab/vox", "ab", VOX, block=512)
 case("processing/ab/song-latency", "ab", SONG, block=1024, latency=64)
+
+# ---- the effects and instruments every product offers
+for fx, params in (("chorus", dict(depthMs=4, speedHz=0.8, width=0.6, mix=0.5)), ("phaser", dict(depth=5, rate=0.5, feedback=0.6)),
+                   ("filter", dict(type=4, hz=900, q=0.7071, slope=1)), ("comp", dict(threshold=-24, ratio=4, attackMs=5, releaseMs=120, makeup=3)),
+                   ("delay", dict(amount=0.5, time=3, bpm=128, feedback=0.4)), ("reverb", dict(mode=3, decay=2.2, mix=0.35))):
+    case(f"effects/{fx}/song", "effect", SONG, block=1024, fx=fx, **params)
+case("effects/pitch/vox-up-octave", "vocoder", VOX, block=512, fx="pitch", semitones=12)
+case("effects/pitch/vox-down-fifth", "vocoder", VOX, block=1024, fx="pitch", semitones=-7)
+case("instruments/synth/phrase", "instrument", None, rate=48000, block=512, instrument="synth", seconds=2.5)
+case("instruments/sampler/vox", "instrument", VOX, block=512, instrument="sampler", seconds=2.5)
 
 # ---- the tuner's block averaging (tp_downsample)
 
@@ -452,6 +487,74 @@ case("music/words", "music", parse=["F#", "Bb", "Cbb", "Gx", "H", "F# minor", "B
      hz=[27.5, 100, 440, 1000, 4186], midi=[21, 60, 69, 108])
 case("music/scale-library", "scale-library", native=True)
 
+# ---- the chord and scale theory: requests to dsp/TheoryCalls.h (th_call in the browser), each
+# answer as JSON text with its numbers rounded to nine decimals, so every build writes the same text
+
+GUITAR_COURSES = [{"midi": [m]} for m in (40, 45, 50, 55, 59, 64)]
+UKULELE_COURSES = [{"midi": [m]} for m in (67, 60, 64, 69)]
+BANJO_COURSES = [{"midi": [67], "start": 5}] + [{"midi": [m]} for m in (50, 55, 59, 62)]
+THEORY = [
+    {"fn": "degree", "d": "#11"}, {"fn": "above", "root": "Eb", "d": "b7"},
+    {"fn": "intervalBetween", "a": "C", "b": "F#"}, {"fn": "moveBy", "note": "Bb", "steps": 2, "semis": 4},
+    {"fn": "chordTones", "chord": "F#m7b5/C"}, {"fn": "chordSymbol", "chord": {"root": {"L": 6, "a": -1}, "type": "maj9#11", "bass": None}},
+    {"fn": "parseChord", "text": "C\u00b07"}, {"fn": "parseChord", "text": "H7"}, {"fn": "chordPcs", "chord": "E7#9"},
+    {"fn": "spellRoot", "pc": 6, "type": "min", "side": -1}, {"fn": "spellBass", "pc": 8, "root": "E", "keyTonic": "A", "side": 0},
+    {"fn": "nameNotes", "midis": [48, 52, 55, 58]}, {"fn": "nameNotes", "midis": [40, 55, 60, 64]},
+    {"fn": "nameNotes", "midis": [50, 54, 57, 60, 64], "keyTonic": "G"}, {"fn": "nameNotes", "midis": [48, 51]},
+    {"fn": "nameNotes", "midis": [61, 65, 68], "side": 1}, {"fn": "nameNotes", "midis": [60]},
+    {"fn": "numeralChord", "key": "C major", "rn": "vii\u00b07/V"}, {"fn": "numeralChord", "key": "A minor", "rn": "bVI"},
+    {"fn": "numeralChord", "key": "G major", "rn": "I/3"}, {"fn": "plainNumeral", "key": "C major", "chord": "F#m7b5"},
+    {"fn": "inversionPart", "chord": "C/Bb"}, {"fn": "numeralOf", "key": "C major", "chord": "C7", "next": "F"},
+    {"fn": "numeralOf", "key": "C major", "chord": "C7", "next": "G"},
+    {"fn": "keyPalette", "key": "C major"}, {"fn": "keyPalette", "key": "F# minor"}, {"fn": "keyPalette", "key": "Db major"},
+    {"fn": "modulations", "key": "Eb major"}, {"fn": "modulations", "key": "E minor"},
+    {"fn": "relate", "key": "C major", "from": "G7", "to": "C"}, {"fn": "relate", "key": "C major", "from": "G7", "to": "Am"},
+    {"fn": "relate", "key": "C major", "from": "F", "to": "Fm"}, {"fn": "relate", "key": "C major", "from": "Db7", "to": "C"},
+    {"fn": "relate", "key": "A minor", "from": "E7", "to": "Am"}, {"fn": "relate", "key": "C major", "from": "Bb7", "to": "C"},
+    {"fn": "nextMoves", "key": "C major", "from": "G7"}, {"fn": "nextMoves", "key": "B minor", "from": "Bm", "limit": 12},
+    {"fn": "keyInterval", "from": "C major", "to": "Ab major"}, {"fn": "transposeChord", "chord": "D7/F#", "steps": 2, "semis": 3},
+    {"fn": "keyBySemis", "key": "Eb minor", "semis": 5},
+    {"fn": "frettable", "name": "Guitar (6-string)", "part": "string", "tunings": [[40, 45, 50, 55, 59, 64]]},
+    {"fn": "frettable", "name": "Erhu", "part": "string", "tunings": [[62, 69]]},
+    {"fn": "coursesOf", "midi": [67, 50, 55, 59, 62], "name": "Banjo (5-string)"},
+    {"fn": "coursesOf", "midi": [55, 67, 62, 74, 69, 81, 76, 88], "courses": [2, 2, 2, 2], "name": "Mandolin"},
+    {"fn": "courseNotes", "courses": BANJO_COURSES, "course": 0, "fret": 3, "capo": 0},
+    {"fn": "shapeNotes", "courses": GUITAR_COURSES, "frets": [-1, 3, 2, 0, 1, 0], "capo": 2},
+    {"fn": "ascending", "courses": UKULELE_COURSES}, {"fn": "fingering", "frets": [1, 3, 3, 2, 1, 1]},
+    {"fn": "fretVoicings", "chord": "C", "courses": GUITAR_COURSES}, {"fn": "fretVoicings", "chord": "F#m7b5", "courses": GUITAR_COURSES, "limit": 8},
+    {"fn": "fretVoicings", "chord": "G/B", "courses": GUITAR_COURSES, "capo": 2, "limit": 6},
+    {"fn": "fretVoicings", "chord": "A7", "courses": UKULELE_COURSES}, {"fn": "fretVoicings", "chord": "D", "courses": BANJO_COURSES, "limit": 6},
+    {"fn": "shapeText", "frets": [-1, 10, 12, 12, 11, 10]}, {"fn": "pianoVoicing", "chord": "Cmaj7"},
+    {"fn": "pianoVoicing", "chord": "G7/B", "prev": [48, 60, 64, 67, 71]}, {"fn": "shapeFor", "chord": "Eb", "capo": 3},
+    {"fn": "capoOptions", "chords": ["Eb", "Ab", "Bb", "Cm"], "courses": GUITAR_COURSES},
+    {"fn": "spellScale", "scale": "harmonic_minor", "root": "G#"}, {"fn": "spellScale", "scale": "blues", "root": "Eb"},
+    {"fn": "spellScale", "scale": "whole_tone", "root": "Db"}, {"fn": "readCost", "scale": "ionian", "root": "C#"},
+    {"fn": "easyRoot", "scale": "aeolian", "pc": 3}, {"fn": "simplerRoot", "scale": "ionian", "root": "D#"},
+    {"fn": "stepSizes", "scale": "hungarian_minor"}, {"fn": "stepText", "scale": "hungarian_minor"},
+    {"fn": "compareScales", "a": "dorian", "b": "aeolian"}, {"fn": "compareScales", "a": "blues", "b": "minor_pent"},
+    {"fn": "scalesWithSemis", "semis": [0, 2, 3, 5, 7, 9, 10]}, {"fn": "familyOf", "scale": "altered"},
+    {"fn": "rotations", "scale": "major_pent", "root": "G"}, {"fn": "parentOf", "scale": "lydian_dominant", "root": "F"},
+    {"fn": "familyModes", "scale": "phrygian", "root": "E"}, {"fn": "familyModes", "scale": "blues", "root": "E"},
+    {"fn": "typeForSemis", "semis": [0, 3, 6, 9]}, {"fn": "scaleChords", "scale": "harmonic_minor", "root": "A"},
+    {"fn": "intervalDeg", "a": "C", "b": "A#"}, {"fn": "chordsInside", "scale": "minor_pent", "root": "A"},
+    {"fn": "readChord", "text": "Bb7alt"}, {"fn": "readChord", "text": "Am7/G"},
+    {"fn": "readProgression", "text": "Am7, D7 | Gmaj7 Xyz"},
+    {"fn": "fitOver", "scale": "ionian", "root": "C", "chord": "Cmaj7"}, {"fn": "fitOver", "scale": "altered", "root": "G", "chord": "G7alt"},
+    {"fn": "scalesForChord", "chord": "G7"}, {"fn": "scalesForChord", "chord": "Cm6", "limit": 4},
+    {"fn": "scalesForChord", "chord": "D7", "limit": 4, "context": [7, 9, 11, 0, 2, 4, 6]},
+    {"fn": "scalesForProgression", "chords": ["Am7", "D7", "Gmaj7"]}, {"fn": "scalesForProgression", "chords": ["C7", "F7", "C7", "G7"]},
+    {"fn": "scalesForProgression", "chords": ["Am", "G", "F", "E"]}, {"fn": "scalesForProgression", "chords": ["Bm7b5", "E7b9", "Am7"]},
+    {"fn": "neckNotes", "scale": "minor_pent", "root": "A", "courses": GUITAR_COURSES, "frets": 12},
+    {"fn": "boxPositions", "scale": "minor_pent", "root": "A", "courses": GUITAR_COURSES, "standard": True},
+    {"fn": "boxPositions", "scale": "dorian", "root": "D", "courses": GUITAR_COURSES, "capo": 2, "standard": True},
+    {"fn": "boxPositions", "scale": "ionian", "root": "C", "courses": UKULELE_COURSES},
+    {"fn": "perStringPatterns", "scale": "ionian", "root": "G", "courses": GUITAR_COURSES},
+    {"fn": "perStringPatterns", "scale": "major_pent", "root": "E", "courses": GUITAR_COURSES, "frets": 19},
+    {"fn": "isStandardSix", "courses": GUITAR_COURSES}, {"fn": "upAndDown", "scale": "ionian", "root": "C", "around": 52},
+    {"fn": "nope"}, {"fn": "chordSymbol", "chord": "H"},
+]
+case("music/theory", "theory", requests=[json.dumps(r, separators=(",", ":")) for r in THEORY])
+
 # ---- processors the browser build has no functions for: natively only ("native"; wasm/reference.mjs
 # skips them and says how many)
 
@@ -491,6 +594,7 @@ native("native/de-esser/vox", VOX, "de-esser", amount=1.0, freq=6500, block=512)
 native("native/pitch-engine/correction", VOX, "pitch-engine", key=0, scale=0, speedMs=20, block=512)
 native("native/pitch-engine/harmony", VOX, "pitch-engine", key=0, scale=0, speedMs=20, harmony=1, interval=3, block=512)
 native("native/body/guitar", GUITAR, "body", block=512)
+case("native/host-mix/song", "host-mix", SONG, block=512, native=True)
 
 
 # ---- writing

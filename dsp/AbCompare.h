@@ -22,6 +22,12 @@ namespace vs
     // Per block: takeOriginal() with the input before it's processed, then
     // mix() with the processed audio (in place), which plays the processed,
     // the matched original, or the crossfade between them.
+    //
+    // Two renders compared after the fact (a whole mastered song against its
+    // mix) can instead set a fixed match: setFixedMatch (gainDb) plays the
+    // processed version at that gain (the difference the caller measured over
+    // the whole of both) and the original as it is; setNoMatch() plays both as
+    // they are. setLiveMatch() returns to matching as described above.
     class AbCompare
     {
     public:
@@ -34,12 +40,18 @@ namespace vs
             delayLen = std::max (0, latencySamples);
             for (auto& d : delay) d.prepare (std::max (1, delayLen));
             matchGain.reset (fs, 0.5);
+            processedGain.reset (fs, 0.03);
+            processedGain.setCurrentAndTarget (match == Match::fixed ? processedGain.getTarget() : 1.0f);
             mixRamp.reset (fs, 0.03);
             mixRamp.setCurrentAndTarget (hearOriginal ? 0.0f : 1.0f);
         }
 
         // true: play the (matched) original
         void setHearOriginal (bool on) { hearOriginal = on; }
+
+        void setLiveMatch() { match = Match::live; processedGain.setTarget (1.0f); }
+        void setFixedMatch (float processedGainDb) { match = Match::fixed; processedGain.setTarget (dbToGain (processedGainDb)); matchGain.setTarget (1.0f); }
+        void setNoMatch() { match = Match::none; processedGain.setTarget (1.0f); matchGain.setTarget (1.0f); }
         bool isHearingOriginal() const { return hearOriginal; }
 
         // The input before processing (r may be null for mono): delayed and measured.
@@ -71,13 +83,22 @@ namespace vs
         void mix (float* l, float* r, int n, float processedShortTerm)
         {
             const float origST = originalMeter.shortTerm.load();
-            if (processedShortTerm > -60.0f && origST > -60.0f)
+            if (match == Match::live && processedShortTerm > -60.0f && origST > -60.0f)
                 matchGain.setTarget (dbToGain (std::clamp (processedShortTerm - origST, -24.0f, 24.0f)));
             mixRamp.setTarget (hearOriginal ? 0.0f : 1.0f);
+            float* ch[2] { l, r };
+            const int nch = r != nullptr ? 2 : 1;
+            if (match != Match::live && (processedGain.isRamping() || processedGain.getTarget() != 1.0f))
+            {
+                // a fixed match: the processed version at its gain, then the crossfade as below
+                for (int i = 0; i < n; ++i)
+                {
+                    const float pg = processedGain.next();
+                    for (int c = 0; c < nch; ++c) ch[c][i] *= pg;
+                }
+            }
             if (mixRamp.isRamping() || mixRamp.getTarget() < 0.5f)
             {
-                float* ch[2] { l, r };
-                const int nch = r != nullptr ? 2 : 1;
                 for (int i = 0; i < n; ++i)
                 {
                     const float m = mixRamp.next(), g = matchGain.next();
@@ -103,7 +124,9 @@ namespace vs
         DelayLine delay[2];
         int delayLen = 0;
         bool hearOriginal = false;
+        enum class Match { live, fixed, none };
+        Match match = Match::live;
         Ramp<true> matchGain;
-        Ramp<false> mixRamp;
+        Ramp<false> mixRamp, processedGain;
     };
 }

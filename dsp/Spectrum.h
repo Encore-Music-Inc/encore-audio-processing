@@ -12,6 +12,17 @@
 
 namespace vs
 {
+    // Drawing axes for a spectrum, an EQ curve or a frequency knob: a log
+    // frequency axis from loHz to hiHz (0 .. 1 across, 20 Hz to 20 kHz unless
+    // given) and its inverse, and a dB axis from -rangeDb to +rangeDb (-1 .. 1).
+    namespace axis
+    {
+        inline float logPosition (float hz, float loHz = 20.0f, float hiHz = 20000.0f) { return std::log (hz / loHz) / std::log (hiHz / loHz); }
+        inline float logHz (float position, float loHz = 20.0f, float hiHz = 20000.0f) { return loHz * std::pow (hiHz / loHz, position); }
+        inline float dbPosition (float db, float rangeDb) { return db / rangeDb; }
+        inline float dbAt (float position, float rangeDb) { return position * rangeDb; }
+    }
+
     // Spectrum analysis: the live analyser the products draw behind an EQ
     // (SpectrumAnalyser); the long-term spectrum (LongTermSpectrum: the one
     // averaged power spectrum, under welch(), CliffFinder and tonalBalance());

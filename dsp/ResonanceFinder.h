@@ -9,6 +9,17 @@ namespace vs
 {
     struct Resonance { float freq = 0.0f, prominenceDb = 0.0f, relDb = 0.0f; };
 
+    // The dynamic band that tames a resonance: at its frequency, Q 5 (about
+    // the width findResonances measures it at), cutting up to its prominence
+    // (3 to 9 dB), starting below the ring's usual level in proportion to how
+    // much it sticks out, so a steady ring is clearly tamed and louder moments
+    // more so (threshold -40 to 0 dB, against relDb's level)
+    struct ResonanceBand { float freq, q, rangeDb, thresholdDb; };
+    inline ResonanceBand bandFor (const Resonance& r)
+    {
+        return { r.freq, 5.0f, std::clamp (r.prominenceDb, 3.0f, 9.0f), std::clamp (r.relDb - 0.5f * r.prominenceDb, -40.0f, 0.0f) };
+    }
+
     // Finds resonances in a long-term average power spectrum: narrow bumps
     // that stand well above their surroundings (ringing drums, boxy guitars,
     // a harsh room mode, a whistly vocal frequency).

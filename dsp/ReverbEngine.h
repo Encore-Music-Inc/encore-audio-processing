@@ -127,6 +127,8 @@ namespace vs
             fade = 0.0f;
         }
 
+        const Settings& getSettings() const { return settings; }
+
         void setSettings (const Settings& s)
         {
             if (s.mode != settings.mode)
