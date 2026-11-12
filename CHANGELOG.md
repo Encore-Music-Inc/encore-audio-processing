@@ -4,6 +4,80 @@ Each release's notes, newest first. When a release is published, the release
 job puts its section on the GitHub release (see "Release notes" in
 `CLAUDE.md`).
 
+## v2.3.0
+
+Adds the effects, instruments, mixer and hosting laws a DAW needs, the
+prediction for a FLAC encoder, a streaming service's playback gain, and chord
+and scale theory, so the plugins, Basement Studio and the browser all use one
+copy. Nothing that worked before changes, except one fix to the drum kits.
+
+### What's new
+- Effects: chorus (`Chorus.h`), phaser (`Phaser.h`), and time stretching and
+  a real-time pitch shifter (`TimeStretch.h`, on Signalsmith Stretch). The
+  compressor gets a general setting and a key input for a sidechain.
+- Instruments: a synth (`Synth.h`: four oscillators with unison, a filter
+  with its own envelope, two LFOs, glide, poly, mono and legato) and a sampler
+  (`Sampler.h`: key ranges, root note, one-shot or released, choke groups).
+- A DAW's mixer and timeline, number for number as Tracktion Engine computes
+  them, so saved songs play the same: pan laws, fixed gain stages and gain
+  ramps (`Mix.h`), the volume fader's law (`Meters.h`), concave and S-curve
+  fades and equal-power crossfades (`Channels.h`), and automation curves
+  (`Ramp.h`).
+- Plugin hosting, the same way: a hosted plugin's dry and wet levels, a
+  rack return's ramps, and the clean-up after a plugin (tiny samples and NaN
+  to zero, loud ones held at a limit).
+- Playback: the resampler's live form for clips at another rate or speed,
+  the click engine's voices for a host's own timeline, and a waveform picture
+  readable at any zoom.
+- Meters (ballistics, peak hold, clip latch, scale), note editing (grid
+  sizes, quantize, transpose, velocities, step grids), an oscillator and an
+  ADSR envelope, and the tempo range.
+- "Hear the original" (`AbCompare`) can compare two renders after the fact,
+  with a fixed loudness match or none. The live match is unchanged.
+- The five chains' presets as one list (`dsp/Presets.h`, `presets.json`).
+- A FLAC encoder's prediction (`lpc::blockPredictors`), in the browser too.
+- A streaming service's playback gain (`loudness::playbackGainDb`): the gain
+  it applies to reach its reference loudness, turning quiet songs up only as
+  far as the true peak allows. In the browser too.
+- Chord and scale theory: the chord types (`ChordTypes.h`, `chords.json`),
+  chord symbols, numerals, the map of a key, key changes and the moves
+  between chords (`Harmony.h`), fretted and piano voicings and capo choices
+  (`Voicings.h`), and scales on a root, their modes and chords, which scale
+  fits a chord or a progression, and positions on a neck (`ScaleTheory.h`).
+  The browser asks all of it through one function, `th_call`. Every build
+  gives the same answers.
+- Browser functions for the effects (`fx_*`), the instruments (`in_*`) and
+  the theory (`th_*`), and more in the existing areas.
+
+### What's fixed
+- A drum kit missing a sound now stands in one of the same kind of drum: Club
+  no longer plays its ride for a floor tom, and Boom no longer plays its
+  cowbell for a ride.
+
+### Downloads
+- `master.wasm`: the browser engine, with `master.wasm.sha256`.
+- `tunings.json`, `scales.json`, `chords.json`, `presets.json`: the tuner's
+  instruments and tunings, the scale library, the chord types and the chains'
+  presets for the browser, each with its `.sha256`.
+- `reference.json`: the reference set, with `reference.json.sha256`.
+
+### Using it
+Pin `external/encore-audio-processing` to `v2.3.0`, then fetch its JUCE by
+path:
+
+```
+git -C external/encore-audio-processing submodule update --init --depth 1 external/JUCE
+```
+
+On Apple systems, link the Accelerate framework (JUCE products already do).
+Green Room pins `master.wasm`, `tunings.json`, `scales.json`, `chords.json`
+and `reference.json` by their SHA-256 and runs `wasm/reference.mjs` on them.
+
+### Built on
+JUCE 9.0.5. `master.wasm` is built without JUCE, with Emscripten 6.0.13.
+
+Questions or problems: support@encoremusic.studio
+
 ## v2.2.0
 
 Adds what a plugin needs to draw the reverb's early reflections and the carve
