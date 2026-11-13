@@ -33,14 +33,7 @@ namespace vs
         // the knee, thresholdDb + over / ratio above it.
         inline float compressedDb (float levelDb, float thresholdDb, float ratio, float kneeDb)
         {
-            const float d = levelDb - thresholdDb;
-            if (2.0f * d < -kneeDb) return levelDb;
-            if (2.0f * std::abs (d) <= kneeDb)
-            {
-                const float t = d + kneeDb * 0.5f;
-                return levelDb + (1.0f / ratio - 1.0f) * t * t / (2.0f * kneeDb);
-            }
-            return thresholdDb + d / ratio;
+            return levelDb - cutDb (levelDb - thresholdDb, 1.0f - 1.0f / ratio, kneeDb);
         }
 
         // Moves a cut (dB, more is deeper) toward its target once per block

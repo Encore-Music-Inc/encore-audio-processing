@@ -9,6 +9,7 @@
 #include "Crossover.h"
 #include "Dynamics.h"
 #include "Loudness.h"
+#include "Spectrum.h"
 #include "Saturator.h"
 #include "ReverbEngine.h"
 #include "Util.h"
@@ -470,18 +471,10 @@ namespace vs
             for (int k = 0; k < numAnalysis; ++k)
                 bandDb[k] = db10 (analysisAcc[k] / std::max (1.0, analysisSeconds * fs));
 
-            auto reference = [] (float f)
-            {
-                float db = 0.0f;
-                if (f < 100.0f) db += 1.5f * std::log2 (100.0f / f) * 0.7f;
-                if (f > 2000.0f) db -= 2.5f * std::log2 (f / 2000.0f);
-                return db;
-            };
-
             double diff[numAnalysis], mean = 0.0;
             for (int k = 0; k < numAnalysis; ++k)
             {
-                diff[k] = reference (analysisFreq (k)) - bandDb[k];
+                diff[k] = finishedMixDb (analysisFreq (k)) - bandDb[k];
                 if (analysisFreq (k) > 150.0f && analysisFreq (k) < 6000.0f) mean += diff[k];
             }
             int midCount = 0;

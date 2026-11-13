@@ -12,6 +12,7 @@
 #include <vector>
 #include "JuceInclude.h"
 #include "Biquad.h"
+#include "Channels.h"
 #include "Convolution.h"
 #include "Fft.h"
 #include "Spectrum.h"
@@ -448,13 +449,12 @@ namespace vs
 
             // keep the start (where a minimum-phase response has its energy),
             // with a gentle fade over the last quarter
-            constexpr float pi = 3.141592653589793238f;
             std::vector<float> ir ((size_t) len);
             const int fadeFrom = len * 3 / 4;
             for (int i = 0; i < len; ++i)
             {
-                float w = 1.0f;
-                if (i >= fadeFrom) w = 0.5f + 0.5f * std::cos (pi * (float) (i - fadeFrom) / (float) (len - fadeFrom));
+                const double t = i >= fadeFrom ? (double) (i - fadeFrom) / (double) (len - fadeFrom) : 0.0;
+                const float w = i >= fadeFrom ? (float) channels::fadeOutGain (channels::FadeCurve::sineSquared, t) : 1.0f;
                 ir[(size_t) i] = (float) re[(size_t) i] * w;
             }
             return ir;

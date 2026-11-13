@@ -133,7 +133,7 @@ namespace vs
             fs = sampleRate;
             // Both detectors average power the same way (10 ms) so their ratio
             // is the true relative level whatever the source's crest factor.
-            avgC = 1.0f - std::exp (-1.0f / (0.01f * (float) fs));
+            avgC = onePole (10.0f, fs);
             envB = envF = 1.0e-9f;
             cutDb = 0.0f;
             bell.prepare (fs, settings.freq, settings.q, -dynamics::noLimit);
@@ -230,7 +230,7 @@ namespace vs
         {
             settings = s;
             const float atkMs = 80.0f - 70.0f * s.speed, relMs = 400.0f - 330.0f * s.speed;
-            envC = 1.0f - std::exp (-1.0f / (0.01f * (float) fs));
+            envC = onePole (10.0f, fs);
             atk = atkMs; rel = relMs;
         }
 
