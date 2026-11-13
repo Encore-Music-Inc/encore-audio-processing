@@ -53,17 +53,10 @@ namespace vs::drumsynth
     inline Buffer squarePolyBlep (double sr, int n, double hz, double phase0 = 0)
     {
         Buffer x ((size_t) n);
-        const double dt = hz / sr;
-        double t = phase0;
-        for (int i = 0; i < n; ++i)
-        {
-            double v = t < 0.5 ? 1 : -1;
-            v += polyBlep (t, dt);
-            v -= polyBlep (std::fmod (t + 0.5, 1.0), dt);
-            x[(size_t) i] = (float) v;
-            t += dt;
-            if (t >= 1) t -= 1;
-        }
+        Oscillator osc;
+        osc.setWave (Oscillator::Wave::square);
+        osc.setPhase (phase0);
+        for (auto& v : x) v = osc.next (hz, sr);
         return x;
     }
 
@@ -100,11 +93,13 @@ namespace vs::drumsynth
     // Starts a sound where it first gets loud (filters ease into a hit)
     inline Buffer onTime (const Buffer& x) { return channels::fromOnset (x); }
 
-    // Peak to `level`, with a short fade at the very end so nothing clicks off
-    inline Buffer finish (const Buffer& in, double level)
+    // Peak to `level`, with a short straight fade over the last fadeLen
+    // samples so nothing clicks off; fromOnset: starting where it first gets
+    // loud (onTime)
+    inline Buffer finish (const Buffer& in, double level, int fadeLen = 512, bool fromOnset = true)
     {
-        Buffer x = onTime (in);
-        channels::toPeakWithEndFade (x, level, 512);
+        Buffer x = fromOnset ? onTime (in) : in;
+        channels::toPeakWithEndFade (x, level, fadeLen);
         return x;
     }
 
@@ -195,8 +190,9 @@ namespace vs::drumsynth
     // A partial of a struck sound: Hz, level, decay seconds
     struct Partial { double hz, level, tau; };
 
-    // Struck wood or metal: decaying sines that start at their peak, plus a noise tick
-    inline Buffer modes (double sr, double seconds, std::initializer_list<Partial> partials, double tick, std::uint32_t seed)
+    // Struck wood or metal: decaying sines that start at their peak, plus a
+    // noise tick (high-passed, falling away with tickDecay seconds)
+    inline Buffer modes (double sr, double seconds, std::initializer_list<Partial> partials, double tick, std::uint32_t seed, double tickDecay = 0.0012)
     {
         const int n = (int) std::floor (sr * seconds);
         Buffer x ((size_t) n, 0.0f);
@@ -205,7 +201,7 @@ namespace vs::drumsynth
             const double w = 2 * pi * p.hz / sr;
             for (int i = 0; i < n; ++i) x[(size_t) i] = (float) (x[(size_t) i] + p.level * std::cos (w * i) * std::exp (-i / sr / p.tau));
         }
-        const auto c = hiss (sr, 0.01, [] (double t) { return std::exp (-t / 0.0012); }, seed, { { Type::highPass, 2500, 0.7 } });
+        const auto c = hiss (sr, std::max (0.01, tickDecay * 8), [tickDecay] (double t) { return std::exp (-t / tickDecay); }, seed, { { Type::highPass, 2500, 0.7 } });
         for (size_t i = 0; i < std::min (c.size(), x.size()); ++i) x[i] = (float) (x[i] + tick * c[i]);
         return x;
     }
@@ -267,6 +263,25 @@ namespace vs::drumsynth
         biquad (x, sr, Type::highPass, 7000, 0.7);
         biquad (x, sr, Type::lowPass, 15000, 0.6);
         for (int i = 0; i < n; ++i) x[(size_t) i] = (float) (x[(size_t) i] * env (i / sr));
+        return x;
+    }
+
+    // The drum machine cowbell: two square waves a not-quite-fifth apart (540
+    // and 800 Hz), band-passed, with a sharp drop right after the hit and then
+    // a ringing tail. pitch scales both
+    inline Buffer cowbell (double sr, double seconds, double pitch = 1, double tail = 0.13)
+    {
+        const int n = (int) std::floor (sr * seconds);
+        const auto a = squarePolyBlep (sr, n, 540 * pitch), b = squarePolyBlep (sr, n, 800 * pitch);
+        Buffer x ((size_t) n);
+        for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) ((double) a[i] + (double) b[i]);
+        biquad (x, sr, Type::bandPass, 2000 * pitch, 0.9);
+        biquad (x, sr, Type::highPass, 400, 0.7);
+        for (int i = 0; i < n; ++i)
+        {
+            const double t = i / sr;
+            x[(size_t) i] = (float) (x[(size_t) i] * (0.7 * std::exp (-t / 0.012) + 0.3 * std::exp (-t / tail)));
+        }
         return x;
     }
 
@@ -400,21 +415,7 @@ namespace vs::drumsynth
             { "boomHighTom", 0.9, [] (double sr) { auto x = body (sr, 0.7, 230, 185, 0.22, 0.05, { 0, 0.06, 2500, 0, 111 }); return drive (x, 1.3); } },
             { "boomLowTom", 0.92, [] (double sr) { auto x = body (sr, 0.9, 140, 108, 0.3, 0.05, { 0, 0.06, 2500, 0, 112 }); return drive (x, 1.3); } },
             // the drum machine cowbell: two square waves a not-quite-fifth apart, band-passed, a sharp drop then a ring
-            { "boomCowbell", 0.6, [] (double sr)
-              {
-                  const int n = (int) std::floor (sr * 0.45);
-                  const auto a = squarePolyBlep (sr, n, 540), b = squarePolyBlep (sr, n, 800);
-                  Buffer x ((size_t) n);
-                  for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) ((double) a[i] + (double) b[i]);
-                  biquad (x, sr, Type::bandPass, 2000, 0.9);
-                  biquad (x, sr, Type::highPass, 400, 0.7);
-                  for (int i = 0; i < n; ++i)
-                  {
-                      const double t = i / sr;
-                      x[(size_t) i] = (float) (x[(size_t) i] * (0.7 * std::exp (-t / 0.012) + 0.3 * std::exp (-t / 0.13)));
-                  }
-                  return x;
-              } },
+            { "boomCowbell", 0.6, [] (double sr) { return cowbell (sr, 0.45); } },
 
             // Club, the house and techno machine: a short kick that starts high and punches, with a hard beater click
             { "clubKick", 0.98, [] (double sr) { auto x = body (sr, 0.5, 260, 52, 0.15, 0.018, { 0.012, 0.55, 5000, 0, 121 }); biquad (x, sr, Type::peak, 70, 0.9, 2); return drive (x, 3); } },
