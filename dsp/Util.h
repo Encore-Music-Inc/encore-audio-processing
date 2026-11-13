@@ -5,6 +5,10 @@
 
 namespace vs
 {
+    // 1 / sqrt 2: the Q of a second-order Butterworth section (the flattest
+    // response, -3 dB at the cut-off)
+    inline constexpr double butterworthQ2 = 0.7071067811865476;
+
     // Coefficient for a one-pole smoother of the form  y += c * (x - y),
     // reaching ~63% of a step after timeMs.
     inline float onePole (float timeMs, double sampleRate)

@@ -23,7 +23,7 @@ namespace vs
             fs = sampleRate;
             line.prepare ((int) (0.06 * fs));
             lfoA.setPhase (0.0); lfoB.setPhase (0.37);
-            hp1.c = BiquadCoefs::highPass (fs, 150.0, 0.7071);
+            hp1.c = BiquadCoefs::highPass (fs, 150.0, butterworthQ2);
             hp2.c = hp1.c;
             hp1.reset(); hp2.reset();
             width.reset (fs, 0.05);

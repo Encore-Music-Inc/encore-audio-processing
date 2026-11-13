@@ -47,10 +47,10 @@ namespace vs
         void prepare (double sampleRate)
         {
             fs = sampleRate;
-            hiA.c = BiquadCoefs::highPass (fs, 1500.0, 0.7071);
-            hiB.c = BiquadCoefs::lowPass (fs, std::min (8000.0, fs * 0.45), 0.7071);
-            midA.c = BiquadCoefs::highPass (fs, 400.0, 0.7071);
-            midB.c = BiquadCoefs::lowPass (fs, 1200.0, 0.7071);
+            hiA.c = BiquadCoefs::highPass (fs, 1500.0, butterworthQ2);
+            hiB.c = BiquadCoefs::lowPass (fs, std::min (8000.0, fs * 0.45), butterworthQ2);
+            midA.c = BiquadCoefs::highPass (fs, 400.0, butterworthQ2);
+            midB.c = BiquadCoefs::lowPass (fs, 1200.0, butterworthQ2);
             for (auto* b : { &hiA, &hiB, &midA, &midB }) b->reset();
             hiAtk = onePole (1.0f, fs);  hiRel = onePole (12.0f, fs);
             smoothC = onePole (4.0f, fs); // two in series: mid power that ignores the fastest beating
@@ -159,8 +159,8 @@ namespace vs
         void prepare (double sampleRate)
         {
             fs = sampleRate;
-            bandA.c = BiquadCoefs::highPass (fs, 2000.0, 0.7071);
-            bandB.c = BiquadCoefs::lowPass (fs, std::min (6000.0, fs * 0.45), 0.7071);
+            bandA.c = BiquadCoefs::highPass (fs, 2000.0, butterworthQ2);
+            bandB.c = BiquadCoefs::lowPass (fs, std::min (6000.0, fs * 0.45), butterworthQ2);
             bandA.reset(); bandB.reset();
             fastAtk = onePole (0.3f, fs); fastRel = onePole (10.0f, fs);
             slowAtk = onePole (20.0f, fs); slowRel = onePole (150.0f, fs);

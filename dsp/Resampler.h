@@ -508,11 +508,11 @@ namespace vs
     };
 
     // A low-band analysis copy of a whole signal: two passes of a 1 kHz
-    // Butterworth-Q (0.7071) low-pass stored as float, then every d-th sample,
+    // Butterworth-Q (1 / sqrt 2) low-pass stored as float, then every d-th sample,
     // floor (n / d) of them. out must hold n / d + 1 samples. Returns the count.
     inline int decimateLowBand (const float* x, int n, double fs, int d, float* out)
     {
-        const auto lp = BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fs, 1000.0, 0.7071067811865476);
+        const auto lp = BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fs, 1000.0, butterworthQ2);
         Decimator dec ({ lp, lp }, std::max (1, d), true);
         dec.push (x, n, out);
         return n / std::max (1, d);

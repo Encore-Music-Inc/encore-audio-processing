@@ -233,22 +233,22 @@ namespace vs
             D = std::max (1, (int) std::round (fs / 6000.0));
             fsd = fs / D;
             decCount = n / D;
-            const auto lp1k = BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fs, 1000.0, 0.7071067811865476);
+            const auto lp1k = BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fs, 1000.0, butterworthQ2);
             decim = Decimator ({ lp1k, lp1k }, D, true);
             for (int b = 0; b < analysis::numBands; ++b)
             {
                 const auto& bd = analysis::bands[b];
                 const double rate = bd.low ? fsd : fs;
                 std::vector<BiquadCoefs> st;
-                if (bd.lo > 0) for (int k = 0; k < 2; ++k) st.push_back (BiquadCoefs::rbj (BiquadCoefs::Type::highPass, rate, bd.lo, 0.7071067811865476));
-                if (bd.hi > 0) for (int k = 0; k < 2; ++k) st.push_back (BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, rate, bd.hi, 0.7071067811865476));
+                if (bd.lo > 0) for (int k = 0; k < 2; ++k) st.push_back (BiquadCoefs::rbj (BiquadCoefs::Type::highPass, rate, bd.lo, butterworthQ2));
+                if (bd.hi > 0) for (int k = 0; k < 2; ++k) st.push_back (BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, rate, bd.hi, butterworthQ2));
                 band[b] = {};
                 band[b].chain.setSections (st, 2);
             }
             low = {};
-            low.chain.setSections ({ BiquadCoefs::rbj (BiquadCoefs::Type::highPass, fsd, 20.0, 0.7071067811865476),
-                                     BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fsd, 120.0, 0.7071067811865476),
-                                     BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fsd, 120.0, 0.7071067811865476) }, 2);
+            low.chain.setSections ({ BiquadCoefs::rbj (BiquadCoefs::Type::highPass, fsd, 20.0, butterworthQ2),
+                                     BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fsd, 120.0, butterworthQ2),
+                                     BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fsd, 120.0, butterworthQ2) }, 2);
             low.perSec = (int) std::round (fsd);
 
             firstLoud = -1; lastLoud = -1;

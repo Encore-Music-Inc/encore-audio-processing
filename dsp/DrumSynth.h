@@ -313,7 +313,7 @@ namespace vs::drumsynth
                 x[i] = held;
             }
         }
-        if (st.lowpass > 0) biquad (x, sr, Type::lowPass, st.lowpass, 0.7071067811865476);
+        if (st.lowpass > 0) biquad (x, sr, Type::lowPass, st.lowpass, butterworthQ2);
         return x;
     }
 
@@ -333,7 +333,7 @@ namespace vs::drumsynth
             {
                 const auto tones = modes (sr, 0.4, { { st.snareTone1, 0.6, st.snareToneDecay }, { st.snareTone2, 0.3, st.snareToneDecay } }, 0, seed);
                 const double decay = st.snareNoiseDecay;
-                const auto wires = hiss (sr, 0.4, [decay] (double t) { return std::exp (-t / decay); }, seed + 100, { { Type::highPass, st.snareNoiseHp, 0.7071067811865476 } });
+                const auto wires = hiss (sr, 0.4, [decay] (double t) { return std::exp (-t / decay); }, seed + 100, { { Type::highPass, st.snareNoiseHp, butterworthQ2 } });
                 x = mix ({ { &tones, 1 }, { &wires, st.snareNoise } });
                 break;
             }
