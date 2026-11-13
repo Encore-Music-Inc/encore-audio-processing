@@ -204,6 +204,8 @@ namespace vs
             ringMic.assign ((size_t) size, 0.0f);
             ltsDi.prepare (size, true);
             ltsMic.prepare (size, true);
+            prefixDi.assign ((size_t) size / 2 + 2, 0.0);
+            prefixMic.assign ((size_t) size / 2 + 2, 0.0);
             learning = false;
             progress = 0.0f;
         }
@@ -274,16 +276,13 @@ namespace vs
             std::array<bool, BodyCurve::numPoints> ok {};
             double maxD = 0.0, maxM = 0.0;
 
+            prefixSums (ltsDi.sum(), prefixDi);
+            prefixSums (ltsMic.sum(), prefixMic);
             for (int i = 0; i < BodyCurve::numPoints; ++i)
             {
                 const double f = BodyCurve::freq (i);
-                int b1 = (int) std::lround (f * std::pow (2.0, -1.0 / 6.0) / binHz);
-                int b2 = (int) std::lround (f * std::pow (2.0, 1.0 / 6.0) / binHz);
-                b1 = std::clamp (b1, 1, last);
-                b2 = std::clamp (b2, b1, last);
-                for (int b = b1; b <= b2; ++b) { pd[(size_t) i] += ltsDi.sum()[(size_t) b]; pm[(size_t) i] += ltsMic.sum()[(size_t) b]; }
-                pd[(size_t) i] /= (b2 - b1 + 1);
-                pm[(size_t) i] /= (b2 - b1 + 1);
+                pd[(size_t) i] = bandMean (prefixDi, f, 1.0 / 3.0, binHz, 1, last);
+                pm[(size_t) i] = bandMean (prefixMic, f, 1.0 / 3.0, binHz, 1, last);
                 if (f >= 60.0 && f <= 12000.0) { maxD = std::max (maxD, pd[(size_t) i]); maxM = std::max (maxM, pm[(size_t) i]); }
             }
 
@@ -394,6 +393,7 @@ namespace vs
         int size = 4096, hop = 2048, write = 0, filled = 0, sinceFrame = 0;
         std::vector<float> ringDi, ringMic;
         LongTermSpectrum ltsDi, ltsMic; // each a sum of frame powers
+        mutable std::vector<double> prefixDi, prefixMic; // their prefix sums, for the curve
         float activeSeconds = 0.0f, peakDi = -200.0f, peakMic = -200.0f;
         BodyCurve result;
         std::atomic<bool> learning { false }, startRequested { false }, stopRequested { false }, resultReady { false };

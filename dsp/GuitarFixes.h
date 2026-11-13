@@ -326,13 +326,11 @@ namespace vs
             if (lts.frames() < 4) return; // need ~0.7 s before trusting it
             const auto& power = lts.sum();
 
-            for (int b = 0; b <= size / 2; ++b) prefix[(size_t) b + 1] = prefix[(size_t) b] + power[(size_t) b];
+            prefixSums (power, prefix);
             const double binHz = fs / size;
             const auto avgDb = [&] (double f, double octaves)
             {
-                const int b1 = juce::jlimit (1, size / 2, (int) std::lround (f * std::pow (2.0, -octaves * 0.5) / binHz));
-                const int b2 = juce::jlimit (b1, size / 2, (int) std::lround (f * std::pow (2.0, octaves * 0.5) / binHz));
-                return db10 ((prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / (b2 - b1 + 1), 1e-30);
+                return db10 (bandMean (prefix, f, octaves, binHz, 1, size / 2), 1e-30);
             };
 
             double maxLevel = -400.0;

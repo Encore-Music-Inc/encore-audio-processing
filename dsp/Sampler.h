@@ -19,6 +19,7 @@
 #include <vector>
 #include "DelayLine.h"
 #include "Envelope.h"
+#include "Mix.h"
 #include "Util.h"
 
 namespace vs
@@ -106,10 +107,10 @@ namespace vs
                 sound = s; note = n; age = a; active = true; pos = 0.0;
                 step = std::pow (2.0, (n - s->rootNote) / 12.0) * s->sampleRate / fs;
                 const float g = dbToGain (s->gainDb) * velocity;
-                const double p = (std::clamp (s->pan, -1.0f, 1.0f) + 1.0) * 0.7853981633974483;
-                // equal power, at unity in the centre
-                gainL = g * (float) (std::cos (p) * 1.4142135623730951);
-                gainR = g * (float) (std::sin (p) * 1.4142135623730951);
+                // the 3 dB pan law, raised 3 dB so the centre is at unity
+                const auto pg = mix::panGains (g * 1.4142135623730951f, std::clamp (s->pan, -1.0f, 1.0f), mix::PanLaw::centre3dB);
+                gainL = pg.left;
+                gainR = pg.right;
                 env.prepare (fs);
                 env.setSettings ({ 0.0f, 0.0f, 1.0f, s->releaseSeconds });
                 env.reset();

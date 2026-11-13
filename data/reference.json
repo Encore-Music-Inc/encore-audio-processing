@@ -2933,7 +2933,7 @@
     }},
     {"id": "effects/chorus/song", "op": "effect", "block": 1024, "fx": "chorus", "depthMs": 4, "speedHz": 0.8, "width": 0.6, "mix": 0.5, "input": {"rate": 44100, "seconds": 8, "channels": 2, "parts": [{"type": "tone", "hz": 55, "l": 0.45, "r": 0.45, "decay": 12, "every": 0.5}, {"type": "tone", "hz": 55, "l": 0.18, "r": 0.18, "mult": 1, "decay": 15, "every": 1}, {"type": "tone", "hz": 55, "l": 0.108, "r": 0.108, "mult": 2, "decay": 15, "every": 1}, {"type": "tone", "hz": 55, "l": 0.054, "r": 0.054, "mult": 3, "decay": 15, "every": 1}, {"type": "tone", "hz": 55, "l": 0.027, "r": 0.027, "mult": 4, "decay": 15, "every": 1}, {"type": "tone", "hz": 261.63, "l": 0.05, "r": 0.05, "mult": 1}, {"type": "tone", "hz": 261.63, "l": 0.025, "r": 0.025, "mult": 2}, {"type": "tone", "hz": 261.63, "l": 0.017499999999999998, "r": 0.017499999999999998, "mult": 3}, {"type": "tone", "hz": 261.63, "l": 0.010000000000000002, "r": 0.010000000000000002, "mult": 4}, {"type": "tone", "hz": 261.63, "l": 0.006, "r": 0.006, "mult": 5}, {"type": "tone", "hz": 261.63, "l": 0.004, "r": 0.004, "mult": 6}, {"type": "tone", "hz": 261.63, "l": 0.0025000000000000005, "r": 0.0025000000000000005, "mult": 7}, {"type": "tone", "hz": 329.63, "l": 0.05, "r": 0.05, "mult": 1}, {"type": "tone", "hz": 329.63, "l": 0.025, "r": 0.025, "mult": 2}, {"type": "tone", "hz": 329.63, "l": 0.017499999999999998, "r": 0.017499999999999998, "mult": 3}, {"type": "tone", "hz": 329.63, "l": 0.010000000000000002, "r": 0.010000000000000002, "mult": 4}, {"type": "tone", "hz": 329.63, "l": 0.006, "r": 0.006, "mult": 5}, {"type": "tone", "hz": 329.63, "l": 0.004, "r": 0.004, "mult": 6}, {"type": "tone", "hz": 329.63, "l": 0.0025000000000000005, "r": 0.0025000000000000005, "mult": 7}, {"type": "tone", "hz": 392.0, "l": 0.05, "r": 0.05, "mult": 1}, {"type": "tone", "hz": 392.0, "l": 0.025, "r": 0.025, "mult": 2}, {"type": "tone", "hz": 392.0, "l": 0.017499999999999998, "r": 0.017499999999999998, "mult": 3}, {"type": "tone", "hz": 392.0, "l": 0.010000000000000002, "r": 0.010000000000000002, "mult": 4}, {"type": "tone", "hz": 392.0, "l": 0.006, "r": 0.006, "mult": 5}, {"type": "tone", "hz": 392.0, "l": 0.004, "r": 0.004, "mult": 6}, {"type": "tone", "hz": 392.0, "l": 0.0025000000000000005, "r": 0.0025000000000000005, "mult": 7}, {"type": "noise", "seed": 101, "l": 0.12, "r": 0.08, "highpass": 1, "decay": 9, "every": 0.25}, {"type": "noise", "seed": 102, "l": 0.2, "r": 0.25, "lowpass": 1, "decay": 11, "every": 1, "from": 0.5}, {"type": "tone", "hz": 880, "l": 0.04, "r": 0.07, "vibHz": 4, "vibDepth": 0.01}]}, "inputHash": "96fa677a", "results": {
       "length": [352800, "exact"],
-      "sum": [90848.31176340563, "proc-sum"],
+      "sum": [90848.31175727007, "proc-sum"],
       "peak": [0.9963703155517578, "proc-peak"],
       "lufs": [-14.944862365722656, "proc-lufs"]
     }},
@@ -2983,15 +2983,15 @@
     }},
     {"id": "instruments/synth/phrase", "op": "instrument", "rate": 48000, "block": 512, "instrument": "synth", "seconds": 2.5, "results": {
       "length": [120000, "exact"],
-      "sum": [17352.65833679441, "proc-sum"],
-      "peak": [0.4821570813655853, "proc-peak"],
+      "sum": [17352.658042081133, "proc-sum"],
+      "peak": [0.48215705156326294, "proc-peak"],
       "lufs": [-16.565458297729492, "proc-lufs"]
     }},
     {"id": "instruments/sampler/vox", "op": "instrument", "block": 512, "instrument": "sampler", "seconds": 2.5, "input": {"rate": 48000, "seconds": 3, "channels": 1, "parts": [{"type": "tone", "hz": 201, "l": 0.3, "r": 0.3, "mult": 1, "vibHz": 5, "vibDepth": 0.01, "attack": 0.05}, {"type": "tone", "hz": 201, "l": 0.15, "r": 0.15, "mult": 2, "vibHz": 5, "vibDepth": 0.01, "attack": 0.05}, {"type": "tone", "hz": 201, "l": 0.105, "r": 0.105, "mult": 3, "vibHz": 5, "vibDepth": 0.01, "attack": 0.05}, {"type": "tone", "hz": 201, "l": 0.06, "r": 0.06, "mult": 4, "vibHz": 5, "vibDepth": 0.01, "attack": 0.05}, {"type": "tone", "hz": 201, "l": 0.036, "r": 0.036, "mult": 5, "vibHz": 5, "vibDepth": 0.01, "attack": 0.05}, {"type": "tone", "hz": 201, "l": 0.024, "r": 0.024, "mult": 6, "vibHz": 5, "vibDepth": 0.01, "attack": 0.05}, {"type": "tone", "hz": 201, "l": 0.015, "r": 0.015, "mult": 7, "vibHz": 5, "vibDepth": 0.01, "attack": 0.05}, {"type": "noise", "seed": 141, "l": 0.35, "r": 0.35, "highpass": 1, "decay": 11, "every": 0.6, "from": 0.3}, {"type": "noise", "seed": 142, "l": 0.004, "r": 0.004, "lowpass": 2}]}, "inputHash": "dd1e5e93", "results": {
       "length": [120000, "exact"],
-      "sum": [32235.965072415125, "proc-sum"],
-      "peak": [1.099454641342163, "proc-peak"],
-      "lufs": [-10.479830741882324, "proc-lufs"]
+      "sum": [32235.966479433406, "proc-sum"],
+      "peak": [1.0994547605514526, "proc-peak"],
+      "lufs": [-10.479829788208008, "proc-lufs"]
     }},
     {"id": "pitch/downsample/voice", "op": "downsample", "strides": [1, 2, 3, 4, 6], "at": [0, 100, 1000, 3999], "input": {"rate": 48000, "seconds": 0.5, "channels": 1, "parts": [{"type": "tone", "hz": 220, "l": 0.4, "r": 0.4, "mult": 1, "vibHz": 5, "vibDepth": 0.01}, {"type": "tone", "hz": 220, "l": 0.2, "r": 0.2, "mult": 2, "vibHz": 5, "vibDepth": 0.01}, {"type": "tone", "hz": 220, "l": 0.13999999999999999, "r": 0.13999999999999999, "mult": 3, "vibHz": 5, "vibDepth": 0.01}, {"type": "tone", "hz": 220, "l": 0.08000000000000002, "r": 0.08000000000000002, "mult": 4, "vibHz": 5, "vibDepth": 0.01}, {"type": "tone", "hz": 220, "l": 0.048, "r": 0.048, "mult": 5, "vibHz": 5, "vibDepth": 0.01}, {"type": "tone", "hz": 220, "l": 0.032, "r": 0.032, "mult": 6, "vibHz": 5, "vibDepth": 0.01}, {"type": "tone", "hz": 220, "l": 0.020000000000000004, "r": 0.020000000000000004, "mult": 7, "vibHz": 5, "vibDepth": 0.01}, {"type": "noise", "seed": 201, "l": 0.01, "r": 0.01}]}, "inputHash": "d75d65b0", "results": {
       "stride1.length": [24000, "exact"],

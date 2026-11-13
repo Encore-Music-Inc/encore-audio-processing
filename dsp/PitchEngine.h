@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <vector>
 #include "DelayLine.h"
+#include "Mix.h"
 #include "Music.h"
 #include "Random.h"
 #include "PitchDetector.h"
@@ -114,9 +115,9 @@ namespace vs
                 const auto& hv = settings.voice[h];
                 on[h] = settings.harmonyOn && hv.interval > 0;
                 gain[h] = dbToGain (hv.levelDb);
-                const float p = (std::clamp (hv.pan, -1.0f, 1.0f) + 1.0f) * pi * 0.25f;
-                panL[h] = std::cos (p);
-                panR[h] = std::sin (p);
+                const auto pg = mix::panGains (1.0f, std::clamp (hv.pan, -1.0f, 1.0f), mix::PanLaw::centre3dB);
+                panL[h] = pg.left;
+                panR[h] = pg.right;
             }
 
             setActive (0, settings.tuneOn);

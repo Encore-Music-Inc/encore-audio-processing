@@ -344,6 +344,25 @@ namespace vs
     };
 
     // The reference curve: a finished mix's level in a band at hz (dB)
+    // The mean power of the bins within `octaves` around f (each edge rounded
+    // to the nearest bin, kept to lo .. hi), from prefix sums of the bin
+    // powers (prefix[b] is the sum of the bins below b).
+    inline double bandMean (const std::vector<double>& prefix, double f, double octaves, double binHz, int lo, int hi)
+    {
+        const int b1 = std::clamp ((int) std::lround (f * std::pow (2.0, -octaves * 0.5) / binHz), lo, hi);
+        const int b2 = std::clamp ((int) std::lround (f * std::pow (2.0, octaves * 0.5) / binHz), b1, hi);
+        return (prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / (b2 - b1 + 1);
+    }
+
+    // Prefix sums of bin powers for bandMean, into p (n + 1 values, the
+    // first 0; it allocates only when p is too small)
+    inline void prefixSums (const std::vector<double>& power, std::vector<double>& p)
+    {
+        p.resize (power.size() + 1);
+        p[0] = 0.0;
+        for (size_t b = 0; b < power.size(); ++b) p[b + 1] = p[b] + power[b];
+    }
+
     inline double finishedMixDb (double hz)
     {
         return (hz < 100 ? 1.05 * std::log2 (100 / hz) : 0) - (hz > 2000 ? 2.5 * std::log2 (hz / 2000) : 0);

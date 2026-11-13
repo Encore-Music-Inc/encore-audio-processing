@@ -333,10 +333,10 @@ namespace vs
             const double meanMidi = mean (values);
             std::vector<double> c (n);
             for (size_t i = 0; i < n; ++i) c[i] = (values[i] - meanMidi) * 100;
-            const double xm = (double) (n - 1) / 2;
-            double sxy = 0.0, sxx = 0.0;
-            for (size_t i = 0; i < n; ++i) { sxy += ((double) i - xm) * c[i]; sxx += ((double) i - xm) * ((double) i - xm); }
-            const double slope = sxx != 0.0 ? sxy / sxx : 0.0;
+            std::vector<double> xs (n);
+            for (size_t i = 0; i < n; ++i) xs[i] = (double) i;
+            const auto line = stats::fitLine (xs.data(), c.data(), (int) n);
+            const double xm = line.meanX, slope = line.slope;
             const double drift = slope * (double) (n - 1);
             std::vector<double> r (n);
             for (size_t i = 0; i < n; ++i) r[i] = c[i] - slope * ((double) i - xm);
