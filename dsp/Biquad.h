@@ -135,11 +135,17 @@ namespace vs
     // An even-order Butterworth filter (low-pass or high-pass) as order / 2
     // cascaded RBJ sections, section k with Q = 1 / (2 cos (pi (2k + 1) / (2 order))).
     // No frequency clamping.
+    // The Q of section k (0 .. order / 2 - 1) of a Butterworth filter of that order
+    inline double butterworthQ (int order, int k)
+    {
+        return 1.0 / (2.0 * std::cos ((juce::MathConstants<double>::pi * (2 * k + 1)) / (2 * order)));
+    }
+
     inline std::vector<BiquadCoefs> butterworth (BiquadCoefs::Type type, double fs, double f, int order = 4)
     {
         std::vector<BiquadCoefs> out;
         for (int k = 0; k < order / 2; ++k)
-            out.push_back (BiquadCoefs::rbj (type, fs, f, 1.0 / (2.0 * std::cos ((juce::MathConstants<double>::pi * (2 * k + 1)) / (2 * order)))));
+            out.push_back (BiquadCoefs::rbj (type, fs, f, butterworthQ (order, k)));
         return out;
     }
 

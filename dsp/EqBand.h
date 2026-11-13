@@ -37,13 +37,11 @@ namespace vs
                 case lowCut:
                 case highCut:
                 {
-                    static const double q4[2] { 0.5412, 1.3066 };
-                    static const double q8[4] { 0.5098, 0.6013, 0.9000, 2.5629 };
                     const int n = s.slope == 0 ? 1 : s.slope == 1 ? 2 : 4;
                     for (int i = 0; i < n; ++i)
                     {
                         // 12 dB/oct uses the band's Q (lets you add a resonant bump); steeper slopes are pure Butterworth
-                        const double q = n == 1 ? (double) s.q : n == 2 ? q4[i] : q8[i];
+                        const double q = n == 1 ? (double) s.q : butterworthQ (2 * n, i);
                         out[(size_t) i] = s.type == lowCut ? BiquadCoefs::highPass (fs, s.freq, q) : BiquadCoefs::lowPass (fs, s.freq, q);
                     }
                     return n;
