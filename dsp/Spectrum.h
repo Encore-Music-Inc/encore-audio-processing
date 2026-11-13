@@ -182,21 +182,44 @@ namespace vs
 
     // A long-term power spectrum: frames of n samples (n a power of two),
     // each times a periodic Hann window, through the FFT; each frame's power
-    // |X(k)|^2 added up per bin k = 0..n/2. sum() is the total; average over
-    // whatever the caller counts (frames, or segments of several channels).
+    // |X(k)|^2 added up per bin k = 0..n/2. sum() is the total (average over
+    // whatever the caller counts: frames, or segments of several channels),
+    // or with setRunningAverage, the running average.
     class LongTermSpectrum
     {
     public:
-        void prepare (int frameSize)
+        // Allocates. floatFrames: each sample is windowed in float (a live
+        // analyser's arithmetic), not double.
+        void prepare (int frameSize, bool floatFrames = false)
         {
             n = frameSize;
             win = windows::hannPeriodic (n);
+            floatWin = floatFrames ? windows::hannPeriodicFloat (n) : std::vector<float> {};
             pow.assign ((size_t) n / 2 + 1, 0.0);
             fft.setSize (n);
             frame.assign ((size_t) n, 0.0);
             re.assign ((size_t) n / 2 + 1, 0.0);
             im.assign ((size_t) n / 2 + 1, 0.0);
             count = 0;
+        }
+
+        // Instead of a sum, a running average: the plain mean of the frames
+        // until firstFrames, then each new frame weighted by `memory` (the
+        // older ones fading). Call after prepare().
+        void setRunningAverage (int firstFrames, double memory) { avgFirst = firstFrames; avgMemory = memory; }
+
+        // Back to no frames (the sum or the average at zero)
+        void clear() { std::fill (pow.begin(), pow.end(), 0.0); count = 0; }
+
+        // A frame from a ring buffer of n samples, the oldest at `start`
+        void addRing (const float* ring, int start)
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                const float x = ring[(size_t) ((start + i) % n)];
+                frame[(size_t) i] = floatWin.empty() ? (double) x * win[(size_t) i] : (double) (x * floatWin[(size_t) i]);
+            }
+            transformAndAdd();
         }
 
         // n samples, windowed here
@@ -238,13 +261,21 @@ namespace vs
         void transformAndAdd()
         {
             fft.forward (frame.data(), re.data(), im.data());
-            for (int k = 0; k <= n / 2; ++k) pow[(size_t) k] += re[(size_t) k] * re[(size_t) k] + im[(size_t) k] * im[(size_t) k];
             ++count;
+            const double k = avgFirst <= 0 ? 0.0 : count < avgFirst ? 1.0 / count : avgMemory;
+            for (int b = 0; b <= n / 2; ++b)
+            {
+                const double p = re[(size_t) b] * re[(size_t) b] + im[(size_t) b] * im[(size_t) b];
+                if (avgFirst <= 0) pow[(size_t) b] += p;
+                else pow[(size_t) b] += k * (p - pow[(size_t) b]);
+            }
         }
 
-        int n = 0, count = 0;
+        int n = 0, count = 0, avgFirst = 0;
+        double avgMemory = 0.0;
         RealFft fft;
         std::vector<double> win, pow, frame, re, im;
+        std::vector<float> floatWin;
     };
 
     // An averaged power spectrum and its bin spacing

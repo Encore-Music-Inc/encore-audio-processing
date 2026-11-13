@@ -6,6 +6,7 @@
 #include "Biquad.h"
 #include "Dynamics.h"
 #include "Fft.h"
+#include "Spectrum.h"
 #include "Windows.h"
 #include "Util.h"
 
@@ -237,16 +238,11 @@ namespace vs
             const int order = sampleRate > 100000.0 ? 16 : sampleRate > 50000.0 ? 15 : 14; // ~3 Hz bins
             size = 1 << order;
             hop = size / 2;
-            fft.setSize (size);
-            window = windows::hannPeriodicFloat (size);
             ring.assign ((size_t) size, 0.0f);
-            work.assign ((size_t) size, 0.0f);
-            re.assign ((size_t) size / 2 + 1, 0.0);
-            im.assign ((size_t) size / 2 + 1, 0.0);
-            framePower.assign ((size_t) size / 2 + 1, 0.0);
-            power.assign ((size_t) size / 2 + 1, 0.0);
+            lts.prepare (size, true);
+            lts.setRunningAverage (18, 0.06); // a plain mean for the first frames, then ~3 s memory
             prefix.assign ((size_t) size / 2 + 2, 0.0);
-            write = filled = sinceFrame = frames = 0;
+            write = filled = sinceFrame = 0;
             found = false;
             foundHz = 0.0f;
             prominenceDb = 0.0f;
@@ -326,16 +322,9 @@ namespace vs
 
         void analyse()
         {
-            for (int i = 0; i < size; ++i)
-                work[(size_t) i] = ring[(size_t) ((write + i) % size)] * window[(size_t) i];
-            fft.power (work.data(), framePower.data(), re.data(), im.data());
-
-            // long-term average: a plain mean for the first frames, then ~3 s memory
-            ++frames;
-            const double k = frames < 18 ? 1.0 / frames : 0.06;
-            for (int b = 0; b <= size / 2; ++b)
-                power[(size_t) b] += k * (framePower[(size_t) b] - power[(size_t) b]);
-            if (frames < 4) return; // need ~0.7 s before trusting it
+            lts.addRing (ring.data(), write);
+            if (lts.frames() < 4) return; // need ~0.7 s before trusting it
+            const auto& power = lts.sum();
 
             for (int b = 0; b <= size / 2; ++b) prefix[(size_t) b + 1] = prefix[(size_t) b] + power[(size_t) b];
             const double binHz = fs / size;
@@ -381,10 +370,10 @@ namespace vs
         }
 
         double fs = 48000.0;
-        int size = 16384, hop = 8192, write = 0, filled = 0, sinceFrame = 0, frames = 0;
-        RealFft fft;
-        std::vector<float> window, ring, work;
-        std::vector<double> re, im, framePower, power, prefix;
+        int size = 16384, hop = 8192, write = 0, filled = 0, sinceFrame = 0;
+        std::vector<float> ring;
+        LongTermSpectrum lts; // the long-term average of frame powers
+        std::vector<double> prefix;
         bool found = false;
         float foundHz = 0.0f, detHz = 0.0f, prominenceDb = 0.0f, relDb = -100.0f;
 

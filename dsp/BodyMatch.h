@@ -14,6 +14,7 @@
 #include "Biquad.h"
 #include "Convolution.h"
 #include "Fft.h"
+#include "Spectrum.h"
 #include "Util.h"
 #include "Windows.h"
 
@@ -198,16 +199,10 @@ namespace vs
             const int order = sampleRate > 100000.0 ? 14 : sampleRate > 50000.0 ? 13 : 12; // ~85 ms frames
             size = 1 << order;
             hop = size / 2;
-            fft.setSize (size);
-            window = windows::hannPeriodicFloat (size);
             ringDi.assign ((size_t) size, 0.0f);
             ringMic.assign ((size_t) size, 0.0f);
-            work.assign ((size_t) size, 0.0f);
-            re.assign ((size_t) size / 2 + 1, 0.0);
-            im.assign ((size_t) size / 2 + 1, 0.0);
-            framePower.assign ((size_t) size / 2 + 1, 0.0);
-            sumDi.assign ((size_t) size / 2 + 1, 0.0);
-            sumMic.assign ((size_t) size / 2 + 1, 0.0);
+            ltsDi.prepare (size, true);
+            ltsMic.prepare (size, true);
             learning = false;
             progress = 0.0f;
         }
@@ -285,7 +280,7 @@ namespace vs
                 int b2 = (int) std::lround (f * std::pow (2.0, 1.0 / 6.0) / binHz);
                 b1 = std::clamp (b1, 1, last);
                 b2 = std::clamp (b2, b1, last);
-                for (int b = b1; b <= b2; ++b) { pd[(size_t) i] += sumDi[(size_t) b]; pm[(size_t) i] += sumMic[(size_t) b]; }
+                for (int b = b1; b <= b2; ++b) { pd[(size_t) i] += ltsDi.sum()[(size_t) b]; pm[(size_t) i] += ltsMic.sum()[(size_t) b]; }
                 pd[(size_t) i] /= (b2 - b1 + 1);
                 pm[(size_t) i] /= (b2 - b1 + 1);
                 if (f >= 60.0 && f <= 12000.0) { maxD = std::max (maxD, pd[(size_t) i]); maxM = std::max (maxM, pm[(size_t) i]); }
@@ -345,8 +340,8 @@ namespace vs
     private:
         void begin()
         {
-            std::fill (sumDi.begin(), sumDi.end(), 0.0);
-            std::fill (sumMic.begin(), sumMic.end(), 0.0);
+            ltsDi.clear();
+            ltsMic.clear();
             std::fill (ringDi.begin(), ringDi.end(), 0.0f);
             std::fill (ringMic.begin(), ringMic.end(), 0.0f);
             write = filled = sinceFrame = 0;
@@ -389,25 +384,15 @@ namespace vs
             peakMic = std::max (peakMic, mDb);
             if (dDb < -65.0f || mDb < -65.0f || dDb < peakDi - 30.0f || mDb < peakMic - 30.0f) return;
 
-            accumulate (ringDi, sumDi);
-            accumulate (ringMic, sumMic);
+            ltsDi.addRing (ringDi.data(), write);
+            ltsMic.addRing (ringMic.data(), write);
             activeSeconds += (float) hop / (float) fs;
-        }
-
-        void accumulate (const std::vector<float>& ring, std::vector<double>& sum)
-        {
-            for (int i = 0; i < size; ++i)
-                work[(size_t) i] = ring[(size_t) ((write + i) % size)] * window[(size_t) i];
-            fft.power (work.data(), framePower.data(), re.data(), im.data());
-            for (int b = 0; b <= size / 2; ++b)
-                sum[(size_t) b] += framePower[(size_t) b];
         }
 
         double fs = 48000.0;
         int size = 4096, hop = 2048, write = 0, filled = 0, sinceFrame = 0;
-        RealFft fft;
-        std::vector<float> window, ringDi, ringMic, work;
-        std::vector<double> re, im, framePower, sumDi, sumMic;
+        std::vector<float> ringDi, ringMic;
+        LongTermSpectrum ltsDi, ltsMic; // each a sum of frame powers
         float activeSeconds = 0.0f, peakDi = -200.0f, peakMic = -200.0f;
         BodyCurve result;
         std::atomic<bool> learning { false }, startRequested { false }, stopRequested { false }, resultReady { false };
