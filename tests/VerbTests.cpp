@@ -233,6 +233,23 @@ int main()
         expect ("reflections: none later than the engine plays them", longest <= E::maxReflectionSec * 1000.0f, juce::String (longest, 1) + " ms");
     }
 
+    // the decay picture, point for point as an editor draws it
+    {
+        bool same = true;
+        for (int mode = 0; mode < vs::ReverbEngine::numModes; ++mode)
+            for (float decay : { 0.3f, 2.0f, 11.7f })
+            {
+                const auto p = vs::ReverbEngine::decayPicture (mode, decay);
+                same = same && p.size() == 81 && p[0].t == 0.0f && p[0].db == (mode == 5 ? -3.0f : -6.0f);
+                for (int i = 1; i <= 80 && same; ++i)
+                {
+                    const float t = decay * (float) i / 80.0f;
+                    same = p[(size_t) i].t == t && p[(size_t) i].db == -6.0f - 54.0f * t / decay;
+                }
+            }
+        expect ("decay picture: from -6 dB (spring -3) straight to -60 dB, bit for bit", same);
+    }
+
     std::printf ("\n%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
     return failures == 0 ? 0 : 1;
 }

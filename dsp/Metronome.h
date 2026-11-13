@@ -25,6 +25,7 @@
 #include "Random.h"
 #include "Util.h"
 #include "Channels.h"
+#include "DrumSynth.h"
 
 namespace vs::metronome
 {
@@ -487,121 +488,33 @@ namespace vs::metronome
 
     using Buffer = std::vector<float>;
 
-    // A partial of a struck sound: Hz, level, decay seconds
-    struct Partial { double hz, level, tau; };
+    // The click sounds are the drum synthesizer's (DrumSynth.h): struck wood
+    // and metal (modes), the cowbell, the hat and the kick
+    using drumsynth::Partial;
 
-    // Damped sinusoids plus a burst of noise
+    // Struck wood or metal: decaying sines plus a tick of noise (noise: its
+    // level, noiseDecay: how fast it falls away), from where it gets loud
     inline Buffer modal (double sr, double seconds, std::initializer_list<Partial> partials, double noise = 0, double noiseDecay = 0.002, std::uint32_t seed = 3)
     {
-        const int n = (int) std::floor (sr * seconds);
-        Buffer x ((size_t) n, 0.0f);
-        Mulberry32 r (seed);
-        for (const auto& p : partials)
-        {
-            const double w = (2 * pi * p.hz) / sr, k = std::exp (-1 / (p.tau * sr));
-            double amp = p.level;
-            for (int i = 0; i < n; ++i)
-            {
-                x[(size_t) i] = (float) (x[(size_t) i] + amp * std::sin (w * i + 0.6));
-                amp *= k;
-            }
-        }
-        if (noise != 0)
-        {
-            const double k = std::exp (-1 / (noiseDecay * sr));
-            double amp = noise, prev = 0;
-            for (int i = 0; i < n && amp > 1e-5; ++i)
-            {
-                const double v = r.uniform() * 2 - 1;
-                x[(size_t) i] = (float) (x[(size_t) i] + amp * (v - prev));
-                prev = v;
-                amp *= k;
-            }
-        }
-        return x;
+        return drumsynth::modes (sr, seconds, partials, noise, seed, noiseDecay);
     }
 
-    // A square wave without aliasing: its odd harmonics, up to just under half the sample rate
-    inline Buffer squareFromHarmonics (double sr, int n, double hz)
-    {
-        Buffer x ((size_t) n, 0.0f);
-        for (int k = 1; k * hz < sr * 0.45; k += 2)
-        {
-            const double w = (2 * pi * k * hz) / sr, a = 4 / (pi * k);
-            for (int i = 0; i < n; ++i) x[(size_t) i] = (float) (x[(size_t) i] + a * std::sin (w * i));
-        }
-        return x;
-    }
-
-    // A biquad (RBJ cookbook) over the whole buffer, in place. The frequency is
-    // kept at or under 0.45 of the sample rate, so a filter set above it (the
-    // hats' 12 kHz at 22.05 kHz) stays stable.
-    inline void biquad (Buffer& x, double sr, BiquadCoefs::Type type, double hz, double q)
-    {
-        filterRbjCapped (x.data(), (int) x.size(), sr, type, hz, q);
-    }
-
-    // Starts a sound where it first gets loud: filters ease into a hit, and a
-    // click has to land right on the beat
-    inline Buffer onTime (const Buffer& x) { return channels::fromOnset (x); }
-
-    // The drum machine cowbell: two square waves a not-quite-fifth apart (540
-    // and 800 Hz), band-passed, with a sharp drop right after the hit and then
-    // a ringing tail. pitch scales both
+    // The drum machine cowbell, pitch scaling it, from where it gets loud
     inline Buffer cowbell (double sr, double seconds, double pitch = 1, double tail = 0.12)
     {
-        using T = BiquadCoefs::Type;
-        const int n = (int) std::floor (sr * seconds);
-        const auto a = squareFromHarmonics (sr, n, 540 * pitch), b = squareFromHarmonics (sr, n, 800 * pitch);
-        Buffer x ((size_t) n);
-        for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) ((double) a[i] + (double) b[i]);
-        biquad (x, sr, T::bandPass, 2000 * pitch, 0.9);
-        biquad (x, sr, T::highPass, 400, 0.7);
-        for (int i = 0; i < n; ++i)
-        {
-            const double t = i / sr;
-            x[(size_t) i] = (float) (x[(size_t) i] * (0.7 * std::exp (-t / 0.012) + 0.3 * std::exp (-t / tail)));
-        }
-        return onTime (x);
+        return drumsynth::onTime (drumsynth::cowbell (sr, seconds, pitch, tail));
     }
 
-    // A hi-hat: bright noise plus six clashing square waves (the drum machine
-    // metal), high-passed. tau: how long it rings (short for closed, long for open)
+    // A hi-hat ringing tau seconds (short for closed, long for open), from where it gets loud
     inline Buffer hihat (double sr, double seconds, double tau, std::uint32_t seed = 11)
     {
-        using T = BiquadCoefs::Type;
-        const int n = (int) std::floor (sr * seconds);
-        Mulberry32 r (seed);
-        Buffer x ((size_t) n, 0.0f);
-        for (double hz : { 205.3, 304.4, 369.6, 522.7, 540.0, 800.0 })
-        {
-            const auto sq = squareFromHarmonics (sr, n, hz);
-            for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) (x[i] + (double) sq[i] / 6);
-        }
-        biquad (x, sr, T::bandPass, 10000, 0.8);
-        for (size_t i = 0; i < (size_t) n; ++i) x[i] = (float) (0.6 * x[i] + 0.5 * (r.uniform() * 2 - 1));
-        biquad (x, sr, T::highPass, 6500, 0.7);
-        biquad (x, sr, T::highPass, 6500, 0.7);
-        // and gently off at the very top, so it's a hat, not just sizzle
-        biquad (x, sr, T::lowPass, 12000, 0.6);
-        for (int i = 0; i < n; ++i) x[(size_t) i] = (float) (x[(size_t) i] * std::exp (-i / sr / tau));
-        return onTime (x);
+        return drumsynth::onTime (drumsynth::hat (sr, seconds, [tau] (double t) { return std::exp (-t / tau); }, seed));
     }
 
-    // A kick: a sine that drops in pitch, with a click on top
+    // A kick: a pitched drum falling from hiHz to loHz, with a beater click
     inline Buffer kick (double sr, double seconds, double hiHz, double loHz, double tau)
     {
-        const int n = (int) std::floor (sr * seconds);
-        Buffer x ((size_t) n);
-        double phase = 0;
-        for (int i = 0; i < n; ++i)
-        {
-            const double t = i / sr;
-            const double f = loHz + (hiHz - loHz) * std::exp (-t / 0.03);
-            phase += (2 * pi * f) / sr;
-            x[(size_t) i] = (float) (std::exp (-t / tau) * std::sin (phase) + (i < sr * 0.0015 ? 0.5 * (1 - i / (sr * 0.0015)) : 0.0));
-        }
-        return x;
+        return drumsynth::body (sr, seconds, hiHz, loHz, tau, 0.03);
     }
 
     // A straight fade to silence over the last len samples (the last one at
@@ -624,10 +537,28 @@ namespace vs::metronome
         return x;
     }
 
+    // The fade at the very end of every click sound, so nothing clicks off
+    inline constexpr int endFadeSamples = 256;
+
+    // A soft count's level, of a normal count's (the engine's beats under the
+    // accent when the accent is "louder")
+    inline constexpr double softCount = 0.4;
+
     // Peak to `level`, with a fade at the very end so nothing clicks off
     inline Buffer finish (Buffer x, double level)
     {
-        channels::toPeakWithEndFade (x, level, 256);
+        return drumsynth::finish (x, level, endFadeSamples, false);
+    }
+
+    // A sound at `level` of its own peak (under 1 only; at 1 or more, or
+    // empty, it is returned as it is), with the end fade again
+    inline Buffer atLevel (Buffer x, float level)
+    {
+        if (level < 1.0f && ! x.empty())
+        {
+            const float* ch[1] { x.data() };
+            channels::toPeakWithEndFade (x, channels::peakOf (ch, 1, (int) x.size()) * level, endFadeSamples);
+        }
         return x;
     }
 
@@ -802,7 +733,7 @@ namespace vs::metronome
                         // a set with an alt sound (kick and hat) plays it on counts 2, 4, 6...
                         const bool alt = ! snd.alt.empty() && ev.count % 2 == 1;
                         voice (alt ? &snd.alt : ev.level == 3 ? &snd.accent : &snd.beat, roundHalfUp (ev.frame),
-                               ev.level == 3 ? g.accent : ev.level == 2 ? g.beat : g.beat * 0.4);
+                               ev.level == 3 ? g.accent : ev.level == 2 ? g.beat : g.beat * softCount);
                         for (size_t k = 1; k < ev.subs.size(); ++k) voice (&snd.sub, roundHalfUp (ev.frame + ev.subs[k] * ev.len), g.sub);
                     }
                     for (const auto& p : ev.poly) voice (&snd.poly, roundHalfUp (ev.frame + p.frac * ev.len), g.poly);

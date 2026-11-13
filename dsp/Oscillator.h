@@ -30,7 +30,10 @@ namespace vs
         double getPhase() const { return phase; }
 
         // The next sample, -1..1, at hz for a sample rate of fs
-        float next (double hz, double fs)
+        float next (double hz, double fs) { return (float) nextValue (hz, fs); }
+
+        // The same, unrounded (an LFO that steers something in double)
+        double nextValue (double hz, double fs)
         {
             const double dt = std::fabs (hz) / fs;
             double v = 0.0;
@@ -60,7 +63,7 @@ namespace vs
             }
             phase += dt;
             if (phase >= 1.0) phase -= std::floor (phase);
-            return (float) v;
+            return v;
         }
 
     private:

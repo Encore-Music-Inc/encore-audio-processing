@@ -347,6 +347,16 @@ namespace
                     "220 Hz " + num (g.at (220.0f), 1) + ", 1.6 kHz " + num (g.at (1600.0f), 1) + ", 12 kHz " + num (g.at (12000.0f), 1) + " dB");
         }
 
+        // what Body applies (and an editor draws) is the curve times the amount
+        {
+            const auto g = vs::BodyCurve::generic();
+            bool same = true;
+            for (float hz : { 30.0f, 220.0f, 1600.0f, 12000.0f })
+                for (float a : { 0.0f, 0.35f, 1.0f, 1.5f })
+                    same = same && g.appliedDb (hz, a) == a * g.at (hz);
+            expect ("applied dB: the curve scaled by the amount", same);
+        }
+
         // text round-trip (what the plugin state stores)
         {
             const auto back = vs::BodyCurve::fromString (c.toString());

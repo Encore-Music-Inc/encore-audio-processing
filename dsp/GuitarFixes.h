@@ -6,6 +6,7 @@
 #include "Biquad.h"
 #include "Dynamics.h"
 #include "Fft.h"
+#include "Spectrum.h"
 #include "Windows.h"
 #include "Util.h"
 
@@ -46,10 +47,10 @@ namespace vs
         void prepare (double sampleRate)
         {
             fs = sampleRate;
-            hiA.c = BiquadCoefs::highPass (fs, 1500.0, 0.7071);
-            hiB.c = BiquadCoefs::lowPass (fs, std::min (8000.0, fs * 0.45), 0.7071);
-            midA.c = BiquadCoefs::highPass (fs, 400.0, 0.7071);
-            midB.c = BiquadCoefs::lowPass (fs, 1200.0, 0.7071);
+            hiA.c = BiquadCoefs::highPass (fs, 1500.0, butterworthQ2);
+            hiB.c = BiquadCoefs::lowPass (fs, std::min (8000.0, fs * 0.45), butterworthQ2);
+            midA.c = BiquadCoefs::highPass (fs, 400.0, butterworthQ2);
+            midB.c = BiquadCoefs::lowPass (fs, 1200.0, butterworthQ2);
             for (auto* b : { &hiA, &hiB, &midA, &midB }) b->reset();
             hiAtk = onePole (1.0f, fs);  hiRel = onePole (12.0f, fs);
             smoothC = onePole (4.0f, fs); // two in series: mid power that ignores the fastest beating
@@ -80,9 +81,7 @@ namespace vs
                 const float dt = (float) len / (float) fs;
                 for (int i = start; i < start + len; ++i)
                 {
-                    float m = 0.0f;
-                    for (int c = 0; c < numCh; ++c) m += ch[c][i];
-                    m /= (float) numCh;
+                    const float m = channelMean (ch, numCh, i);
                     const float h = hiB.process (0, hiA.process (0, m));
                     const float md = midB.process (0, midA.process (0, m));
                     followEnvelope (eh, h * h, hiAtk, hiRel);
@@ -160,8 +159,8 @@ namespace vs
         void prepare (double sampleRate)
         {
             fs = sampleRate;
-            bandA.c = BiquadCoefs::highPass (fs, 2000.0, 0.7071);
-            bandB.c = BiquadCoefs::lowPass (fs, std::min (6000.0, fs * 0.45), 0.7071);
+            bandA.c = BiquadCoefs::highPass (fs, 2000.0, butterworthQ2);
+            bandB.c = BiquadCoefs::lowPass (fs, std::min (6000.0, fs * 0.45), butterworthQ2);
             bandA.reset(); bandB.reset();
             fastAtk = onePole (0.3f, fs); fastRel = onePole (10.0f, fs);
             slowAtk = onePole (20.0f, fs); slowRel = onePole (150.0f, fs);
@@ -182,9 +181,7 @@ namespace vs
                 const int len = std::min (sub, n - start);
                 for (int i = start; i < start + len; ++i)
                 {
-                    float m = 0.0f;
-                    for (int c = 0; c < numCh; ++c) m += ch[c][i];
-                    m /= (float) numCh;
+                    const float m = channelMean (ch, numCh, i);
                     const float b = bandB.process (0, bandA.process (0, m));
                     const float p = b * b;
                     followEnvelope (fast, p, fastAtk, fastRel);
@@ -241,16 +238,11 @@ namespace vs
             const int order = sampleRate > 100000.0 ? 16 : sampleRate > 50000.0 ? 15 : 14; // ~3 Hz bins
             size = 1 << order;
             hop = size / 2;
-            fft.setSize (size);
-            window = windows::hannPeriodicFloat (size);
             ring.assign ((size_t) size, 0.0f);
-            work.assign ((size_t) size, 0.0f);
-            re.assign ((size_t) size / 2 + 1, 0.0);
-            im.assign ((size_t) size / 2 + 1, 0.0);
-            framePower.assign ((size_t) size / 2 + 1, 0.0);
-            power.assign ((size_t) size / 2 + 1, 0.0);
+            lts.prepare (size, true);
+            lts.setRunningAverage (18, 0.06); // a plain mean for the first frames, then ~3 s memory
             prefix.assign ((size_t) size / 2 + 2, 0.0);
-            write = filled = sinceFrame = frames = 0;
+            write = filled = sinceFrame = 0;
             found = false;
             foundHz = 0.0f;
             prominenceDb = 0.0f;
@@ -276,9 +268,7 @@ namespace vs
                 const int len = std::min (sub, n - start);
                 for (int i = start; i < start + len; ++i)
                 {
-                    float m = 0.0f;
-                    for (int c = 0; c < numCh; ++c) m += ch[c][i];
-                    m /= (float) numCh;
+                    const float m = channelMean (ch, numCh, i);
 
                     ring[(size_t) write] = m;
                     write = (write + 1) % size;
@@ -332,24 +322,15 @@ namespace vs
 
         void analyse()
         {
-            for (int i = 0; i < size; ++i)
-                work[(size_t) i] = ring[(size_t) ((write + i) % size)] * window[(size_t) i];
-            fft.power (work.data(), framePower.data(), re.data(), im.data());
+            lts.addRing (ring.data(), write);
+            if (lts.frames() < 4) return; // need ~0.7 s before trusting it
+            const auto& power = lts.sum();
 
-            // long-term average: a plain mean for the first frames, then ~3 s memory
-            ++frames;
-            const double k = frames < 18 ? 1.0 / frames : 0.06;
-            for (int b = 0; b <= size / 2; ++b)
-                power[(size_t) b] += k * (framePower[(size_t) b] - power[(size_t) b]);
-            if (frames < 4) return; // need ~0.7 s before trusting it
-
-            for (int b = 0; b <= size / 2; ++b) prefix[(size_t) b + 1] = prefix[(size_t) b] + power[(size_t) b];
+            prefixSums (power, prefix);
             const double binHz = fs / size;
             const auto avgDb = [&] (double f, double octaves)
             {
-                const int b1 = juce::jlimit (1, size / 2, (int) std::lround (f * std::pow (2.0, -octaves * 0.5) / binHz));
-                const int b2 = juce::jlimit (b1, size / 2, (int) std::lround (f * std::pow (2.0, octaves * 0.5) / binHz));
-                return db10 ((prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / (b2 - b1 + 1), 1e-30);
+                return db10 (bandMean (prefix, f, octaves, binHz, 1, size / 2), 1e-30);
             };
 
             double maxLevel = -400.0;
@@ -387,10 +368,10 @@ namespace vs
         }
 
         double fs = 48000.0;
-        int size = 16384, hop = 8192, write = 0, filled = 0, sinceFrame = 0, frames = 0;
-        RealFft fft;
-        std::vector<float> window, ring, work;
-        std::vector<double> re, im, framePower, power, prefix;
+        int size = 16384, hop = 8192, write = 0, filled = 0, sinceFrame = 0;
+        std::vector<float> ring;
+        LongTermSpectrum lts; // the long-term average of frame powers
+        std::vector<double> prefix;
         bool found = false;
         float foundHz = 0.0f, detHz = 0.0f, prominenceDb = 0.0f, relDb = -100.0f;
 

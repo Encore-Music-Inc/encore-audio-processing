@@ -4,6 +4,7 @@
 #include <cmath>
 #include "Channels.h"
 #include "DelayLine.h"
+#include "Oscillator.h"
 
 namespace vs
 {
@@ -28,18 +29,18 @@ namespace vs
         {
             fs = sampleRate;
             for (auto& d : delays) { d.prepare ((int) std::ceil ((baseMs + maxDepthMs + 2.0f) * 0.001 * fs)); d.clear(); }
-            phase = 0.0;
+            lfo[0].setPhase (0.0);
         }
 
-        void reset() { for (auto& d : delays) d.clear(); phase = 0.0; }
+        void reset() { for (auto& d : delays) d.clear(); lfo[0].setPhase (0.0); }
         void setSettings (const Settings& s) { set = s; set.depthMs = std::clamp (s.depthMs, 0.0f, maxDepthMs); }
         const Settings& getSettings() const { return set; }
 
         // numCh channels (1 or 2) of n samples, in place
         void process (float* const* ch, int numCh, int n)
         {
-            constexpr double twoPi = 6.283185307179586;
-            const double step = twoPi * set.speedHz / fs;
+            // the right channel's sweep: width x half a cycle ahead
+            lfo[1].setPhase (lfo[0].getPhase() + 0.5 * set.width);
             const float minS = (float) (baseMs * 0.001 * fs), maxS = (float) ((baseMs + set.depthMs) * 0.001 * fs);
             const float half = 0.5f * (maxS - minS), centre = minS + half;
             const float wet = (float) channels::fadeGain (channels::FadeCurve::quarterSine, set.mix);
@@ -49,21 +50,20 @@ namespace vs
             {
                 for (int c = 0; c < nc; ++c)
                 {
-                    const double ph = phase + (c == 1 ? 3.141592653589793 * set.width : 0.0);
-                    const float delay = centre + half * (float) std::sin (ph);
+                    // one step a sample; lfo[1] is set from lfo[0] each block
+                    const float delay = centre + half * lfo[c].next (set.speedHz, fs);
                     auto& d = delays[(size_t) c];
                     const float in = ch[c][i];
                     d.write (in);
                     const float out = d.read (delay);
                     ch[c][i] = out * wet + in * dry;
                 }
-                phase += step;
-                if (phase >= twoPi) phase -= twoPi;
             }
         }
 
     private:
-        double fs = 48000.0, phase = 0.0;
+        double fs = 48000.0;
+        Oscillator lfo[2]; // the sweep, one per channel (sines)
         Settings set;
         DelayLine delays[2];
     };

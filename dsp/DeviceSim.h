@@ -67,34 +67,21 @@ namespace vs
         // The frequency is kept to 0 .. fs / 2.
         inline BiquadCoefs design (const Filter& f, double fs)
         {
-            const double nyquist = fs / 2, freq = std::max (0.0, std::min (nyquist, f.frequency));
-            const double A = std::pow (10.0, f.gainDb / 40);
-            const double w0 = 2 * 3.141592653589793 * freq / fs, c = std::cos (w0), s = std::sin (w0);
-            const double alphaQ = s / (2 * f.q);
-            const double alphaQdB = s / (2 * std::pow (10.0, f.q / 20));
-            const double alphaS = s / 2 * std::sqrt (2.0); // S = 1
+            using T = BiquadCoefs::Type;
+            const double freq = std::max (0.0, std::min (fs / 2, f.frequency));
+            // lowpass and highpass take their Q in dB; the shelves have a slope of 1 (Q = 1 / sqrt 2)
+            const double qdB = std::pow (10.0, f.q / 20), shelfQ = 1.0 / std::sqrt (2.0);
+            BiquadCoefs::Raw r {};
             switch (f.type)
             {
-                case FilterType::lowpass:
-                    return BiquadCoefs::make ((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + alphaQdB, -2 * c, 1 - alphaQdB);
-                case FilterType::highpass:
-                    return BiquadCoefs::make ((1 + c) / 2, -(1 + c), (1 + c) / 2, 1 + alphaQdB, -2 * c, 1 - alphaQdB);
-                case FilterType::peaking:
-                    return BiquadCoefs::make (1 + alphaQ * A, -2 * c, 1 - alphaQ * A, 1 + alphaQ / A, -2 * c, 1 - alphaQ / A);
-                case FilterType::lowshelf:
-                {
-                    const double k = 2 * alphaS * std::sqrt (A);
-                    return BiquadCoefs::make (A * ((A + 1) - (A - 1) * c + k), 2 * A * ((A - 1) - (A + 1) * c), A * ((A + 1) - (A - 1) * c - k),
-                                              (A + 1) + (A - 1) * c + k, -2 * ((A - 1) + (A + 1) * c), (A + 1) + (A - 1) * c - k);
-                }
-                case FilterType::highshelf:
-                {
-                    const double k = 2 * alphaS * std::sqrt (A);
-                    return BiquadCoefs::make (A * ((A + 1) + (A - 1) * c + k), -2 * A * ((A - 1) + (A + 1) * c), A * ((A + 1) + (A - 1) * c - k),
-                                              (A + 1) - (A - 1) * c + k, 2 * ((A - 1) - (A + 1) * c), (A + 1) - (A - 1) * c - k);
-                }
+                case FilterType::lowpass:   r = BiquadCoefs::rbjRaw (T::lowPass, fs, freq, qdB); break;
+                case FilterType::highpass:  r = BiquadCoefs::rbjRaw (T::highPass, fs, freq, qdB); break;
+                case FilterType::peaking:   r = BiquadCoefs::rbjRaw (T::peak, fs, freq, f.q, f.gainDb); break;
+                case FilterType::lowshelf:  r = BiquadCoefs::rbjRaw (T::lowShelf, fs, freq, shelfQ, f.gainDb); break;
+                case FilterType::highshelf: r = BiquadCoefs::rbjRaw (T::highShelf, fs, freq, shelfQ, f.gainDb); break;
+                default: return {};
             }
-            return {};
+            return BiquadCoefs::make (r.b0, r.b1, r.b2, r.a0, r.a1, r.a2);
         }
     }
 

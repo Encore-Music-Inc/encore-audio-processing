@@ -1122,4 +1122,63 @@ namespace vs::harmony
         for (auto n : options) if (sign (music::signature ({ n, key.mode })) == sign (music::signature (key))) return { n, key.mode };
         return { options[0], key.mode };
     }
+    // The key a song's chords most likely belong to (none with no chords):
+    // each key's own chords and sevenths count for it (+1 each, -0.6 for a
+    // chord outside), the home chord pulls (+1.2 first, +1.5 last, +0.3 for
+    // each time), and fewer sharps or flats breaks a tie (C over B#). Major
+    // keys are tried before minor ones, each list in its usual order, and a
+    // later key wins only with a higher score.
+    inline std::optional<Key> guessKey (const std::vector<Chord>& cs)
+    {
+        if (cs.empty()) return std::nullopt;
+        auto id = [] (const Chord& c) { return std::string_view (typeOf (c).id); };
+        // a minor-sounding type: starts with m (but not maj), or diminished, or half-diminished
+        auto startsMinor = [] (std::string_view t) { return t.size() >= 1 && t[0] == 'm' && t.substr (1, 2) != "aj"; };
+        auto has = [] (std::string_view t, std::string_view x) { return t.find (x) != std::string_view::npos; };
+        auto minorish = [&] (std::string_view t) { return startsMinor (t) || has (t, "dim") || has (t, "m7b5"); };
+        auto sameQuality = [&] (std::string_view a, std::string_view b) { return minorish (a) == minorish (b) && has (a, "dim") == has (b, "dim"); };
+        std::optional<Key> best;
+        double bestScore = -1e9;
+        for (const Mode mode : { Mode::major, Mode::minor })
+            for (const char* t : mode == Mode::minor ? music::minorKeys : music::majorKeys)
+            {
+                const Key key = *music::makeKey (t, mode);
+                const auto pal = keyPalette (key);
+                std::vector<const PaletteEntry*> own;
+                for (const auto& [g, items] : pal.groups)
+                    if (g == PaletteGroup::diatonic) for (const auto& e : items) own.push_back (&e);
+                for (const auto& [g, items] : pal.groups)
+                    if (g == PaletteGroup::sevenths) for (const auto& e : items) own.push_back (&e);
+                auto fits = [&] (const Chord& c)
+                {
+                    for (const auto* e : own)
+                        if (pcOf (e->chord.root) == pcOf (c.root) && sameQuality (id (e->chord), id (c))) return true;
+                    return false;
+                };
+                auto home = [&] (const Chord& c)
+                {
+                    if (pcOf (c.root) != pcOf (key.tonic)) return false;
+                    return mode == Mode::minor ? startsMinor (id (c)) : ! (startsMinor (id (c)) || has (id (c), "dim"));
+                };
+                double score = 0;
+                for (const auto& c : cs) score = score + (fits (c) ? 1 : -0.6);
+                score = score + (home (cs.front()) ? 1.2 : 0) + (home (cs.back()) ? 1.5 : 0);
+                int homes = 0;
+                for (const auto& c : cs) if (home (c)) ++homes;
+                score = score + homes * 0.3;
+                score -= std::abs (music::signature (key)) * 0.01;
+                if (score > bestScore) { bestScore = score; best = key; }
+            }
+        return best;
+    }
+
+    // A capo that plays a shift up (or down, as the same shift up) with the
+    // original chord shapes: 1 to maxCapo frets, or none
+    inline std::optional<int> capoForShift (int semis, int maxCapo = 7)
+    {
+        const int k = mod12 (semis);
+        if (k >= 1 && k <= maxCapo) return k;
+        return std::nullopt;
+    }
+
 }

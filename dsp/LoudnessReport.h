@@ -76,7 +76,7 @@ namespace vs
             {
                 double e = 0.0;
                 for (int k = from; k < from + count; ++k) e += kL[(size_t) k] + kR[(size_t) k];
-                return -0.691 + 10.0 * std::log10 (e / (count * hop) + 1e-20);
+                return lufsOf (e / (count * hop));
             };
 
             // short-term: 30 blocks (3 s), every 100 ms; a song under 3 s is one window
@@ -149,7 +149,7 @@ namespace vs
                 if (data[c] == nullptr) continue;
                 float p = 0.0f;
                 double e = 0.0;
-                for (int i = 0; i < samples; ++i) { p = std::max (p, std::abs (data[c][i])); e += data[c][i] * data[c][i]; }
+                for (int i = 0; i < samples; ++i) { p = std::max (p, std::abs (data[c][i])); e += (double) data[c][i] * (double) data[c][i]; }
                 peak[(size_t) c] = std::max (peak[(size_t) c], p);
                 energy[(size_t) c] += e;
             }
@@ -189,7 +189,7 @@ namespace vs
             meter.reset();
             peaks.reset();
             frames = 0;
-            sumSq[0] = sumSq[1] = 0.0;
+            levels = ChannelLevels (channels);
         }
 
         // r is read only for two channels.
@@ -199,12 +199,7 @@ namespace vs
             meter.process (l, r, n);
             const float* ch[2] { l, r };
             peaks.process (ch, n);
-            for (int c = 0; c < channels; ++c)
-            {
-                double s = 0.0;
-                for (int i = 0; i < n; ++i) s += (double) ch[c][i] * (double) ch[c][i];
-                sumSq[c] += s;
-            }
+            levels.add (ch, channels, n);
             frames += n;
         }
 
@@ -222,7 +217,7 @@ namespace vs
             for (int c = 0; c < channels; ++c)
             {
                 rep.peakDb[c] = loudness::db20 (peaks.samplePeak (c));
-                rep.rmsDb[c] = loudness::db10 (frames > 0 ? sumSq[c] / (double) frames : 0.0);
+                rep.rmsDb[c] = loudness::db10 (frames > 0 ? levels.energy[(size_t) c] / (double) frames : 0.0);
             }
             return rep;
         }
@@ -233,7 +228,7 @@ namespace vs
         LoudnessMeter meter;
         TruePeakMeter peaks;
         std::int64_t frames = 0;
-        double sumSq[2] {};
+        ChannelLevels levels;
     };
 
     // The report of a whole song: r null for one channel.

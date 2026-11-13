@@ -5,6 +5,10 @@
 
 namespace vs
 {
+    // 1 / sqrt 2: the Q of a second-order Butterworth section (the flattest
+    // response, -3 dB at the cut-off)
+    inline constexpr double butterworthQ2 = 0.7071067811865476;
+
     // Coefficient for a one-pole smoother of the form  y += c * (x - y),
     // reaching ~63% of a step after timeMs.
     inline float onePole (float timeMs, double sampleRate)
@@ -27,6 +31,29 @@ namespace vs
     inline void followEnvelope (float& env, float x, float up, float down)
     {
         env += (x > env ? up : down) * (x - env);
+    }
+
+    // Sample i of every channel averaged (a float sum, then divided by the
+    // count): what a detector listens to.
+    inline float channelMean (const float* const* ch, int numCh, int i)
+    {
+        float m = 0.0f;
+        for (int c = 0; c < numCh; ++c) m += ch[c][i];
+        return m / (float) numCh;
+    }
+
+    // The same with an instant rise: env jumps up to x, and falls toward it by
+    // `down` of the difference (a peak follower).
+    inline void followPeak (float& env, float x, float down)
+    {
+        env = x > env ? x : env + down * (x - env);
+    }
+
+    // The same upside down: env drops to x at once, and rises toward it by
+    // `up` of the difference (a gain that cuts at once and recovers).
+    inline void followTrough (float& env, float x, float up)
+    {
+        env = x < env ? x : env + up * (x - env);
     }
 
     // Decibels. Each takes the small amount added before the logarithm (so

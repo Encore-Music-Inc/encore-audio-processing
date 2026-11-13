@@ -37,13 +37,11 @@ namespace vs
                 case lowCut:
                 case highCut:
                 {
-                    static const double q4[2] { 0.5412, 1.3066 };
-                    static const double q8[4] { 0.5098, 0.6013, 0.9000, 2.5629 };
                     const int n = s.slope == 0 ? 1 : s.slope == 1 ? 2 : 4;
                     for (int i = 0; i < n; ++i)
                     {
                         // 12 dB/oct uses the band's Q (lets you add a resonant bump); steeper slopes are pure Butterworth
-                        const double q = n == 1 ? (double) s.q : n == 2 ? q4[i] : q8[i];
+                        const double q = n == 1 ? (double) s.q : butterworthQ (2 * n, i);
                         out[(size_t) i] = s.type == lowCut ? BiquadCoefs::highPass (fs, s.freq, q) : BiquadCoefs::lowPass (fs, s.freq, q);
                     }
                     return n;
@@ -135,7 +133,7 @@ namespace vs
             fs = sampleRate;
             // Both detectors average power the same way (10 ms) so their ratio
             // is the true relative level whatever the source's crest factor.
-            avgC = 1.0f - std::exp (-1.0f / (0.01f * (float) fs));
+            avgC = onePole (10.0f, fs);
             envB = envF = 1.0e-9f;
             cutDb = 0.0f;
             bell.prepare (fs, settings.freq, settings.q, -dynamics::noLimit);
@@ -159,15 +157,13 @@ namespace vs
 
             for (int i = start; i < start + len; ++i)
             {
-                float m = 0.0f;
-                for (int c = 0; c < numCh; ++c) m += ch[c][i];
-                m /= (float) numCh;
+                const float m = channelMean (ch, numCh, i);
                 const float b = det.process (0, m);
                 envB += avgC * (b * b - envB);
                 envF += avgC * (m * m - envF);
             }
 
-            const float relDb = 10.0f * std::log10 ((envB + 1e-12f) / (envF + 1e-12f));
+            const float relDb = powerToDb ((envB + 1e-12f) / (envF + 1e-12f), 0.0f);
             const float fullDb = powerToDb (envF);
             const float target = fullDb > -70.0f ? dynamics::cutDb (relDb - settings.thresholdDb, 1.5f, 0.0f, settings.rangeDb) : 0.0f;
 
@@ -234,7 +230,7 @@ namespace vs
         {
             settings = s;
             const float atkMs = 80.0f - 70.0f * s.speed, relMs = 400.0f - 330.0f * s.speed;
-            envC = 1.0f - std::exp (-1.0f / (0.01f * (float) fs));
+            envC = onePole (10.0f, fs);
             atk = atkMs; rel = relMs;
         }
 
@@ -253,9 +249,7 @@ namespace vs
             {
                 for (int i = start; i < start + len; ++i)
                 {
-                    float m = 0.0f;
-                    for (int c = 0; c < scCh; ++c) m += sc[c][i];
-                    m /= (float) scCh;
+                    const float m = channelMean (sc, scCh, i);
                     totalPow += m * m;
                     for (int k = 0; k < numBands; ++k)
                     {

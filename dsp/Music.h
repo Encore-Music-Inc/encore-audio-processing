@@ -28,7 +28,7 @@ namespace vs::music
 
     inline constexpr std::array<const char*, 7> letters { "C", "D", "E", "F", "G", "A", "B" };
     inline constexpr std::array<int, 7> letterPc { 0, 2, 4, 5, 7, 9, 11 };
-    inline constexpr std::array<int, 7> majorSemis { 0, 2, 4, 5, 7, 9, 11 };   // the major scale's degrees 1..7
+    inline constexpr std::array<int, 7> majorSemis = letterPc;   // the major scale's degrees 1..7 (C major is the naturals)
 
     // ---- spelled notes: a letter and an accidental, so F# and Gb stay different notes
 

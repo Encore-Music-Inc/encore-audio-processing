@@ -433,7 +433,7 @@ namespace vs
             : Decimator (factor > 1 ? butterworth (BiquadCoefs::Type::lowPass, fs, (0.42 * fs) / factor, 8) : std::vector<BiquadCoefs> {}, factor) {}
 
         Decimator (std::vector<BiquadCoefs> sections, int factor, bool floatBetweenSections = false)
-            : step (factor), floatStore (floatBetweenSections), filter (std::move (sections), 1) {}
+            : step (factor), floatStore (floatBetweenSections), filter (std::move (sections), 2) {}
 
         int factor() const { return step; }
 
@@ -441,9 +441,11 @@ namespace vs
         int maxOutput (int n) const { return n / std::max (1, step) + 1; }
 
         // Filters n samples and writes the kept ones to out; returns how many.
+        // (With no filter, every sample is kept as it is; a factor of 1 with a
+        // filter keeps every filtered sample.)
         int push (const float* x, int n, float* out)
         {
-            if (step <= 1 || filter.getSections().empty())
+            if (filter.getSections().empty())
             {
                 std::copy (x, x + n, out);
                 return n;
@@ -465,32 +467,54 @@ namespace vs
             return o;
         }
 
+        // Two channels at once (r null for one): the same kept samples as
+        // push() gives each channel on its own, filtered in one pass. Writes
+        // the kept ones to outL (and outR); returns how many.
+        int pushPair (const float* l, const float* r, int n, float* outL, float* outR)
+        {
+            if (filter.getSections().empty())
+            {
+                std::copy (l, l + n, outL);
+                if (r != nullptr) std::copy (r, r + n, outR);
+                return n;
+            }
+            int o = 0, i = phase;
+            if (floatStore)
+            {
+                fbuf.assign (l, l + n);
+                fbufR.assign (r != nullptr ? r : l, (r != nullptr ? r : l) + (r != nullptr ? n : 0));
+                filter.processPair (fbuf.data(), r != nullptr ? fbufR.data() : nullptr, n);
+                for (; i < n; i += step, ++o) { outL[o] = fbuf[(size_t) i]; if (r != nullptr) outR[o] = fbufR[(size_t) i]; }
+            }
+            else
+            {
+                dbuf.assign (l, l + n);
+                dbufR.assign (r != nullptr ? r : l, (r != nullptr ? r : l) + (r != nullptr ? n : 0));
+                filter.processPair (dbuf.data(), r != nullptr ? dbufR.data() : nullptr, n);
+                for (; i < n; i += step, ++o) { outL[o] = (float) dbuf[(size_t) i]; if (r != nullptr) outR[o] = (float) dbufR[(size_t) i]; }
+            }
+            phase = i - n;
+            return o;
+        }
+
         void reset() { filter.reset(); phase = 0; }
 
     private:
         int step, phase = 0;
         bool floatStore;
         BiquadChain filter;
-        std::vector<float> fbuf;
-        std::vector<double> dbuf;
+        std::vector<float> fbuf, fbufR;
+        std::vector<double> dbuf, dbufR;
     };
 
     // A low-band analysis copy of a whole signal: two passes of a 1 kHz
-    // Butterworth-Q (0.7071) low-pass stored as float, then every d-th sample,
+    // Butterworth-Q (1 / sqrt 2) low-pass stored as float, then every d-th sample,
     // floor (n / d) of them. out must hold n / d + 1 samples. Returns the count.
     inline int decimateLowBand (const float* x, int n, double fs, int d, float* out)
     {
-        const auto lp = BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fs, 1000.0, 0.7071067811865476);
+        const auto lp = BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fs, 1000.0, butterworthQ2);
         Decimator dec ({ lp, lp }, std::max (1, d), true);
-        if (d <= 1)
-        {
-            // the filter still runs: only the keeping is skipped
-            std::vector<float> tmp (x, x + n);
-            BiquadChain ({ lp, lp }, 1).process (0, tmp.data(), n);
-            std::copy (tmp.begin(), tmp.end(), out);
-            return n;
-        }
         dec.push (x, n, out);
-        return n / d;
+        return n / std::max (1, d);
     }
 }

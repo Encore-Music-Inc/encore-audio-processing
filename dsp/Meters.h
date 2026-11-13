@@ -92,6 +92,34 @@ namespace vs
             return db > faderFloorDb ? std::exp ((db - faderTopDb) * (1.0f / 20.0f)) : 0.0f;
         }
 
+        // A level in dB as a meter reads it: silence (faderFloorDb) for no signal.
+        inline float levelDb (float gain)
+        {
+            return gain > 0.0f ? ampToDb (gain, 0.0f) : faderFloorDb;
+        }
+
+        // A sample over this gain lights the overload light.
+        inline constexpr float overloadGain = 0.999f;
+
+        // The highest level since a meter last read it, with when it came (ms).
+        // A reading replaces the held one when it is at least as loud (so a
+        // later equal reading moves the time, and a NaN never replaces it);
+        // taking it leaves silence at the same time, for the next block.
+        struct Reading { std::uint32_t timeMs = 0; float db = faderFloorDb; };
+
+        inline void keepHighest (Reading& held, Reading r)
+        {
+            // NaN first, by name: a fast-math build may let it through the comparison
+            if (! std::isnan (r.db) && r.db >= held.db) held = r;
+        }
+
+        inline Reading takeHighest (Reading& held)
+        {
+            const Reading r = held;
+            held.db = faderFloorDb;
+            return r;
+        }
+
         inline float faderPositionToGain (float position)
         {
             return position > 0.0f ? std::pow (10.0f, (20.0f * std::log (position) + faderTopDb) * (1.0f / 20.0f)) : 0.0f;

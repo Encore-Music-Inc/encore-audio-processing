@@ -42,6 +42,13 @@ namespace vs
             }
         }
 
+        // x blended with other, sample by sample, by a gain per sample (0 keeps
+        // x, 1 is other): x (1 - g) + other g. A crossfade worked out ahead.
+        inline void blend (float* x, const float* other, const float* otherGain, int n)
+        {
+            for (int i = 0; i < n; ++i) x[i] = x[i] * (1.0f - otherGain[i]) + other[i] * otherGain[i];
+        }
+
         // A send-style dry/wet law for a mix amount (0 dry only .. 1 wet only):
         // dry stays full up to the middle, wet reaches full at the middle, so
         // the middle of the knob is "both at full"
@@ -101,6 +108,9 @@ namespace vs
                               : 1.0f;
             return { std::pow (l, power) * gain, std::pow (r, power) * gain };
         }
+
+        // A DAW's playback level while the play head is dragged (scrubbing)
+        inline constexpr float scrubGain = 0.4f;
 
         // n samples of each channel times a fixed gain (the gain stage with no ramp)
         inline void applyGain (float gain, float* const* ch, int numCh, int n)

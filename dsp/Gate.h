@@ -41,13 +41,13 @@ namespace vs
                 for (int c = 0; c < numCh; ++c)
                     peak = std::max (peak, std::abs (ch[c][i]));
 
-                env = peak > env ? peak : env + relCoef * (peak - env);
+                followPeak (env, peak, relCoef);
 
                 if (env > openThr)            { open = true; holdCount = holdSamples; }
                 else if (env < closeThr)      { if (holdCount > 0) --holdCount; else open = false; }
 
                 const float target = open ? 1.0f : floorGain;
-                gain += (target > gain ? openCoef : closeCoef) * (target - gain);
+                followEnvelope (gain, target, openCoef, closeCoef);
 
                 for (int c = 0; c < numCh; ++c)
                     ch[c][i] *= gain;

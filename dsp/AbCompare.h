@@ -7,6 +7,7 @@
 #include "Loudness.h"
 #include "Util.h"
 #include "DelayLine.h"
+#include "Mix.h"
 #include "Ramp.h"
 
 namespace vs
@@ -91,11 +92,7 @@ namespace vs
             if (match != Match::live && (processedGain.isRamping() || processedGain.getTarget() != 1.0f))
             {
                 // a fixed match: the processed version at its gain, then the crossfade as below
-                for (int i = 0; i < n; ++i)
-                {
-                    const float pg = processedGain.next();
-                    for (int c = 0; c < nch; ++c) ch[c][i] *= pg;
-                }
+                mix::applyGain (processedGain, ch, nch, n);
             }
             if (mixRamp.isRamping() || mixRamp.getTarget() < 0.5f)
             {

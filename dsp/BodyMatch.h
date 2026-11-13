@@ -12,8 +12,10 @@
 #include <vector>
 #include "JuceInclude.h"
 #include "Biquad.h"
+#include "Channels.h"
 #include "Convolution.h"
 #include "Fft.h"
+#include "Spectrum.h"
 #include "Util.h"
 #include "Windows.h"
 
@@ -58,6 +60,10 @@ namespace vs
             const float t = pos - (float) i;
             return lerp (db[(size_t) i], db[(size_t) i + 1], t);
         }
+
+        // The dB Body applies at a frequency at an amount (0..1 and beyond):
+        // the curve scaled, what the filter is built from and what an editor draws
+        float appliedDb (float hz, float amount) const { return amount * at (hz); }
 
         bool operator== (const BodyCurve& o) const { return db == o.db && levelDb == o.levelDb && valid == o.valid; }
 
@@ -194,16 +200,12 @@ namespace vs
             const int order = sampleRate > 100000.0 ? 14 : sampleRate > 50000.0 ? 13 : 12; // ~85 ms frames
             size = 1 << order;
             hop = size / 2;
-            fft.setSize (size);
-            window = windows::hannPeriodicFloat (size);
             ringDi.assign ((size_t) size, 0.0f);
             ringMic.assign ((size_t) size, 0.0f);
-            work.assign ((size_t) size, 0.0f);
-            re.assign ((size_t) size / 2 + 1, 0.0);
-            im.assign ((size_t) size / 2 + 1, 0.0);
-            framePower.assign ((size_t) size / 2 + 1, 0.0);
-            sumDi.assign ((size_t) size / 2 + 1, 0.0);
-            sumMic.assign ((size_t) size / 2 + 1, 0.0);
+            ltsDi.prepare (size, true);
+            ltsMic.prepare (size, true);
+            prefixDi.assign ((size_t) size / 2 + 2, 0.0);
+            prefixMic.assign ((size_t) size / 2 + 2, 0.0);
             learning = false;
             progress = 0.0f;
         }
@@ -274,16 +276,13 @@ namespace vs
             std::array<bool, BodyCurve::numPoints> ok {};
             double maxD = 0.0, maxM = 0.0;
 
+            prefixSums (ltsDi.sum(), prefixDi);
+            prefixSums (ltsMic.sum(), prefixMic);
             for (int i = 0; i < BodyCurve::numPoints; ++i)
             {
                 const double f = BodyCurve::freq (i);
-                int b1 = (int) std::lround (f * std::pow (2.0, -1.0 / 6.0) / binHz);
-                int b2 = (int) std::lround (f * std::pow (2.0, 1.0 / 6.0) / binHz);
-                b1 = std::clamp (b1, 1, last);
-                b2 = std::clamp (b2, b1, last);
-                for (int b = b1; b <= b2; ++b) { pd[(size_t) i] += sumDi[(size_t) b]; pm[(size_t) i] += sumMic[(size_t) b]; }
-                pd[(size_t) i] /= (b2 - b1 + 1);
-                pm[(size_t) i] /= (b2 - b1 + 1);
+                pd[(size_t) i] = bandMean (prefixDi, f, 1.0 / 3.0, binHz, 1, last);
+                pm[(size_t) i] = bandMean (prefixMic, f, 1.0 / 3.0, binHz, 1, last);
                 if (f >= 60.0 && f <= 12000.0) { maxD = std::max (maxD, pd[(size_t) i]); maxM = std::max (maxM, pm[(size_t) i]); }
             }
 
@@ -341,8 +340,8 @@ namespace vs
     private:
         void begin()
         {
-            std::fill (sumDi.begin(), sumDi.end(), 0.0);
-            std::fill (sumMic.begin(), sumMic.end(), 0.0);
+            ltsDi.clear();
+            ltsMic.clear();
             std::fill (ringDi.begin(), ringDi.end(), 0.0f);
             std::fill (ringMic.begin(), ringMic.end(), 0.0f);
             write = filled = sinceFrame = 0;
@@ -385,25 +384,16 @@ namespace vs
             peakMic = std::max (peakMic, mDb);
             if (dDb < -65.0f || mDb < -65.0f || dDb < peakDi - 30.0f || mDb < peakMic - 30.0f) return;
 
-            accumulate (ringDi, sumDi);
-            accumulate (ringMic, sumMic);
+            ltsDi.addRing (ringDi.data(), write);
+            ltsMic.addRing (ringMic.data(), write);
             activeSeconds += (float) hop / (float) fs;
-        }
-
-        void accumulate (const std::vector<float>& ring, std::vector<double>& sum)
-        {
-            for (int i = 0; i < size; ++i)
-                work[(size_t) i] = ring[(size_t) ((write + i) % size)] * window[(size_t) i];
-            fft.power (work.data(), framePower.data(), re.data(), im.data());
-            for (int b = 0; b <= size / 2; ++b)
-                sum[(size_t) b] += framePower[(size_t) b];
         }
 
         double fs = 48000.0;
         int size = 4096, hop = 2048, write = 0, filled = 0, sinceFrame = 0;
-        RealFft fft;
-        std::vector<float> window, ringDi, ringMic, work;
-        std::vector<double> re, im, framePower, sumDi, sumMic;
+        std::vector<float> ringDi, ringMic;
+        LongTermSpectrum ltsDi, ltsMic; // each a sum of frame powers
+        mutable std::vector<double> prefixDi, prefixMic; // their prefix sums, for the curve
         float activeSeconds = 0.0f, peakDi = -200.0f, peakMic = -200.0f;
         BodyCurve result;
         std::atomic<bool> learning { false }, startRequested { false }, stopRequested { false }, resultReady { false };
@@ -437,7 +427,7 @@ namespace vs
             for (int k = 0; k <= n / 2; ++k)
             {
                 const float hz = (float) (k * fs / n);
-                const float lm = amount * curve.at (hz) * (float) (std::log (10.0) / 20.0);
+                const float lm = curve.appliedDb (hz, amount) * (float) (std::log (10.0) / 20.0);
                 re[(size_t) k] = lm;
                 if (k > 0 && k < n / 2) re[(size_t) (n - k)] = lm;
             }
@@ -459,13 +449,12 @@ namespace vs
 
             // keep the start (where a minimum-phase response has its energy),
             // with a gentle fade over the last quarter
-            constexpr float pi = 3.141592653589793238f;
             std::vector<float> ir ((size_t) len);
             const int fadeFrom = len * 3 / 4;
             for (int i = 0; i < len; ++i)
             {
-                float w = 1.0f;
-                if (i >= fadeFrom) w = 0.5f + 0.5f * std::cos (pi * (float) (i - fadeFrom) / (float) (len - fadeFrom));
+                const double t = i >= fadeFrom ? (double) (i - fadeFrom) / (double) (len - fadeFrom) : 0.0;
+                const float w = i >= fadeFrom ? (float) channels::fadeOutGain (channels::FadeCurve::sineSquared, t) : 1.0f;
                 ir[(size_t) i] = (float) re[(size_t) i] * w;
             }
             return ir;

@@ -50,7 +50,7 @@ namespace vs
                 const bool zero = m != 0.0 && std::fmod (m, 2.0) == 0.0;
                 const double sinc = m == 0.0 ? 0.5 : zero ? 0.0 : std::sin (pi * m * 0.5) / (pi * m);
                 const double r = 2.0 * i / (n - 1) - 1.0;
-                coeff[i] = (T) (sinc * windows::besselI0 (beta * std::sqrt (1.0 - r * r), 30, 0.0) / windows::besselI0 (beta, 30, 0.0));
+                coeff[i] = (T) (sinc * windows::kaiserTaper (r, beta, 30, 0.0) / windows::besselI0 (beta, 30, 0.0));
             }
             for (int j = 0; j < upEvenTaps; ++j) evenTaps[j] = coeff[2 * j];
             for (int j = 0; j < upOddTaps; ++j) oddTaps[j] = coeff[2 * j + 1];

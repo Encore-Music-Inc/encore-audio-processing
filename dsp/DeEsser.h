@@ -21,7 +21,7 @@ namespace vs
         {
             hp.prepare (spec.sampleRate, (int) spec.numChannels);
             hp.setType (StateVariableFilter<float>::Type::highPass);
-            hp.setResonance (0.7071f);
+            hp.setResonance ((float) butterworthQ2);
             envAtk = onePole (1.0f, spec.sampleRate);
             envRel = onePole (60.0f, spec.sampleRate);
             grAtk = onePole (0.5f, spec.sampleRate);

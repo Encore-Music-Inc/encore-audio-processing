@@ -126,7 +126,7 @@ namespace vs
             for (size_t b = 0; b < mag.size(); ++b)
             {
                 const float d = ampToDb (mag[b]);
-                db[b] += (d > db[b] ? opt.attack : opt.release) * (d - db[b]);
+                followEnvelope (db[b], d, opt.attack, opt.release);
                 pow[b] += opt.powerSmoothing * (mag[b] * mag[b] - pow[b]);
             }
         }
@@ -182,21 +182,44 @@ namespace vs
 
     // A long-term power spectrum: frames of n samples (n a power of two),
     // each times a periodic Hann window, through the FFT; each frame's power
-    // |X(k)|^2 added up per bin k = 0..n/2. sum() is the total; average over
-    // whatever the caller counts (frames, or segments of several channels).
+    // |X(k)|^2 added up per bin k = 0..n/2. sum() is the total (average over
+    // whatever the caller counts: frames, or segments of several channels),
+    // or with setRunningAverage, the running average.
     class LongTermSpectrum
     {
     public:
-        void prepare (int frameSize)
+        // Allocates. floatFrames: each sample is windowed in float (a live
+        // analyser's arithmetic), not double.
+        void prepare (int frameSize, bool floatFrames = false)
         {
             n = frameSize;
             win = windows::hannPeriodic (n);
+            floatWin = floatFrames ? windows::hannPeriodicFloat (n) : std::vector<float> {};
             pow.assign ((size_t) n / 2 + 1, 0.0);
             fft.setSize (n);
             frame.assign ((size_t) n, 0.0);
             re.assign ((size_t) n / 2 + 1, 0.0);
             im.assign ((size_t) n / 2 + 1, 0.0);
             count = 0;
+        }
+
+        // Instead of a sum, a running average: the plain mean of the frames
+        // until firstFrames, then each new frame weighted by `memory` (the
+        // older ones fading). Call after prepare().
+        void setRunningAverage (int firstFrames, double memory) { avgFirst = firstFrames; avgMemory = memory; }
+
+        // Back to no frames (the sum or the average at zero)
+        void clear() { std::fill (pow.begin(), pow.end(), 0.0); count = 0; }
+
+        // A frame from a ring buffer of n samples, the oldest at `start`
+        void addRing (const float* ring, int start)
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                const float x = ring[(size_t) ((start + i) % n)];
+                frame[(size_t) i] = floatWin.empty() ? (double) x * win[(size_t) i] : (double) (x * floatWin[(size_t) i]);
+            }
+            transformAndAdd();
         }
 
         // n samples, windowed here
@@ -238,13 +261,21 @@ namespace vs
         void transformAndAdd()
         {
             fft.forward (frame.data(), re.data(), im.data());
-            for (int k = 0; k <= n / 2; ++k) pow[(size_t) k] += re[(size_t) k] * re[(size_t) k] + im[(size_t) k] * im[(size_t) k];
             ++count;
+            const double k = avgFirst <= 0 ? 0.0 : count < avgFirst ? 1.0 / count : avgMemory;
+            for (int b = 0; b <= n / 2; ++b)
+            {
+                const double p = re[(size_t) b] * re[(size_t) b] + im[(size_t) b] * im[(size_t) b];
+                if (avgFirst <= 0) pow[(size_t) b] += p;
+                else pow[(size_t) b] += k * (p - pow[(size_t) b]);
+            }
         }
 
-        int n = 0, count = 0;
+        int n = 0, count = 0, avgFirst = 0;
+        double avgMemory = 0.0;
         RealFft fft;
         std::vector<double> win, pow, frame, re, im;
+        std::vector<float> floatWin;
     };
 
     // An averaged power spectrum and its bin spacing
@@ -313,6 +344,25 @@ namespace vs
     };
 
     // The reference curve: a finished mix's level in a band at hz (dB)
+    // The mean power of the bins within `octaves` around f (each edge rounded
+    // to the nearest bin, kept to lo .. hi), from prefix sums of the bin
+    // powers (prefix[b] is the sum of the bins below b).
+    inline double bandMean (const std::vector<double>& prefix, double f, double octaves, double binHz, int lo, int hi)
+    {
+        const int b1 = std::clamp ((int) std::lround (f * std::pow (2.0, -octaves * 0.5) / binHz), lo, hi);
+        const int b2 = std::clamp ((int) std::lround (f * std::pow (2.0, octaves * 0.5) / binHz), b1, hi);
+        return (prefix[(size_t) b2 + 1] - prefix[(size_t) b1]) / (b2 - b1 + 1);
+    }
+
+    // Prefix sums of bin powers for bandMean, into p (n + 1 values, the
+    // first 0; it allocates only when p is too small)
+    inline void prefixSums (const std::vector<double>& power, std::vector<double>& p)
+    {
+        p.resize (power.size() + 1);
+        p[0] = 0.0;
+        for (size_t b = 0; b < power.size(); ++b) p[b + 1] = p[b] + power[b];
+    }
+
     inline double finishedMixDb (double hz)
     {
         return (hz < 100 ? 1.05 * std::log2 (100 / hz) : 0) - (hz > 2000 ? 2.5 * std::log2 (hz / 2000) : 0);

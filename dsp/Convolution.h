@@ -6,6 +6,7 @@
 #include <thread>
 #include <vector>
 #include "Fft.h"
+#include "Mix.h"
 #include "Ramp.h"
 
 namespace vs
@@ -307,8 +308,7 @@ namespace vs
                     if (previous != nullptr) previous->process (c, ch[c], m, n);
                     else std::copy (ch[c], ch[c] + n, m);
                     run (c, ch[c], n);
-                    for (int i = 0; i < n; ++i)
-                        ch[c][i] = ch[c][i] * (1.0f - fadeGain[(size_t) i]) + m[i] * fadeGain[(size_t) i];
+                    mix::blend (ch[c], m, fadeGain.data(), n);
                 }
                 if (! fade.isRamping()) retirePrevious();
             }

@@ -20,9 +20,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <set>
+#include <string>
 #include <vector>
 #include "Music.h"
 #include "Stats.h"
@@ -43,11 +45,7 @@ namespace vs
         // The middle value (the mean of the two middle ones for an even count); NaN when empty.
         inline double median (const std::vector<double>& a)
         {
-            if (a.empty()) return std::numeric_limits<double>::quiet_NaN();
-            auto s = a;
-            std::sort (s.begin(), s.end());
-            const size_t h = s.size() >> 1;
-            return (s.size() & 1) ? s[h] : (s[h - 1] + s[h]) / 2;
+            return a.empty() ? std::numeric_limits<double>::quiet_NaN() : stats::median (a.data(), (int) a.size());
         }
 
         inline double mean (const std::vector<double>& a) { return stats::mean (a.data(), (int) a.size()); }
@@ -335,10 +333,10 @@ namespace vs
             const double meanMidi = mean (values);
             std::vector<double> c (n);
             for (size_t i = 0; i < n; ++i) c[i] = (values[i] - meanMidi) * 100;
-            const double xm = (double) (n - 1) / 2;
-            double sxy = 0.0, sxx = 0.0;
-            for (size_t i = 0; i < n; ++i) { sxy += ((double) i - xm) * c[i]; sxx += ((double) i - xm) * ((double) i - xm); }
-            const double slope = sxx != 0.0 ? sxy / sxx : 0.0;
+            std::vector<double> xs (n);
+            for (size_t i = 0; i < n; ++i) xs[i] = (double) i;
+            const auto line = stats::fitLine (xs.data(), c.data(), (int) n);
+            const double xm = line.meanX, slope = line.slope;
             const double drift = slope * (double) (n - 1);
             std::vector<double> r (n);
             for (size_t i = 0; i < n; ++i) r[i] = c[i] - slope * ((double) i - xm);
@@ -371,8 +369,7 @@ namespace vs
                 if (best > 0 && bestV > 0.3 && width >= 15)
                 {
                     const double a = acs[(size_t) best - 1], b = acs[(size_t) best], cc = acs[(size_t) best + 1];
-                    const double denom = a - 2 * b + cc;
-                    const double lag = best + (std::abs (denom) > 1e-9 ? (0.5 * (a - cc)) / denom : 0);
+                    const double lag = best + stats::parabolicOffset (a, b, cc, 1e-9);
                     const double hz = rate / lag;
                     const double N = 2 * ((int) roundHalfUp (0.4 * rate) >> 1) + 1;
                     const double pi = 3.141592653589793;
@@ -649,6 +646,185 @@ namespace vs
             s.all = mean (all);
             return s;
         }
+
+        // ---- exercises for a range: notes and times only (their names and
+        // instructions are the product's). Notes are MIDI numbers.
+
+        // A saved range: the lowest and highest notes and the comfortable middle
+        struct VocalRange { double low = 0, high = 0, tessLo = 0, tessHi = 0; };
+
+        // A random number from 0 to 1 (the product's own source, so it can be repeated)
+        using Rand = std::function<double()>;
+
+        // The notes a range allows: the saved range less a semitone of cushion at each end
+        struct NoteSpan { double lo = 0, hi = 0; };
+        inline NoteSpan safeRange (const VocalRange& r) { return { r.low + 1, r.high - 1 }; }
+
+        // One key shift for a song whose melody runs low..high: where the melody
+        // lands, whether it fits the range, how far outside it goes, how far it
+        // strays out of the comfortable middle, and its rank (lower is better).
+        // keyPc: the new key's pitch class (-1 when the original isn't known).
+        struct KeyShift { int shift = 0; double low = 0, high = 0; bool fits = false, comfortable = false; double outside = 0, strain = 0; int keyPc = -1; double rank = 0; };
+
+        // Every shift from an octave down to an octave up, best first: the melody
+        // in or near the comfortable middle, a smaller move winning a tie.
+        inline std::vector<KeyShift> keyShiftsForRange (double songLow, double songHigh, const VocalRange& r, int originalPc = -1)
+        {
+            const double lo = std::min (songLow, songHigh), hi = std::max (songLow, songHigh);
+            std::vector<KeyShift> out;
+            for (int s = -12; s <= 12; ++s)
+            {
+                KeyShift k;
+                k.shift = s;
+                k.low = lo + s;
+                k.high = hi + s;
+                k.fits = k.low >= r.low && k.high <= r.high;
+                k.outside = std::max (0.0, r.low - k.low) + std::max (0.0, k.high - r.high);
+                k.strain = std::max (0.0, k.high - r.tessHi) + std::max (0.0, r.tessLo - k.low);
+                const double centre = std::abs ((k.low + k.high) / 2 - (r.tessLo + r.tessHi) / 2);
+                k.comfortable = k.fits && k.strain == 0;
+                k.keyPc = originalPc < 0 ? -1 : ((originalPc + s) % 12 + 12) % 12;
+                k.rank = (k.fits ? 0 : 1000 + k.outside * 10) + k.strain * 3 + centre * 0.5 + std::abs (s) * 0.15;
+                out.push_back (k);
+            }
+            std::stable_sort (out.begin(), out.end(), [] (const KeyShift& a, const KeyShift& b) { return a.rank < b.rank; });
+            return out;
+        }
+
+        // The next note to match. Level 1 stays in the comfortable middle with
+        // small steps; each level widens the area and the jumps. Never outside
+        // the safe range. prev: the last note, if any.
+        inline double nextMatchNote (int level, const VocalRange& r, std::optional<double> prev, const Rand& rand)
+        {
+            const auto safe = safeRange (r);
+            const NoteSpan area = level <= 2 ? NoteSpan { r.tessLo, r.tessHi }
+                                : level == 3 ? NoteSpan { std::max (safe.lo, r.tessLo - 2), std::min (safe.hi, r.tessHi + 2) }
+                                : safe;
+            static constexpr int maxJumps[] { 0, 4, 7, 9, 12, 24 };
+            const int maxJump = maxJumps[std::clamp (level, 1, 5)];
+            double lo = area.lo, hi = std::max (area.lo, area.hi);
+            if (prev)
+            {
+                lo = std::max (lo, *prev - maxJump);
+                hi = std::min (hi, *prev + maxJump);
+            }
+            if (lo > hi) { lo = area.lo; hi = std::max (area.lo, area.hi); }
+            std::vector<double> choices;
+            for (double m = lo; m <= hi; m++) if (! prev || m != *prev) choices.push_back (m);
+            if (choices.empty()) choices.push_back (lo);
+            const double n = (double) choices.size();
+            return choices[(size_t) std::fmod (std::floor (rand() * n), n)];
+        }
+
+        // A short tune to sing back: 2 notes (levels 1 and 2) or 3 (from level 3),
+        // jumps growing with the level, every note in the safe range
+        inline std::vector<double> buildSingBack (int level, const VocalRange& r, const Rand& rand)
+        {
+            const auto safe = safeRange (r);
+            const int count = level >= 3 ? 3 : 2;
+            static const std::vector<int> stepTables[] { { 1, 2, 3, 4 }, { 2, 3, 4, 5, 7 }, { 2, 3, 4, 5, 7 }, { 3, 4, 5, 7, 8, 9 }, { 4, 5, 7, 9, 10, 12 } };
+            const auto& steps = stepTables[std::clamp (level, 1, 5) - 1];
+            const double n = (double) steps.size();
+            for (int tries = 0; tries < 50; ++tries)
+            {
+                std::vector<double> notes { nextMatchNote (std::min (level, 2), r, std::nullopt, rand) };
+                for (int i = 1; i < count; ++i)
+                {
+                    const int pick = steps[(size_t) std::fmod (std::floor (rand() * n), n)];
+                    const double step = pick * (rand() < 0.5 ? -1.0 : 1.0);
+                    notes.push_back (notes.back() + step);
+                }
+                if (std::all_of (notes.begin(), notes.end(), [&] (double m) { return m >= safe.lo && m <= safe.hi; })) return notes;
+            }
+            return { r.tessLo, std::min (safe.hi, r.tessLo + 2) };
+        }
+
+        // ---- warm-ups
+
+        // One pattern: a run of notes (PatternNote), or a siren (Glide)
+        struct WarmupPattern { std::vector<PatternNote> notes; std::optional<Glide> glide; };
+        // An exercise: its id (hum, trill, siren, arpeggio, vowels, sustain,
+        // cooldown) and its patterns
+        struct WarmupExercise { std::string id; std::vector<WarmupPattern> patterns; };
+
+        inline std::vector<PatternNote> warmupPattern (const std::vector<int>& intervals, double root, double dur)
+        {
+            std::vector<PatternNote> out;
+            for (size_t i = 0; i < intervals.size(); ++i) out.push_back ({ root + intervals[i], (double) i * dur, dur });
+            return out;
+        }
+
+        // Roots for a pattern climbing (dir 1) or falling (dir -1) by half steps,
+        // staying within lo..hi, at most count of them
+        inline std::vector<double> warmupRoots (const std::vector<int>& intervals, double start, double lo, double hi, int count, int dir = 1)
+        {
+            const double top = *std::max_element (intervals.begin(), intervals.end());
+            const double bottom = *std::min_element (intervals.begin(), intervals.end());
+            std::vector<double> out;
+            double r = start;
+            while (r + bottom < lo) r++;
+            while (r + top > hi && r + bottom > lo) r--;
+            for (; (int) out.size() < count && r + bottom >= lo && r + top <= hi; r += dir) out.push_back (r);
+            return out;
+        }
+
+        // A warm-up built for a range: hums, lip trills, sirens, arpeggios, a
+        // vowel scale (full only), long notes and a cool-down. Every note stays
+        // inside the safe range, and the climbing patterns stop a few semitones
+        // above the comfortable middle. An exercise with no patterns is left out.
+        inline std::vector<WarmupExercise> buildWarmup (const VocalRange& r, bool full)
+        {
+            const auto safe = safeRange (r);
+            const double top = std::min (safe.hi, r.tessHi + 3);
+            const double mid = roundHalfUp ((r.tessLo + r.tessHi) / 2);
+            std::vector<WarmupExercise> ex;
+            auto add = [&] (const char* id, std::vector<WarmupPattern> list) { if (! list.empty()) ex.push_back ({ id, std::move (list) }); };
+            auto runs = [] (const std::vector<double>& roots, const std::vector<int>& iv, double dur)
+            {
+                std::vector<WarmupPattern> l;
+                for (double root : roots) l.push_back ({ warmupPattern (iv, root, dur), std::nullopt });
+                return l;
+            };
+            const std::vector<int> five { 7, 5, 4, 2, 0 };
+            add ("hum", runs (warmupRoots (five, std::max (safe.lo, r.tessLo - 2), safe.lo, top, full ? 6 : 4), five, 0.6));
+            const std::vector<int> trill { 0, 2, 4, 5, 7, 5, 4, 2, 0 };
+            auto up = warmupRoots (trill, std::max (safe.lo, r.tessLo - 2), safe.lo, top, full ? 11 : 8);
+            if (full && ! up.empty())
+            {
+                std::vector<double> down (up.begin(), up.end() - 1);
+                std::reverse (down.begin(), down.end());
+                if (down.size() > 4) down.resize (4);
+                up.insert (up.end(), down.begin(), down.end());
+            }
+            add ("trill", runs (up, trill, 0.4));
+            const double sLo = std::max (safe.lo, r.tessLo - 3), sHi = std::min (safe.hi, r.tessHi + 4);
+            if (sHi - sLo >= 5)
+                add ("siren", std::vector<WarmupPattern> ((size_t) (full ? 4 : 3), WarmupPattern { {}, Glide { sLo, sHi, 2.5, 2.5 } }));
+            const std::vector<int> arp = std::min (top, safe.hi) - r.tessLo < 12 ? std::vector<int> { 0, 4, 7, 4, 0 } : std::vector<int> { 0, 4, 7, 12, 7, 4, 0 };
+            add ("arpeggio", runs (warmupRoots (arp, std::max (safe.lo, r.tessLo - 1), safe.lo, top, full ? 8 : 5), arp, 0.45));
+            if (full) add ("vowels", runs (warmupRoots (trill, r.tessLo, safe.lo, top, 6), trill, 0.4));
+            std::vector<WarmupPattern> holds;
+            for (double m : { mid - 2, mid, mid + 2 })
+                if (m >= safe.lo && m <= safe.hi) holds.push_back ({ { { m, 0.0, full ? 5.0 : 4.0 } }, std::nullopt });
+            add ("sustain", holds);
+            add ("cooldown", runs (warmupRoots (five, std::min (mid + 1, top - 7), safe.lo, top, full ? 5 : 3, -1), five, 0.6));
+            return ex;
+        }
+
+        // How long a pattern lasts, in seconds
+        inline double patternSeconds (const WarmupPattern& p)
+        {
+            if (p.glide) return p.glide->up + p.glide->down;
+            double end = -std::numeric_limits<double>::infinity();
+            for (const auto& n : p.notes) end = std::max (end, n.at + n.dur);
+            return end;
+        }
+
+        // A siren's target pitch at t seconds from its start
+        inline double glideAt (const Glide& g, double t)
+        {
+            return t <= g.up ? g.from + ((g.to - g.from) * t) / g.up : g.to - (g.to - g.from) * std::min (1.0, (t - g.up) / g.down);
+        }
     }
 
     // Follows a voice frame by frame: gates out silence and breath, catches
@@ -828,12 +1004,8 @@ namespace vs
             if (! std::isnan (times[i]) && ! std::isnan (b)) offs.push_back (times[i] - b);
         }
         if (offs.empty()) return std::nullopt;
-        double sum = 0.0;
-        for (double x : offs) sum += x;
-        const double mean = sum / (double) offs.size();
-        double ss = 0.0;
-        for (double x : offs) ss += (x - mean) * (x - mean);
-        const double spread = std::sqrt (ss / (double) offs.size());
+        const double mean = stats::mean (offs.data(), (int) offs.size());
+        const double spread = stats::standardDeviation (offs.data(), (int) offs.size());
         TimingReport r;
         int within = 0;
         for (double x : offs)

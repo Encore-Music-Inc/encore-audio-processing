@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <vector>
 #include "Envelope.h"
+#include "Mix.h"
 #include "Music.h"
 #include "Oscillator.h"
 #include "Svf.h"
@@ -250,9 +251,9 @@ namespace vs
                         auto& x = osc[(size_t) o][(size_t) u];
                         x.setPulseWidth (O.pulseWidth + pwMod);
                         const double v = x.next (music::midiToHz (semis, 440.0), fs) * gain;
-                        const double pan = std::clamp (O.pan + O.spread * spreadPos, -1.0, 1.0);
-                        l += v * std::cos ((pan + 1.0) * 0.7853981633974483);
-                        r += v * std::sin ((pan + 1.0) * 0.7853981633974483);
+                        const auto pg = mix::panGains (1.0f, (float) std::clamp (O.pan + O.spread * spreadPos, -1.0, 1.0), mix::PanLaw::centre3dB);
+                        l += v * pg.left;
+                        r += v * pg.right;
                     }
                 }
 
@@ -266,10 +267,8 @@ namespace vs
                         const double semis = s.filter.keyTrack * (pitch - 60.0) + s.filter.envSemitones * fe
                                            + s.filter.velocity * 24.0 * (velocity - 0.5) + cutoffMod;
                         const double hz = std::clamp ((double) s.filter.hz * std::pow (2.0, semis / 12.0), 20.0, 0.45 * fs);
-                        g = std::tan (3.141592653589793 * hz / fs);
-                        const double r2 = 1.0 / std::clamp ((double) s.filter.resonance, 0.5, 10.0);
-                        k = g + r2;
-                        h = 1.0 / (1.0 + r2 * g + g * g);
+                        const auto c = svfCoefs<double> (fs, hz, 1.0 / std::clamp ((double) s.filter.resonance, 0.5, 10.0));
+                        g = c.g; k = c.k; h = c.h;
                     }
                     auto pickOut = [&s] (const SvfOutputs<double>& o)
                     {
