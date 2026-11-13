@@ -41,6 +41,16 @@ namespace
     }
 
     bool near (double a, double b, double tol) { return std::abs (a - b) <= tol; }
+
+    // The same formula worked out twice: equal to a millionth (a fast-math
+    // build, as MSVC's /fp:fast, may order or fuse the two copies differently)
+    bool sameFormula (const std::vector<float>& a, const std::vector<float>& b)
+    {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i)
+            if (! near (a[i], b[i], 1e-6 * std::max (1.0, (double) std::abs (b[i])))) return false;
+        return true;
+    }
 }
 
 int main()
@@ -310,7 +320,7 @@ int main()
         expect ("sidechain: without a key, a tone 10 dB under the threshold is untouched", plain == tone);
     }
 
-    // a section of a clip's fade, bit for bit as a DAW's block-by-block loop
+    // a section of a clip's fade, the same formula as a DAW's block-by-block loop
     // (the position in double, one gain for every channel)
     {
         bool same = true;
@@ -335,9 +345,9 @@ int main()
                     float* ch[] { l.data(), r.data() };
                     channels::fadeSection (ch, 2, n, curve, a[0], a[1]);
                     channels::addFadeSection (src.data(), dst.data(), n, curve, a[0], a[1]);
-                    same = same && l == refL && r == refR && dst == refDst;
+                    same = same && sameFormula (l, refL) && sameFormula (r, refR) && sameFormula (dst, refDst);
                 }
-        expect ("fade section: every curve and block size, bit for bit", same);
+        expect ("fade section: every curve and block size, the same formula", same);
     }
 
     // a clip's de-click when playback jumps
@@ -348,8 +358,8 @@ int main()
         channels::fadeFromHeld (x.data(), len, 0.8f);
         channels::joinFromHeld (y.data(), len, 0.8f);
         channels::fadeFromHeld (z.data(), len, 0.0f);
-        expect ("de-click: the held sample fades away, bit for bit", x == refX);
-        expect ("de-click: new audio joins from the held sample, bit for bit", y == refY);
+        expect ("de-click: the held sample fades away, the same formula", sameFormula (x, refX));
+        expect ("de-click: new audio joins from the held sample, the same formula", sameFormula (y, refY));
         expect ("de-click: a held zero leaves the block as it is", z == std::vector<float> (64, 0.3f));
         expect ("de-click: 40 samples, 10 at a clip's start", channels::heldFadeSamples == 40 && channels::heldFadeStartSamples == 10);
         expect ("scrubbing plays at 0.4", mix::scrubGain == 0.4f);

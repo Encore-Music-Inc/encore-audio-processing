@@ -109,7 +109,8 @@ namespace vs
 
         inline void keepHighest (Reading& held, Reading r)
         {
-            if (r.db >= held.db) held = r;
+            // NaN first, by name: a fast-math build may let it through the comparison
+            if (! std::isnan (r.db) && r.db >= held.db) held = r;
         }
 
         inline Reading takeHighest (Reading& held)
