@@ -9,6 +9,7 @@
 #include "DelayLine.h"
 #include "Mix.h"
 #include "Music.h"
+#include "Oscillator.h"
 #include "Random.h"
 #include "PitchDetector.h"
 #include "Scales.h"
@@ -92,8 +93,9 @@ namespace vs
             hopCount = 0;
             markCount = markHead = 0;
             cur = {};
-            lfo[0] = 0.0f;
-            lfo[1] = 1.7f;
+            // each singer's drift, read one step in (the second starts 1.7 radians on)
+            lfo[0].setPhase (humanizeHz[0] / fs);
+            lfo[1].setPhase (1.7 / 6.283185307179586 + humanizeHz[1] / fs);
             detectedMidi.store (-1.0f);
             correctionCents.store (0.0f);
         }
@@ -124,8 +126,6 @@ namespace vs
             setActive (1, on[0]);
             setActive (2, on[1]);
 
-            const float lfoInc[2] { twoPi * 0.23f / (float) fs,
-                                    twoPi * 0.31f / (float) fs };
 
             for (int i = 0; i < numSamples; ++i)
             {
@@ -164,9 +164,7 @@ namespace vs
                     float s = take (h + 1, tOut) * gain[h];
 
                     // Humanize: each harmony singer is a little late and drifts
-                    lfo[h] += lfoInc[h];
-                    if (lfo[h] > twoPi) lfo[h] -= twoPi;
-                    const float delayMs = 2.0f + settings.humanize * (16.0f + 3.0f * std::sin (lfo[h]));
+                    const float delayMs = 2.0f + settings.humanize * (16.0f + 3.0f * lfo[h].next (humanizeHz[h], fs));
                     auto& d = humanDelay[(size_t) h];
                     d.put (s); // this sample is at delay 0
                     s = d.read ((double) (delayMs * 0.001f * (float) fs));
@@ -403,7 +401,8 @@ namespace vs
         std::array<Voice, 3> voices;
         std::array<float, hannSize + 1> hann {};
         std::array<DelayLine, 2> humanDelay;
-        float lfo[2] {};
+        Oscillator lfo[2]; // the harmony singers' drift (sines)
+        static constexpr double humanizeHz[2] { 0.23, 0.31 };
         Xorshift32 rng { 0x5a5a };
     };
 }

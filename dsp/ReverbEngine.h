@@ -5,6 +5,7 @@
 #include <array>
 #include <vector>
 #include "DelayLine.h"
+#include "Oscillator.h"
 #include "Util.h"
 
 namespace vs
@@ -139,7 +140,7 @@ namespace vs
             for (auto& s : springs) { s.delay.clear(); for (auto& a : s.ap) a = 0.0f; s.lp = s.hp = 0.0f; }
             shimLine.clear(); shimPhase = 0.0f;
             for (auto& v : damp) v = 0.0f;
-            for (auto& p : lfoPhase) p = 0.0f;
+            for (int i = 0; i < numLines; ++i) lfo[(size_t) i].setPhase (lfoInc[i] / fs); // each read is one step in
             duckEnv = 0.0f; duckGain = 1.0f;
             outHpL = outHpR = 0.0f; outHpPrevL = outHpPrevR = 0.0f;
             inLp[0] = inLp[1] = 0.0f;
@@ -336,9 +337,7 @@ namespace vs
             float y[numLines];
             for (int i = 0; i < numLines; ++i)
             {
-                lfoPhase[i] += lfoInc[i] / (float) fs;
-                if (lfoPhase[i] >= 1.0f) lfoPhase[i] -= 1.0f;
-                const float mod = modDepth * std::sin (juce::MathConstants<float>::twoPi * lfoPhase[i]);
+                const float mod = modDepth * lfo[(size_t) i].next (lfoInc[i], fs);
                 y[i] = lines[(size_t) i].read (std::max (2.0f, lineSamples[i] + mod));
             }
 
@@ -452,7 +451,8 @@ namespace vs
         std::array<Delay, 4> diffL, diffR;
         Delay pre, er;
         Delay preL, preR;
-        float lineSamples[numLines] {}, lineGain[numLines] {}, damp[numLines] {}, lfoPhase[numLines] {};
+        float lineSamples[numLines] {}, lineGain[numLines] {}, damp[numLines] {};
+        std::array<Oscillator, numLines> lfo; // each line's slow sweep (sines)
         const float lfoInc[numLines] { 0.31f, 0.43f, 0.57f, 0.67f, 0.79f, 0.89f, 1.03f, 1.13f };
         float diffSamples[4] {}, apGain = 0.7f, modDepth = 0.0f, dampC = 0.5f, erMix = 0.0f;
         Tap taps[numTaps];

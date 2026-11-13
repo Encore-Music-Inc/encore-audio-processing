@@ -50,10 +50,8 @@ namespace vs
                 bandSum.assign (cols * 3, 0.0);
                 if (opt.bands)
                 {
-                    // Q 0.7071, not butterworthQ2: the picture's band levels are part of
-                    // the reference set, and the exact Q moves them past its allowance
-                    const auto lp = BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, sampleRate, 200.0, 0.7071);
-                    const auto hp = BiquadCoefs::rbj (BiquadCoefs::Type::highPass, sampleRate, 3000.0, 0.7071);
+                    const auto lp = BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, sampleRate, 200.0, butterworthQ2);
+                    const auto hp = BiquadCoefs::rbj (BiquadCoefs::Type::highPass, sampleRate, 3000.0, butterworthQ2);
                     lows.setSections ({ lp, lp }, 1);
                     highs.setSections ({ hp, hp }, 1);
                 }
