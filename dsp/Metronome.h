@@ -624,10 +624,29 @@ namespace vs::metronome
         return x;
     }
 
+    // The fade at the very end of every click sound, so nothing clicks off
+    inline constexpr int endFadeSamples = 256;
+
+    // A soft count's level, of a normal count's (the engine's beats under the
+    // accent when the accent is "louder")
+    inline constexpr double softCount = 0.4;
+
     // Peak to `level`, with a fade at the very end so nothing clicks off
     inline Buffer finish (Buffer x, double level)
     {
-        channels::toPeakWithEndFade (x, level, 256);
+        channels::toPeakWithEndFade (x, level, endFadeSamples);
+        return x;
+    }
+
+    // A sound at `level` of its own peak (under 1 only; at 1 or more, or
+    // empty, it is returned as it is), with the end fade again
+    inline Buffer atLevel (Buffer x, float level)
+    {
+        if (level < 1.0f && ! x.empty())
+        {
+            const float* ch[1] { x.data() };
+            channels::toPeakWithEndFade (x, channels::peakOf (ch, 1, (int) x.size()) * level, endFadeSamples);
+        }
         return x;
     }
 
@@ -802,7 +821,7 @@ namespace vs::metronome
                         // a set with an alt sound (kick and hat) plays it on counts 2, 4, 6...
                         const bool alt = ! snd.alt.empty() && ev.count % 2 == 1;
                         voice (alt ? &snd.alt : ev.level == 3 ? &snd.accent : &snd.beat, roundHalfUp (ev.frame),
-                               ev.level == 3 ? g.accent : ev.level == 2 ? g.beat : g.beat * 0.4);
+                               ev.level == 3 ? g.accent : ev.level == 2 ? g.beat : g.beat * softCount);
                         for (size_t k = 1; k < ev.subs.size(); ++k) voice (&snd.sub, roundHalfUp (ev.frame + ev.subs[k] * ev.len), g.sub);
                     }
                     for (const auto& p : ev.poly) voice (&snd.poly, roundHalfUp (ev.frame + p.frac * ev.len), g.poly);

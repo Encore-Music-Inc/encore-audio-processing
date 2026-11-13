@@ -130,4 +130,10 @@ namespace vs
         float smoothed = 0.0f;
         int quiet = 0, steadyCount = 0, lastString = -1;
     };
+
+    // TunerFollow's settings for a note readout (a voice's note on a plugin's
+    // screen, one reading per frame): no smoothing, each reading shown as it
+    // is, and the last note held through up to nine readings without one,
+    // cleared on the tenth.
+    inline constexpr TunerFollow::Settings noteReadout { 0.0f, 0.6f, 0.4f, 9 };
 }

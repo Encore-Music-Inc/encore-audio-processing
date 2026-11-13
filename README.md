@@ -85,6 +85,7 @@ CI fails if either differs from what the script writes.
 | | `Random.h` | seeded random numbers, the same on every system |
 | | `Stats.h` | median, percentile, mean, deviation and a least-squares line |
 | | `Util.h` | smoothers, decibels, mid and side, rounding |
+| | `Denormals.h` | the denormal guard: turns the processor's denormals off while audio code runs |
 | Measurement | `Loudness.h` | the loudness meter (ITU-R BS.1770, EBU R128), and the true-peak limiter the mastering chain ends with |
 | | `LoudnessReport.h` | a song's loudness report |
 | | `TruePeak.h` | the true-peak detector |

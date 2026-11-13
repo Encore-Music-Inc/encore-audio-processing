@@ -50,6 +50,25 @@ namespace vs
             return r;
         }
 
+        // The decay as a picture: a line from where the tail starts after the
+        // pre-delay (pictureStartDb, springStartDb for the spring's brighter
+        // onset) falling straight to pictureEndDb at decaySec, as `steps`
+        // points after the first. Times are seconds after the pre-delay.
+        struct DecayPoint { float t = 0.0f, db = 0.0f; };
+        static constexpr float pictureStartDb = -6.0f, springStartDb = -3.0f, pictureEndDb = -60.0f;
+        static std::vector<DecayPoint> decayPicture (int mode, float decaySec, int steps = 80)
+        {
+            std::vector<DecayPoint> p;
+            p.reserve ((size_t) std::max (0, steps) + 1);
+            p.push_back ({ 0.0f, mode == spring ? springStartDb : pictureStartDb });
+            for (int i = 1; i <= steps; ++i)
+            {
+                const float t = decaySec * (float) i / (float) steps;
+                p.push_back ({ t, pictureStartDb + (pictureEndDb - pictureStartDb) * t / decaySec });
+            }
+            return p;
+        }
+
         // How much a size (0..1) scales the room's delays
         static float sizeScale (float size01) { return 0.55f + 0.9f * std::clamp (size01, 0.0f, 1.0f); }
 

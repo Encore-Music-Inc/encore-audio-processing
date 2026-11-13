@@ -101,6 +101,7 @@ The headers, by area (each header's top comment says more):
 | | `Random.h` | seeded random number generators, the same on every system |
 | | `Stats.h` | median, percentile, mean, deviation, least-squares line |
 | | `Util.h` | smoothers, envelope steps, decibels, mid and side, rounding |
+| | `Denormals.h` | the denormal guard: turns the processor's denormals off while audio code runs |
 | Measurement | `Loudness.h` | the BS.1770 / EBU R128 loudness meter, and the mastering chain's true-peak limiter |
 | | `LoudnessReport.h` | a song's loudness report |
 | | `TruePeak.h` | the true-peak detector |

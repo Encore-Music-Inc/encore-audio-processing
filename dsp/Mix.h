@@ -102,6 +102,9 @@ namespace vs
             return { std::pow (l, power) * gain, std::pow (r, power) * gain };
         }
 
+        // A DAW's playback level while the play head is dragged (scrubbing)
+        inline constexpr float scrubGain = 0.4f;
+
         // n samples of each channel times a fixed gain (the gain stage with no ramp)
         inline void applyGain (float gain, float* const* ch, int numCh, int n)
         {

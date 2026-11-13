@@ -59,6 +59,10 @@ namespace vs
             return lerp (db[(size_t) i], db[(size_t) i + 1], t);
         }
 
+        // The dB Body applies at a frequency at an amount (0..1 and beyond):
+        // the curve scaled, what the filter is built from and what an editor draws
+        float appliedDb (float hz, float amount) const { return amount * at (hz); }
+
         bool operator== (const BodyCurve& o) const { return db == o.db && levelDb == o.levelDb && valid == o.valid; }
 
         // Saved in the plugin state (and in user presets) as plain text:
@@ -437,7 +441,7 @@ namespace vs
             for (int k = 0; k <= n / 2; ++k)
             {
                 const float hz = (float) (k * fs / n);
-                const float lm = amount * curve.at (hz) * (float) (std::log (10.0) / 20.0);
+                const float lm = curve.appliedDb (hz, amount) * (float) (std::log (10.0) / 20.0);
                 re[(size_t) k] = lm;
                 if (k > 0 && k < n / 2) re[(size_t) (n - k)] = lm;
             }

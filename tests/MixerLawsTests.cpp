@@ -12,6 +12,7 @@
 #include "dsp/AbCompare.h"
 #include "dsp/Channels.h"
 #include "dsp/Compressor.h"
+#include "dsp/Denormals.h"
 #include "dsp/LoudnessReport.h"
 #include "dsp/Lpc.h"
 #include "dsp/Windows.h"
@@ -307,6 +308,134 @@ int main()
         expect ("sidechain: the quiet tone passes until the key is loud", near (quietDb, -20.0, 0.1), "%.2f dB", quietDb);
         expect ("sidechain: a loud key ducks it", duckDb < quietDb - 5.0f, "%.2f dB", duckDb);
         expect ("sidechain: without a key, a tone 10 dB under the threshold is untouched", plain == tone);
+    }
+
+    // a section of a clip's fade, bit for bit as a DAW's block-by-block loop
+    // (the position in double, one gain for every channel)
+    {
+        bool same = true;
+        const channels::FadeCurve curves[] { channels::FadeCurve::quarterSine, channels::FadeCurve::sineSquared,
+                                             channels::FadeCurve::linear, channels::FadeCurve::concave, channels::FadeCurve::sCurve };
+        const float alphas[][2] { { 0.2f, 0.9f }, { 1.0f, 0.0f }, { 0.0f, 1.0f } };
+        for (auto curve : curves)
+            for (auto& a : alphas)
+                for (int n : { 1, 7, 4096 })
+                {
+                    std::vector<float> l (n), r (n), refL, refR, src (n), dst (n, 0.25f), refDst;
+                    for (int i = 0; i < n; ++i) { l[i] = std::sin (0.01f * i); r[i] = std::cos (0.013f * i); src[i] = 0.5f - 0.0003f * i; }
+                    refL = l; refR = r; refDst = dst;
+                    const double delta = ((double) a[1] - (double) a[0]) / n;
+                    double alpha = a[0];
+                    for (int i = 0; i < n; ++i)
+                    {
+                        const float g = channels::fadeGainFloat (curve, alpha);
+                        refL[i] *= g; refR[i] *= g; refDst[i] += src[i] * g;
+                        alpha += delta;
+                    }
+                    float* ch[] { l.data(), r.data() };
+                    channels::fadeSection (ch, 2, n, curve, a[0], a[1]);
+                    channels::addFadeSection (src.data(), dst.data(), n, curve, a[0], a[1]);
+                    same = same && l == refL && r == refR && dst == refDst;
+                }
+        expect ("fade section: every curve and block size, bit for bit", same);
+    }
+
+    // a clip's de-click when playback jumps
+    {
+        std::vector<float> x (64, 0.3f), y (64, 0.3f), z (64, 0.3f), refX = x, refY = y;
+        const int len = std::min (64, channels::heldFadeSamples);
+        for (int i = 0; i < len; ++i) { const float a = (float) i / (float) len; refX[i] = 0.8f * (1.0f - a); refY[i] = a * refY[i] + 0.8f * (1.0f - a); }
+        channels::fadeFromHeld (x.data(), len, 0.8f);
+        channels::joinFromHeld (y.data(), len, 0.8f);
+        channels::fadeFromHeld (z.data(), len, 0.0f);
+        expect ("de-click: the held sample fades away, bit for bit", x == refX);
+        expect ("de-click: new audio joins from the held sample, bit for bit", y == refY);
+        expect ("de-click: a held zero leaves the block as it is", z == std::vector<float> (64, 0.3f));
+        expect ("de-click: 40 samples, 10 at a clip's start", channels::heldFadeSamples == 40 && channels::heldFadeStartSamples == 10);
+        expect ("scrubbing plays at 0.4", mix::scrubGain == 0.4f);
+    }
+
+    // what a DAW sends to the sound card: nothing that isn't a normal number
+    {
+        const float in[] { std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+                           -std::numeric_limits<float>::infinity(), std::numeric_limits<float>::min() / 2, -0.0f,
+                           std::numeric_limits<float>::min(), 1.0f, -0.5f };
+        std::vector<float> a (std::begin (in), std::end (in)), b = a;
+        float* ca[] { a.data() };
+        float* cb[] { b.data() };
+        channels::zeroNaN (ca, 1, 8, channels::Zero::notNormal);
+        channels::zeroNaN (cb, 1, 8);
+        bool cleared = true;
+        for (int i = 0; i < 5; ++i) cleared = cleared && a[i] == 0.0f && ! std::signbit (a[i]);
+        expect ("output clean-up: NaN, infinities, denormals and -0 become +0", cleared);
+        expect ("output clean-up: normal numbers pass", a[5] == std::numeric_limits<float>::min() && a[6] == 1.0f && a[7] == -0.5f);
+        expect ("zeroNaN on its own clears NaN only", b[0] == 0.0f && std::isinf (b[1]) && b[3] != 0.0f);
+    }
+
+    // a meter's highest level since it was last read
+    {
+        meters::Reading held;
+        meters::keepHighest (held, { 10, -20.0f });
+        meters::keepHighest (held, { 20, -30.0f });
+        meters::keepHighest (held, { 30, -20.0f });
+        meters::keepHighest (held, { 40, std::numeric_limits<float>::quiet_NaN() });
+        const auto r = meters::takeHighest (held);
+        expect ("meter hold: the loudest, the later of two equal ones, never a NaN", r.timeMs == 30 && r.db == -20.0f);
+        expect ("meter hold: reading leaves silence at the same time", held.timeMs == 30 && held.db == meters::faderFloorDb);
+        expect ("meter level: silence for no signal, dB otherwise", meters::levelDb (0.0f) == meters::faderFloorDb && near (meters::levelDb (0.5f), -6.0206, 1e-3));
+        expect ("overload above 0.999", meters::overloadGain == 0.999f);
+    }
+
+    // the denormal guard
+    {
+        if constexpr (noDenormalsMask != 0)
+        {
+            const auto before = fpStatus();
+            volatile float tiny = 1e-30f, scale = 1e-10f;
+            float inside;
+            {
+                ScopedNoDenormals guard;
+                inside = tiny * scale;
+                expect ("denormals: off inside the guard", denormalsDisabled() && inside == 0.0f);
+            }
+            const float after = tiny * scale;
+            expect ("denormals: the thread's mode back after it", (fpStatus() & noDenormalsMask) == (before & noDenormalsMask) && after != 0.0f);
+            disableDenormals();
+            const bool off = denormalsDisabled();
+            disableDenormals (false);
+            // (only the mode bits: x86 keeps sticky flags that arithmetic sets in the same register)
+            expect ("denormals: turned off and on again", off && ! denormalsDisabled() && (fpStatus() & noDenormalsMask) == (before & noDenormalsMask));
+        }
+        else
+            expect ("denormals: no mode on this system, nothing to do", ! denormalsDisabled());
+    }
+
+    // the click's soft count
+    {
+        metronome::Buffer s (2000);
+        for (size_t i = 0; i < s.size(); ++i) s[i] = 0.7f * std::sin (0.05f * (float) i) * std::exp (-0.002f * (float) i);
+        auto ref = s;
+        const float* ch[1] { ref.data() };
+        channels::toPeakWithEndFade (ref, channels::peakOf (ch, 1, (int) ref.size()) * (float) metronome::softCount, 256);
+        expect ("soft count: 0.4 of the peak with the end fade, bit for bit", metronome::atLevel (s, (float) metronome::softCount) == ref);
+        expect ("soft count: full level leaves a sound as it is", metronome::atLevel (s, 1.0f) == s);
+    }
+
+    // a note readout held through gaps (a plugin's screen, one reading per frame)
+    {
+        TunerFollow f (noteReadout);
+        int hold = 0;
+        float shown = -1.0f;
+        bool same = true;
+        const float notes[] { 0, 60, 60.4f, 0, 0, 0, 62, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        for (float note : notes)
+        {
+            if (note > 0.0f) { shown = note; hold = 10; }
+            else if (hold > 0 && --hold == 0) shown = -1.0f;
+            const float got = f.push (note);
+            same = same && (got > 0.0f ? got : -1.0f) == shown;
+        }
+        expect ("note readout: each note as it is, held through nine empty frames, cleared on the tenth", same);
     }
 
     std::printf (failures == 0 ? "ALL PASSED\n" : "%d FAILED\n", failures);

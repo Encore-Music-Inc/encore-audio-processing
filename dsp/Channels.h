@@ -1,6 +1,8 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -193,6 +195,65 @@ namespace vs
                 }
         }
 
+        // A section of a longer fade, as a DAW draws a clip's fade block by
+        // block: the position along the curve moves in a straight line from
+        // startAlpha to endAlpha over n samples (in double, a step of
+        // (end - start) / n), and each sample is multiplied by the curve's gain
+        // there (fadeGainFloat), one gain for every channel.
+        inline void fadeSection (float* const* ch, int numCh, int n, FadeCurve curve, float startAlpha, float endAlpha)
+        {
+            if (n <= 0) return;
+            const double delta = ((double) endAlpha - (double) startAlpha) / n;
+            double alpha = startAlpha;
+            for (int i = 0; i < n; ++i)
+            {
+                const float g = fadeGainFloat (curve, alpha);
+                for (int c = 0; c < numCh; ++c) ch[c][i] *= g;
+                alpha += delta;
+            }
+        }
+
+        // The same section added into dst: dst[i] += src[i] x the gain.
+        inline void addFadeSection (const float* src, float* dst, int n, FadeCurve curve, float startAlpha, float endAlpha)
+        {
+            if (n <= 0) return;
+            const double delta = ((double) endAlpha - (double) startAlpha) / n;
+            double alpha = startAlpha;
+            for (int i = 0; i < n; ++i)
+            {
+                dst[i] += src[i] * fadeGainFloat (curve, alpha);
+                alpha += delta;
+            }
+        }
+
+        // A clip's de-click when playback jumps: the sample it last played
+        // (held) fades away over heldFadeSamples (heldFadeStartSamples on the
+        // first block of a clip that starts mid-way), or the new audio joins
+        // from it. Lengths are at most these, fewer in a shorter block.
+        inline constexpr int heldFadeSamples = 40, heldFadeStartSamples = 10;
+
+        // x becomes held fading straight to silence over len samples (a held
+        // value of exactly 0 leaves x as it is).
+        inline void fadeFromHeld (float* x, int len, float held)
+        {
+            if (held == 0.0f) return;
+            for (int i = 0; i < len; ++i)
+            {
+                const float alpha = (float) i / (float) len;
+                x[i] = held * (1.0f - alpha);
+            }
+        }
+
+        // x joins from held: a straight crossfade from the held value to x over len samples.
+        inline void joinFromHeld (float* x, int len, float held)
+        {
+            for (int i = 0; i < len; ++i)
+            {
+                const float alpha = (float) i / (float) len;
+                x[i] = alpha * x[i] + held * (1.0f - alpha);
+            }
+        }
+
         // The sample peak (largest |x|) over every channel.
         inline float peakOf (const float* const* ch, int numCh, int n)
         {
@@ -240,12 +301,25 @@ namespace vs
                 }
         }
 
-        // Every NaN sample becomes zero (what a DAW does to each plugin's output)
-        inline void zeroNaN (float* const* ch, int numCh, int n)
+        // What zeroNaN clears. nan: every NaN (what a DAW does to each plugin's
+        // output). notNormal: everything that isn't a normal number, NaN, +-Inf,
+        // denormals and -0 (what a DAW does to what it sends to the sound card).
+        enum class Zero { nan, notNormal };
+
+        // Whether v is a normal number, read from its exponent bits so that a
+        // fast-math build, which may assume there are no NaNs or infinities,
+        // still sees them.
+        inline bool isNormalBits (float v)
+        {
+            const auto e = (std::bit_cast<std::uint32_t> (v) >> 23) & 0xffu;
+            return e != 0 && e != 0xffu;
+        }
+
+        inline void zeroNaN (float* const* ch, int numCh, int n, Zero what = Zero::nan)
         {
             for (int c = 0; c < numCh; ++c)
                 for (int i = 0; i < n; ++i)
-                    if (std::isnan (ch[c][i])) ch[c][i] = 0.0f;
+                    if (what == Zero::nan ? std::isnan (ch[c][i]) : ! isNormalBits (ch[c][i])) ch[c][i] = 0.0f;
         }
 
         // Every channel averaged into one (what a detector or an analyser listens to).
