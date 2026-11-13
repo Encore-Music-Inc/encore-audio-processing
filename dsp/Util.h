@@ -29,6 +29,29 @@ namespace vs
         env += (x > env ? up : down) * (x - env);
     }
 
+    // Sample i of every channel averaged (a float sum, then divided by the
+    // count): what a detector listens to.
+    inline float channelMean (const float* const* ch, int numCh, int i)
+    {
+        float m = 0.0f;
+        for (int c = 0; c < numCh; ++c) m += ch[c][i];
+        return m / (float) numCh;
+    }
+
+    // The same with an instant rise: env jumps up to x, and falls toward it by
+    // `down` of the difference (a peak follower).
+    inline void followPeak (float& env, float x, float down)
+    {
+        env = x > env ? x : env + down * (x - env);
+    }
+
+    // The same upside down: env drops to x at once, and rises toward it by
+    // `up` of the difference (a gain that cuts at once and recovers).
+    inline void followTrough (float& env, float x, float up)
+    {
+        env = x < env ? x : env + up * (x - env);
+    }
+
     // Decibels. Each takes the small amount added before the logarithm (so
     // silence reads a finite level) as `floor`; 0 gives -inf for silence.
     //   float, for processing:  dbToGain 10^(dB / 20) (as pow (10, dB x 0.05)),

@@ -159,15 +159,13 @@ namespace vs
 
             for (int i = start; i < start + len; ++i)
             {
-                float m = 0.0f;
-                for (int c = 0; c < numCh; ++c) m += ch[c][i];
-                m /= (float) numCh;
+                const float m = channelMean (ch, numCh, i);
                 const float b = det.process (0, m);
                 envB += avgC * (b * b - envB);
                 envF += avgC * (m * m - envF);
             }
 
-            const float relDb = 10.0f * std::log10 ((envB + 1e-12f) / (envF + 1e-12f));
+            const float relDb = powerToDb ((envB + 1e-12f) / (envF + 1e-12f), 0.0f);
             const float fullDb = powerToDb (envF);
             const float target = fullDb > -70.0f ? dynamics::cutDb (relDb - settings.thresholdDb, 1.5f, 0.0f, settings.rangeDb) : 0.0f;
 
@@ -253,9 +251,7 @@ namespace vs
             {
                 for (int i = start; i < start + len; ++i)
                 {
-                    float m = 0.0f;
-                    for (int c = 0; c < scCh; ++c) m += sc[c][i];
-                    m /= (float) scCh;
+                    const float m = channelMean (sc, scCh, i);
                     totalPow += m * m;
                     for (int k = 0; k < numBands; ++k)
                     {

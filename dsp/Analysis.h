@@ -7,6 +7,7 @@
 #include <vector>
 #include "Biquad.h"
 #include "Loudness.h"
+#include "Resampler.h"
 #include "LoudnessReport.h"
 #include "Spectrum.h"
 #include "TruePeak.h"
@@ -113,6 +114,11 @@ namespace vs
             const double bits = isFloat ? 0 : bitDepth;
             return bits > 0 ? std::max (1.5 / std::pow (2.0, bits - 1), 2e-6) : 1e-5;
         }
+
+        // Only a channel peaking at minPeak or more is checked (a quieter one
+        // can't have clipped).
+        static constexpr float minPeak = 0.5f;
+        static bool checks (float channelPeak) { return channelPeak >= minPeak; }
 
         void prepare (float channelPeak, double tol, double sampleRate)
         {
@@ -228,7 +234,7 @@ namespace vs
             fsd = fs / D;
             decCount = n / D;
             const auto lp1k = BiquadCoefs::rbj (BiquadCoefs::Type::lowPass, fs, 1000.0, 0.7071067811865476);
-            decim.setSections ({ lp1k, lp1k }, 2);
+            decim = Decimator ({ lp1k, lp1k }, D, true);
             for (int b = 0; b < analysis::numBands; ++b)
             {
                 const auto& bd = analysis::bands[b];
@@ -258,7 +264,7 @@ namespace vs
             const bool deep = opts.bitDepth > 16 && ! opts.isFloat;
             gridStride = std::max<std::int64_t> (1, n / 400000);
             gridChecked = 0; gridOff = 0; gridNext = 0;
-            decNext = 0; decTaken = 0;
+            decTaken = 0;
             gridDone[0] = gridDone[1] = ! deep;
             if (! stereo) gridDone[1] = true;
 
@@ -285,7 +291,7 @@ namespace vs
                 bool any = false;
                 for (int c = 0; c < (stereo ? 2 : 1); ++c)
                 {
-                    clipOn[c] = pk[c] >= 0.5f; // only a channel peaking at 0.5 or more is checked
+                    clipOn[c] = FlatRuns::checks (pk[c]);
                     clipCh[c].prepare (pk[c], tol, fs);
                     any = any || clipOn[c];
                 }
@@ -514,18 +520,16 @@ namespace vs
             for (int b = 0; b < analysis::numBands; ++b)
                 if (! analysis::bands[b].low) accumulate (band[b], l, r, count);
 
-            // decimated copy: the 1 kHz low-pass twice, then every D-th sample
-            if ((int) bufL.size() < count) { bufL.resize ((size_t) count); bufR.resize ((size_t) count); }
-            std::copy (l, l + count, bufL.begin());
-            if (stereo) std::copy (r, r + count, bufR.begin());
-            decim.processPair (bufL.data(), stereo ? bufR.data() : nullptr, count);
+            // decimated copy: the 1 kHz low-pass twice, then every D-th sample,
+            // the first decCount of them
+            const int most = decim.maxOutput (count);
+            if ((int) bufL.size() < most) { bufL.resize ((size_t) most); bufR.resize ((size_t) most); }
+            const int got = decim.pushPair (l, stereo ? r : nullptr, count, bufL.data(), bufR.data());
             decL.clear(); decR.clear();
-            // the decimated samples are those at multiples of D, the first decCount of them
-            for (; decNext < at + count && decTaken < decCount; decNext += D, ++decTaken)
+            for (int i = 0; i < got && decTaken < decCount; ++i, ++decTaken)
             {
-                const size_t i = (size_t) (decNext - at);
-                decL.push_back (bufL[i]);
-                decR.push_back (stereo ? bufR[i] : bufL[i]);
+                decL.push_back (bufL[(size_t) i]);
+                decR.push_back (stereo ? bufR[(size_t) i] : bufL[(size_t) i]);
             }
             if (decL.empty()) return;
             for (int b = 0; b < analysis::numBands; ++b)
@@ -587,7 +591,7 @@ namespace vs
         int D = 8;
         double fsd = 6000.0;
         std::int64_t decCount = 0;
-        BiquadChain decim;
+        Decimator decim { {}, 1 };
         BandAcc band[analysis::numBands], low;
         std::vector<float> bufL, bufR, decL, decR, tmpA, tmpB;
 
@@ -598,7 +602,7 @@ namespace vs
 
         CliffFinder cliff;
 
-        std::int64_t gridStride = 1, gridChecked = 0, gridOff = 0, gridNext = 0, decNext = 0, decTaken = 0;
+        std::int64_t gridStride = 1, gridChecked = 0, gridOff = 0, gridNext = 0, decTaken = 0;
         bool gridDone[2] { true, true };
     };
 }

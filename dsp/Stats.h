@@ -11,6 +11,17 @@ namespace vs
     // precision on a pointer and a count. An empty array gives 0.
     namespace stats
     {
+        // Where the peak (or dip) of a parabola through three equally spaced
+        // values a, b, c lies, from the middle one: -0.5 .. 0.5 for a true peak,
+        // 0 when the three are too close to a straight line (|curvature| at most
+        // minDenom). Worked out in T.
+        template <typename T>
+        T parabolicOffset (T a, T b, T c, T minDenom)
+        {
+            const T denom = a - T (2) * b + c;
+            return std::abs (denom) > minDenom ? (T (0.5) * (a - c)) / denom : T (0);
+        }
+
         // The middle value (the mean of the two middle values for an even count).
         template <typename T>
         double median (const T* x, int n)

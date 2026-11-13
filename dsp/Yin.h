@@ -21,6 +21,7 @@
 #include <cmath>
 #include <vector>
 #include "Fft.h"
+#include "Stats.h"
 
 namespace vs
 {
@@ -344,14 +345,10 @@ namespace vs
             if (settings.arithmetic == Arithmetic::single)
             {
                 const float y0 = d[(size_t) tau - 1], y1 = d[(size_t) tau], y2 = d[(size_t) tau + 1];
-                const float denom = y0 - 2.0f * y1 + y2;
-                float t = (float) tau;
-                if (std::abs (denom) > 1.0e-9f) t += 0.5f * (y0 - y2) / denom;
-                return (double) t;
+                return (double) ((float) tau + stats::parabolicOffset (y0, y1, y2, 1.0e-9f));
             }
             const double y0 = d[(size_t) tau - 1], y1 = d[(size_t) tau], y2 = d[(size_t) tau + 1];
-            const double denom = y0 - 2.0 * y1 + y2;
-            return std::abs (denom) > 1.0e-9 ? tau + (0.5 * (y0 - y2)) / denom : (double) tau;
+            return tau + stats::parabolicOffset (y0, y1, y2, 1.0e-9);
         }
     };
 

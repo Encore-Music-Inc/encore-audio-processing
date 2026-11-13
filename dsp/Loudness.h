@@ -10,6 +10,13 @@
 
 namespace vs
 {
+    // Loudness in LUFS of a K-weighted mean square (BS.1770): the one formula.
+    // floor is added before the logarithm, so silence reads a finite level.
+    inline double lufsOf (double meanSquare, double floor = 1e-20)
+    {
+        return -0.691 + 10.0 * std::log10 (meanSquare + floor);
+    }
+
     // Loudness meter per ITU-R BS.1770-4 / EBU R128: K-weighting, momentary
     // (400 ms), short-term (3 s) and gated integrated loudness, in LUFS.
     // This is the measurement streaming services use to set playback level.
@@ -83,14 +90,14 @@ namespace vs
             for (int i = 0; i < count; ++i)
                 if (blocks[(size_t) i] > -70.0f) { sum += std::pow (10.0, (blocks[(size_t) i] + 0.691) / 10.0); ++n; }
             if (n == 0) return -100.0f;
-            const double relGate = -0.691 + 10.0 * std::log10 (sum / n) - 10.0;
+            const double relGate = lufsOf (sum / n, 0.0) - 10.0;
             sum = 0.0; n = 0;
             for (int i = 0; i < count; ++i)
                 if (blocks[(size_t) i] > -70.0f && blocks[(size_t) i] > relGate) { sum += std::pow (10.0, (blocks[(size_t) i] + 0.691) / 10.0); ++n; }
-            return n == 0 ? -100.0f : (float) (-0.691 + 10.0 * std::log10 (sum / n));
+            return n == 0 ? -100.0f : (float) lufsOf (sum / n, 0.0);
         }
 
-        static float toLufs (double meanSquareSum) { return (float) (-0.691 + 10.0 * std::log10 (meanSquareSum + 1e-20)); }
+        static float toLufs (double meanSquareSum) { return (float) lufsOf (meanSquareSum); }
 
     private:
         void closeSubBlock()
@@ -233,7 +240,7 @@ namespace vs
                 while (minQ[(size_t) qHead].first < t - window) qHead = (qHead + 1) % qs;
                 const float held = minQ[(size_t) qHead].second;
 
-                relState = held < relState ? held : relState + relCoef * (held - relState);
+                followTrough (relState, held, relCoef);
 
                 // box average: the gain is fully down before the peak leaves the delay
                 boxSum += relState - boxBuf.at (look);

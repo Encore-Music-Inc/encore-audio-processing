@@ -266,10 +266,8 @@ namespace vs
                         const double semis = s.filter.keyTrack * (pitch - 60.0) + s.filter.envSemitones * fe
                                            + s.filter.velocity * 24.0 * (velocity - 0.5) + cutoffMod;
                         const double hz = std::clamp ((double) s.filter.hz * std::pow (2.0, semis / 12.0), 20.0, 0.45 * fs);
-                        g = std::tan (3.141592653589793 * hz / fs);
-                        const double r2 = 1.0 / std::clamp ((double) s.filter.resonance, 0.5, 10.0);
-                        k = g + r2;
-                        h = 1.0 / (1.0 + r2 * g + g * g);
+                        const auto c = svfCoefs<double> (fs, hz, 1.0 / std::clamp ((double) s.filter.resonance, 0.5, 10.0));
+                        g = c.g; k = c.k; h = c.h;
                     }
                     auto pickOut = [&s] (const SvfOutputs<double>& o)
                     {

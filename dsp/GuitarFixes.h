@@ -80,9 +80,7 @@ namespace vs
                 const float dt = (float) len / (float) fs;
                 for (int i = start; i < start + len; ++i)
                 {
-                    float m = 0.0f;
-                    for (int c = 0; c < numCh; ++c) m += ch[c][i];
-                    m /= (float) numCh;
+                    const float m = channelMean (ch, numCh, i);
                     const float h = hiB.process (0, hiA.process (0, m));
                     const float md = midB.process (0, midA.process (0, m));
                     followEnvelope (eh, h * h, hiAtk, hiRel);
@@ -182,9 +180,7 @@ namespace vs
                 const int len = std::min (sub, n - start);
                 for (int i = start; i < start + len; ++i)
                 {
-                    float m = 0.0f;
-                    for (int c = 0; c < numCh; ++c) m += ch[c][i];
-                    m /= (float) numCh;
+                    const float m = channelMean (ch, numCh, i);
                     const float b = bandB.process (0, bandA.process (0, m));
                     const float p = b * b;
                     followEnvelope (fast, p, fastAtk, fastRel);
@@ -276,9 +272,7 @@ namespace vs
                 const int len = std::min (sub, n - start);
                 for (int i = start; i < start + len; ++i)
                 {
-                    float m = 0.0f;
-                    for (int c = 0; c < numCh; ++c) m += ch[c][i];
-                    m /= (float) numCh;
+                    const float m = channelMean (ch, numCh, i);
 
                     ring[(size_t) write] = m;
                     write = (write + 1) % size;

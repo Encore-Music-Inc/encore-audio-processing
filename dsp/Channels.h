@@ -326,12 +326,7 @@ namespace vs
         inline void monoAverage (const float* const* ch, int numCh, int n, float* out)
         {
             if (numCh <= 0) { std::fill (out, out + n, 0.0f); return; }
-            for (int i = 0; i < n; ++i)
-            {
-                float m = 0.0f;
-                for (int c = 0; c < numCh; ++c) m += ch[c][i];
-                out[i] = m / (float) numCh;
-            }
+            for (int i = 0; i < n; ++i) out[i] = channelMean (ch, numCh, i);
         }
 
         // The gain in dB that brings a sample peak to targetDb (0 for silence),
@@ -339,7 +334,7 @@ namespace vs
         inline float gainToPeakDb (float peak, float targetDb, float minDb = -60.0f, float maxDb = 24.0f)
         {
             if (! (peak > 0.00001f)) return 0.0f;
-            return std::clamp (targetDb - 20.0f * std::log10 (peak), minDb, maxDb);
+            return std::clamp (targetDb - ampToDb (peak, 0.0f), minDb, maxDb);
         }
 
         // The running peak of |v|, NaN-aware as a browser's Math.max is: a NaN

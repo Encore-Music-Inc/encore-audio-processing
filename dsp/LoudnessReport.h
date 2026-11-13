@@ -76,7 +76,7 @@ namespace vs
             {
                 double e = 0.0;
                 for (int k = from; k < from + count; ++k) e += kL[(size_t) k] + kR[(size_t) k];
-                return -0.691 + 10.0 * std::log10 (e / (count * hop) + 1e-20);
+                return lufsOf (e / (count * hop));
             };
 
             // short-term: 30 blocks (3 s), every 100 ms; a song under 3 s is one window

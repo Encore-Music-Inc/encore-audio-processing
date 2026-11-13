@@ -109,6 +109,14 @@ namespace vs
 
         // Kaiser window with shape beta, symmetric: I0 (beta sqrt (1 - r^2)) / I0 (beta),
         // r from -1 to 1 across the window.
+        // The Kaiser taper at r (-1 .. 1 across the window), not normalized:
+        // I0 (beta sqrt (1 - r^2)). The window, the oversampler's and the
+        // sinc table's kernels all use it.
+        inline double kaiserTaper (double r, double beta, int terms = 40, double relStop = 1e-14)
+        {
+            return besselI0 (beta * std::sqrt (std::max (0.0, 1.0 - r * r)), terms, relStop);
+        }
+
         inline std::vector<double> kaiser (int n, double beta)
         {
             std::vector<double> w ((size_t) n, 1.0);
@@ -117,7 +125,7 @@ namespace vs
             for (int i = 0; i < n; ++i)
             {
                 const double r = 2.0 * i / (n - 1) - 1.0;
-                w[(size_t) i] = besselI0 (beta * std::sqrt (std::max (0.0, 1.0 - r * r))) / norm;
+                w[(size_t) i] = kaiserTaper (r, beta) / norm;
             }
             return w;
         }
@@ -140,7 +148,7 @@ namespace vs
                 const double x = (double) i / res;
                 const double sinc = x == 0.0 ? 1.0 : std::sin (windows::pi * x) / (windows::pi * x);
                 const double r = x / half;
-                t[(size_t) i] = r >= 1.0 ? 0.0 : (sinc * windows::besselI0 (beta * std::sqrt (1 - r * r))) / i0b;
+                t[(size_t) i] = r >= 1.0 ? 0.0 : (sinc * windows::kaiserTaper (r, beta)) / i0b;
             }
         }
 

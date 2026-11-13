@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include "Stats.h"
 #include "dsp/Fft.h"
 #include "dsp/Windows.h"
 #include "dsp/Util.h"
@@ -49,20 +50,13 @@ namespace vs::tempo
         // The least-squares line through (beat number n[i], time t[i]); 500 ms per beat when every n is the same.
         inline TapLine tapLine (const double* t, const double* n, const int* idx, int count)
         {
-            double mx = 0.0, my = 0.0;
-            for (int i = 0; i < count; ++i) mx += n[idx[i]];
-            mx /= count;
-            for (int i = 0; i < count; ++i) my += t[idx[i]];
-            my /= count;
-            double sxy = 0.0, sxx = 0.0;
-            for (int i = 0; i < count; ++i)
-            {
-                const double dn = n[idx[i]] - mx;
-                sxy += dn * (t[idx[i]] - my);
-                sxx += dn * dn;
-            }
-            const double b = sxx > 0 ? sxy / sxx : 500.0;
-            return { my - b * mx, b };
+            std::vector<double> xs, ys;
+            for (int i = 0; i < count; ++i) { xs.push_back (n[idx[i]]); ys.push_back (t[idx[i]]); }
+            const auto l = stats::fitLine (xs.data(), ys.data(), count);
+            bool flat = true;
+            for (double x : xs) flat = flat && x == l.meanX;
+            const double b = flat ? 500.0 : l.slope;
+            return { l.meanY - b * l.meanX, b };
         }
 
         // Rounds half up, as the web app does (2.5 is 3, -2.5 is -2)

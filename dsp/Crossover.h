@@ -37,7 +37,7 @@ namespace vs
         // one Butterworth 2nd-order section; returns its low-pass or high-pass output
         T section (int ch, int k, T x, bool lowPass)
         {
-            const auto o = svfStep (x, st[ch & 1][k], g, (T) (2 * R + g), h);
+            const auto o = svfStep (x, st[ch & 1][k], c.g, c.k, c.h);
             return lowPass ? o.lowPass : o.highPass;
         }
 
@@ -45,14 +45,13 @@ namespace vs
         {
             const double v = (double) cutoff, hi = fs * 0.49;
             const double f = v < 10.0 ? 10.0 : (v > hi ? hi : v);
-            g = (T) std::tan (pi * f / fs);
-            h = (T) (1.0 / (1.0 + 2.0 * R * g + g * g));
+            c = svfCoefs<T> (fs, f, 2.0 * R);
         }
 
-        static constexpr double pi = 3.141592653589793;
         static constexpr double R = 0.70710678118654752; // 1/(2Q), Q = 1/sqrt(2)
         double fs = 48000.0;
-        T cutoff = T (1000), g = T (0.06), h = T (0.9);
+        T cutoff = T (1000);
+        SvfCoefs<T> c { T (0.06), T (2 * R + T (0.06)), T (0.9) };
         T st[2][4][2] {};
         Type type = Type::lowPass;
     };

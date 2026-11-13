@@ -32,6 +32,19 @@ namespace vs
         return { lp, bp, hp };
     }
 
+    // A section's coefficients for a cut-off (hz) and 1/Q (r2): the one place
+    // they are worked out. g is T, k = r2 + g and h = 1 / (1 + r2 g + g^2) are
+    // worked out in the type of r2 and then T (each filter keeps its own
+    // precision, number for number).
+    template <typename T> struct SvfCoefs { T g {}, k {}, h {}; };
+
+    template <typename T, typename R>
+    inline SvfCoefs<T> svfCoefs (double fs, double hz, R r2)
+    {
+        const T g = static_cast<T> (std::tan (3.141592653589793 * hz / fs));
+        return { g, static_cast<T> (r2 + g), static_cast<T> (1.0 / (1.0 + r2 * g + g * g)) };
+    }
+
     template <typename T>
     class StateVariableFilter
     {
@@ -58,22 +71,19 @@ namespace vs
 
         T processSample (int channel, T x)
         {
-            const auto o = svfStep (x, state.data() + 2 * channel, g, g + r2, h);
+            const auto o = svfStep (x, state.data() + 2 * channel, c.g, c.k, c.h);
             return type == Type::highPass ? o.highPass : type == Type::bandPass ? o.bandPass : o.lowPass;
         }
 
     private:
         void update()
         {
-            g = static_cast<T> (std::tan (pi * cutoff / fs));
-            r2 = static_cast<T> (1.0 / resonance);
-            h = static_cast<T> (1.0 / (1.0 + r2 * g + g * g));
+            c = svfCoefs<T> (fs, (double) cutoff, static_cast<T> (1.0 / resonance));
         }
 
-        static constexpr double pi = 3.141592653589793238;
         double fs = 44100.0;
         T cutoff = static_cast<T> (1000.0), resonance = static_cast<T> (1.0 / std::sqrt (2.0));
-        T g {}, r2 {}, h {};
+        SvfCoefs<T> c;
         Type type = Type::lowPass;
         std::vector<T> state = std::vector<T> (4, T (0));
     };

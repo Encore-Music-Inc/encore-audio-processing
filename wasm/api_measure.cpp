@@ -412,7 +412,7 @@ extern "C"
         {
             float peak = 0.0f;
             for (std::int64_t i = 0; i < (std::int64_t) n; ++i) peak = std::max (peak, std::abs (ch[c][i]));
-            if (peak < 0.5f) continue; // only a channel peaking at 0.5 or more is checked
+            if (! vs::FlatRuns::checks (peak)) continue;
             vs::FlatRuns fr;
             fr.prepare (peak, tol, sampleRate);
             fr.process (ch[c], (int) n);

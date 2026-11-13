@@ -45,11 +45,7 @@ namespace vs
         // The middle value (the mean of the two middle ones for an even count); NaN when empty.
         inline double median (const std::vector<double>& a)
         {
-            if (a.empty()) return std::numeric_limits<double>::quiet_NaN();
-            auto s = a;
-            std::sort (s.begin(), s.end());
-            const size_t h = s.size() >> 1;
-            return (s.size() & 1) ? s[h] : (s[h - 1] + s[h]) / 2;
+            return a.empty() ? std::numeric_limits<double>::quiet_NaN() : stats::median (a.data(), (int) a.size());
         }
 
         inline double mean (const std::vector<double>& a) { return stats::mean (a.data(), (int) a.size()); }
@@ -373,8 +369,7 @@ namespace vs
                 if (best > 0 && bestV > 0.3 && width >= 15)
                 {
                     const double a = acs[(size_t) best - 1], b = acs[(size_t) best], cc = acs[(size_t) best + 1];
-                    const double denom = a - 2 * b + cc;
-                    const double lag = best + (std::abs (denom) > 1e-9 ? (0.5 * (a - cc)) / denom : 0);
+                    const double lag = best + stats::parabolicOffset (a, b, cc, 1e-9);
                     const double hz = rate / lag;
                     const double N = 2 * ((int) roundHalfUp (0.4 * rate) >> 1) + 1;
                     const double pi = 3.141592653589793;
@@ -1009,12 +1004,8 @@ namespace vs
             if (! std::isnan (times[i]) && ! std::isnan (b)) offs.push_back (times[i] - b);
         }
         if (offs.empty()) return std::nullopt;
-        double sum = 0.0;
-        for (double x : offs) sum += x;
-        const double mean = sum / (double) offs.size();
-        double ss = 0.0;
-        for (double x : offs) ss += (x - mean) * (x - mean);
-        const double spread = std::sqrt (ss / (double) offs.size());
+        const double mean = stats::mean (offs.data(), (int) offs.size());
+        const double spread = stats::standardDeviation (offs.data(), (int) offs.size());
         TimingReport r;
         int within = 0;
         for (double x : offs)

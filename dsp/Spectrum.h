@@ -126,7 +126,7 @@ namespace vs
             for (size_t b = 0; b < mag.size(); ++b)
             {
                 const float d = ampToDb (mag[b]);
-                db[b] += (d > db[b] ? opt.attack : opt.release) * (d - db[b]);
+                followEnvelope (db[b], d, opt.attack, opt.release);
                 pow[b] += opt.powerSmoothing * (mag[b] * mag[b] - pow[b]);
             }
         }

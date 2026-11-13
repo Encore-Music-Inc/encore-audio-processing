@@ -13,6 +13,7 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include "Stats.h"
 #include "Fft.h"
 #include "Windows.h"
 
@@ -52,8 +53,7 @@ namespace vs::drums
                 if (mag (k) > floor && mag (k) >= mag (k - 1) && mag (k) >= mag (k + 1)) { best = k; break; }
         }
         const double a = mag (best - 1), b = mag (best), c = mag (best + 1);
-        const double denom = a - 2 * b + c;
-        const double shift = std::abs (denom) > 1e-12 ? (0.5 * (a - c)) / denom : 0.0;
+        const double shift = stats::parabolicOffset (a, b, c, 1e-12);
         return ((best + shift) * sampleRate) / size;
     }
 

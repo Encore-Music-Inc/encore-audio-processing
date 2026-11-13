@@ -3,6 +3,7 @@
 #include "JuceInclude.h"
 #include "Biquad.h"
 #include "DelayLine.h"
+#include "Oscillator.h"
 #include "Util.h"
 
 namespace vs
@@ -21,7 +22,7 @@ namespace vs
         {
             fs = sampleRate;
             line.prepare ((int) (0.06 * fs));
-            phaseA = 0.0; phaseB = 0.37;
+            lfoA.setPhase (0.0); lfoB.setPhase (0.37);
             hp1.c = BiquadCoefs::highPass (fs, 150.0, 0.7071);
             hp2.c = hp1.c;
             hp1.reset(); hp2.reset();
@@ -40,17 +41,14 @@ namespace vs
                 return;
             }
 
-            const double incA = 0.31 / fs, incB = 0.47 / fs;
             for (int i = 0; i < n; ++i)
             {
                 const float mid = midOf (l[i], r[i]), side = sideOf (l[i], r[i]);
                 line.put (mid);
 
                 // delays in samples: A 14 ms +-1.1 ms, B 23 ms +-1.3 ms (about 4 and 7 cents of drift)
-                const double dA = fs * (0.014 + 0.0011 * std::sin (juce::MathConstants<double>::twoPi * phaseA));
-                const double dB = fs * (0.023 + 0.0013 * std::sin (juce::MathConstants<double>::twoPi * phaseB));
-                phaseA += incA; if (phaseA >= 1.0) phaseA -= 1.0;
-                phaseB += incB; if (phaseB >= 1.0) phaseB -= 1.0;
+                const double dA = fs * (0.014 + 0.0011 * lfoA.nextValue (0.31, fs));
+                const double dB = fs * (0.023 + 0.0013 * lfoB.nextValue (0.47, fs));
 
                 const float copy = 0.62f * line.readHermite (dA) - 0.62f * line.readHermite (dB);
                 const float s = hp2.process (0, hp1.process (0, copy));
@@ -68,7 +66,8 @@ namespace vs
         }
 
     private:
-        double fs = 48000.0, phaseA = 0.0, phaseB = 0.0;
+        double fs = 48000.0;
+        Oscillator lfoA, lfoB; // the two copies' slow drift (sines)
         DelayLine line;
         Biquad hp1, hp2;
         juce::SmoothedValue<float> width;
