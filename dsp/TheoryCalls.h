@@ -1,6 +1,7 @@
 #pragma once
 
-// The chord and scale theory (Harmony.h, Voicings.h, ScaleTheory.h) as JSON
+// The chord and scale theory (Harmony.h, Voicings.h, ScaleTheory.h) and the
+// voice exercises' notes (VoiceTracker.h) as JSON
 // requests and answers, for the browser build (th_call in wasm/api_theory.cpp)
 // and the reference set, so both run the same code on the same text.
 //
@@ -12,6 +13,8 @@
 //   scale   a library id ("dorian")
 //   courses [{"midi": [..], "open": n, "start": n}], as coursesOf answers
 //   a fit chord: the text readChord reads ("C7alt")
+//   range   {"low", "high", "tessLo", "tessHi"}: a saved vocal range, MIDI notes
+//   rand    [numbers 0..1]: the random numbers an exercise uses, in order
 // The answer is the result as JSON, or {"error": "..."} for a request it can't
 // read. Numbers are written rounded to nine decimals, so every build writes
 // the same text. Plain C++20, no JUCE.
@@ -25,6 +28,7 @@
 #include <string_view>
 #include <vector>
 #include "ScaleTheory.h"
+#include "VoiceTracker.h"
 
 namespace vs::theorycalls
 {
@@ -263,6 +267,32 @@ namespace vs::theorycalls
             if (! v || v->isNull()) return fallback;
             if (v->type != Json::Type::string) { fail (std::string (k) + " is not text"); return fallback; }
             return v->s;
+        }
+
+        inline double numArg (const Json& req, std::string_view k, double fallback)
+        {
+            const auto* v = req.get (k);
+            if (! v || v->isNull()) return fallback;
+            if (v->type != Json::Type::number) { fail (std::string (k) + " is not a number"); return fallback; }
+            return v->n;
+        }
+
+        inline voice::VocalRange rangeFrom (const Json& v)
+        {
+            return { numArg (v, "low", 0), numArg (v, "high", 0), numArg (v, "tessLo", 0), numArg (v, "tessHi", 0) };
+        }
+
+        // The request's random numbers, handed out in order (0 and a problem once they run out)
+        inline voice::Rand randFrom (const Json& req)
+        {
+            auto list = std::make_shared<std::vector<double>>();
+            if (const auto* r = req.get ("rand")) for (const auto& x : r->items) list->push_back (x.n);
+            auto next = std::make_shared<size_t> (0);
+            return [list, next]
+            {
+                if (*next >= list->size()) { fail ("rand ran out"); return 0.0; }
+                return (*list)[(*next)++];
+            };
         }
 
         inline std::vector<int> ints (const Json& v)
@@ -874,6 +904,60 @@ namespace vs::theorycalls
                           o.close ('}');
                       });
             }
+            // a song's key and a capo for a shift
+            else if (fn == "guessKey")
+            {
+                std::vector<Chord> cs;
+                for (const auto& x : need (q, "chords").items)
+                    if (x.type == Json::Type::string) { if (const auto c = H::parseChord (x.s)) cs.push_back (*c); }
+                const auto k = H::guessKey (cs);
+                if (k) put (o, *k); else o.null();
+            }
+            else if (fn == "capoForShift")
+            {
+                const auto c = H::capoForShift (intArg (q, "semis", 0), intArg (q, "maxCapo", 7));
+                if (c) o.num (*c); else o.null();
+            }
+            // voice exercises
+            else if (fn == "keyShiftsForRange")
+                list (o, voice::keyShiftsForRange (numArg (q, "songLow", 0), numArg (q, "songHigh", 0), rangeFrom (need (q, "range")), intArg (q, "originalPc", -1)),
+                      [&] (const voice::KeyShift& k)
+                      {
+                          o.open ('{').key ("shift").num (k.shift).key ("low").num (k.low).key ("high").num (k.high)
+                           .key ("fits").boolean (k.fits).key ("comfortable").boolean (k.comfortable)
+                           .key ("outside").num (k.outside).key ("strain").num (k.strain).key ("keyPc");
+                          if (k.keyPc < 0) o.null(); else o.num (k.keyPc);
+                          o.key ("rank").num (k.rank).close ('}');
+                      });
+            else if (fn == "nextMatchNote")
+            {
+                std::optional<double> prev;
+                if (const auto* p = q.get ("prev"); p && ! p->isNull()) prev = p->n;
+                o.num (voice::nextMatchNote (intArg (q, "level", 1), rangeFrom (need (q, "range")), prev, randFrom (q)));
+            }
+            else if (fn == "buildSingBack")
+                list (o, voice::buildSingBack (intArg (q, "level", 1), rangeFrom (need (q, "range")), randFrom (q)), [&] (double m) { o.num (m); });
+            else if (fn == "buildWarmup")
+                list (o, voice::buildWarmup (rangeFrom (need (q, "range")), boolArg (q, "full", false)), [&] (const voice::WarmupExercise& e)
+                {
+                    o.open ('{').key ("id").str (e.id).key ("patterns");
+                    list (o, e.patterns, [&] (const voice::WarmupPattern& p)
+                    {
+                        o.open ('{');
+                        if (p.glide) o.key ("glide").open ('{').key ("from").num (p.glide->from).key ("to").num (p.glide->to)
+                                      .key ("up").num (p.glide->up).key ("down").num (p.glide->down).close ('}');
+                        else
+                        {
+                            o.key ("notes");
+                            list (o, p.notes, [&] (const voice::PatternNote& n)
+                            {
+                                o.open ('{').key ("midi").num (n.midi).key ("at").num (n.at).key ("dur").num (n.dur).close ('}');
+                            });
+                        }
+                        o.close ('}');
+                    });
+                    o.close ('}');
+                });
             else fail ("no such function: " + fn);
         }
     }

@@ -2,7 +2,9 @@
 // the chord types made by tools/chords.py) and the browser's requests to it
 // (dsp/TheoryCalls.h), built without JUCE as the browser build is. Each check
 // prints PASS or FAIL; the suite exits non-zero on any failure.
+#include <cmath>
 #include <cstdio>
+#include <memory>
 #include <string>
 #include <vector>
 #include "dsp/TheoryCalls.h"
@@ -178,6 +180,56 @@ namespace
         expect ("C major up and down from C3: 15 notes, 48 to 60 and back", run.size() == 15 && run[0].midi == 48 && run[7].midi == 60 && run.back().midi == 48);
     }
 
+    // a song's key from its chords, a capo for a shift, and the voice exercises' notes
+    void songKeysAndVoice()
+    {
+        using theorycalls::call;
+        auto key = [] (std::vector<const char*> syms)
+        {
+            std::vector<harmony::Chord> cs;
+            for (auto* x : syms) cs.push_back (C (x));
+            const auto k = harmony::guessKey (cs);
+            return k ? music::noteText (k->tonic) + (k->mode == music::Mode::minor ? " minor" : " major") : std::string ("none");
+        };
+        expect ("guessKey: Am F C G Am is A minor", key ({ "Am", "F", "C", "G", "Am" }) == "A minor", key ({ "Am", "F", "C", "G", "Am" }));
+        expect ("guessKey: E A B7 E is E major", key ({ "E", "A", "B7", "E" }) == "E major");
+        expect ("guessKey: Dm Gm A7 Dm is D minor", key ({ "Dm", "Gm", "A7", "Dm" }) == "D minor");
+        expect ("guessKey: no chords, no key", key ({}) == "none");
+        expect ("guessKey: a request skips what isn't a chord", call (R"({"fn":"guessKey","chords":["C","nope"]})") == R"({"tonic":{"L":0,"a":0},"mode":"major"})");
+        expect ("capo: 1 to 7 frets for a shift up, none otherwise",
+                harmony::capoForShift (3) == 3 && harmony::capoForShift (-5) == 7 && ! harmony::capoForShift (-3) && ! harmony::capoForShift (0) && ! harmony::capoForShift (12));
+
+        const voice::VocalRange r { 48, 67, 52, 62 };
+        const auto shifts = voice::keyShiftsForRange (60, 72, r, 0);
+        expect ("key shifts: every shift an octave either way, best first", shifts.size() == 25 && shifts[0].shift == -9 && shifts[0].fits
+                && shifts[0].strain == 2 && shifts[0].keyPc == 3 && std::abs (shifts[0].rank - 7.35) < 1e-12);
+        bool sorted = true;
+        for (size_t i = 1; i < shifts.size(); ++i) sorted = sorted && shifts[i - 1].rank <= shifts[i].rank;
+        expect ("key shifts: in rank order", sorted);
+
+        auto fixed = [] (std::vector<double> v) { auto i = std::make_shared<size_t> (0); return [v, i] { return v[(*i)++ % v.size()]; }; };
+        expect ("next match note: level 3 within 7 of the last, never the last", voice::nextMatchNote (3, r, 55.0, fixed ({ 0.5 })) == 58);
+        const auto tune = voice::buildSingBack (4, r, fixed ({ 0.1, 0.9, 0.2, 0.3, 0.7, 0.45 }));
+        bool inside = tune.size() == 3;
+        for (double m : tune) inside = inside && m >= 49 && m <= 66;
+        expect ("sing back: three notes from level 3, all inside the safe range", inside);
+
+        const auto w = voice::buildWarmup (r, false), full = voice::buildWarmup (r, true);
+        std::string ids, fullIds;
+        for (const auto& e : w) ids += e.id + " ";
+        for (const auto& e : full) fullIds += e.id + " ";
+        expect ("warm-up: the short one's exercises", ids == "hum trill siren arpeggio sustain cooldown ", ids);
+        expect ("warm-up: the full one adds the vowel scale", fullIds == "hum trill siren arpeggio vowels sustain cooldown ", fullIds);
+        bool safe = true;
+        for (const auto& e : full)
+            for (const auto& p : e.patterns)
+                for (const auto& n : p.notes) safe = safe && n.midi >= 49 && n.midi <= 66;
+        expect ("warm-up: every note inside the safe range", safe);
+        expect ("warm-up: a siren lasts its slide up and back", voice::patternSeconds (w[2].patterns[0]) == 5.0
+                && voice::glideAt (*w[2].patterns[0].glide, 2.5) == w[2].patterns[0].glide->to);
+        expect ("a request with too few random numbers is an error", call (R"({"fn":"buildSingBack","level":3,"range":{"low":48,"high":67,"tessLo":52,"tessHi":62},"rand":[0.1]})") == R"({"error":"rand ran out"})");
+    }
+
     void requests()
     {
         using theorycalls::call;
@@ -202,6 +254,7 @@ int main()
     modes();
     scaleFits();
     neck();
+    songKeysAndVoice();
     requests();
     std::printf ("\n%s (%d failed)\n", failures == 0 ? "ALL PASSED" : "SOME FAILED", failures);
     return failures == 0 ? 0 : 1;

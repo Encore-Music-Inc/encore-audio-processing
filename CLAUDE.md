@@ -130,7 +130,7 @@ The headers, by area (each header's top comment says more):
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction's detector and its real-time engine |
 | | `TunerPitch.h` | the tuner's pitch and what it means on the instrument |
 | | `Tunings.h` | the tuner's list (written by `tools/tunings.py`) |
-| | `VoiceTracker.h` | following a singing voice and measuring it; played notes |
+| | `VoiceTracker.h` | following a singing voice and measuring it; played notes; the notes of warm-ups, sing-back and the keys that suit a range |
 | | `DrumPitch.h` | drum tuning |
 | Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
@@ -141,10 +141,10 @@ The headers, by area (each header's top comment says more):
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library (written by `tools/scales.py`) |
 | | `ChordTypes.h` | the chord types (written by `tools/chords.py`) |
-| | `Harmony.h` | chords: naming notes, numerals, the map of a key, key changes, the moves between chords and their facts, transposing |
+| | `Harmony.h` | chords: naming notes, numerals, the map of a key, key changes, the moves between chords and their facts, transposing, guessing a song's key, a capo for a shift |
 | | `Voicings.h` | chord shapes on fretted instruments and the piano |
 | | `ScaleTheory.h` | scales on a root: spelling, modes, their chords, which scale fits a chord or a progression, the neck |
-| | `TheoryCalls.h` | the theory as JSON requests and answers (the browser's `th_call`, and the reference set) |
+| | `TheoryCalls.h` | the theory and the voice exercises as JSON requests and answers (the browser's `th_call`, and the reference set) |
 | | `Scales.h` | pitch correction's keys, scales and harmony intervals |
 | | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids |
 

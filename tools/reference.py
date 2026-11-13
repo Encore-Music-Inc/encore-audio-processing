@@ -493,6 +493,10 @@ case("music/scale-library", "scale-library", native=True)
 GUITAR_COURSES = [{"midi": [m]} for m in (40, 45, 50, 55, 59, 64)]
 UKULELE_COURSES = [{"midi": [m]} for m in (67, 60, 64, 69)]
 BANJO_COURSES = [{"midi": [67], "start": 5}] + [{"midi": [m]} for m in (50, 55, 59, 62)]
+# a saved vocal range, and random numbers for the exercises that draw them (a fixed stream)
+VOICE_RANGE = {"low": 47, "high": 69, "tessLo": 52, "tessHi": 63}
+RAND = [round((k * 0.6180339887498949) % 1, 9) for k in range(1, 251)]
+
 THEORY = [
     {"fn": "degree", "d": "#11"}, {"fn": "above", "root": "Eb", "d": "b7"},
     {"fn": "intervalBetween", "a": "C", "b": "F#"}, {"fn": "moveBy", "note": "Bb", "steps": 2, "semis": 4},
@@ -552,6 +556,15 @@ THEORY = [
     {"fn": "perStringPatterns", "scale": "major_pent", "root": "E", "courses": GUITAR_COURSES, "frets": 19},
     {"fn": "isStandardSix", "courses": GUITAR_COURSES}, {"fn": "upAndDown", "scale": "ionian", "root": "C", "around": 52},
     {"fn": "nope"}, {"fn": "chordSymbol", "chord": "H"},
+    # a song's key, a capo for a shift and the voice exercises (random numbers given in order)
+    {"fn": "guessKey", "chords": ["Am", "F", "C", "G", "Am"]}, {"fn": "guessKey", "chords": ["G", "D/F#", "Em", "C", "D7", "G"]},
+    {"fn": "guessKey", "chords": ["B#", "C"]}, {"fn": "guessKey", "chords": []},
+    {"fn": "capoForShift", "semis": 5}, {"fn": "capoForShift", "semis": -3},
+    {"fn": "keyShiftsForRange", "songLow": 60, "songHigh": 72, "range": VOICE_RANGE, "originalPc": 0},
+    {"fn": "keyShiftsForRange", "songLow": 55.5, "songHigh": 81, "range": VOICE_RANGE},
+    {"fn": "nextMatchNote", "level": 4, "range": VOICE_RANGE, "prev": 55, "rand": RAND},
+    {"fn": "buildSingBack", "level": 5, "range": VOICE_RANGE, "rand": RAND},
+    {"fn": "buildWarmup", "range": VOICE_RANGE, "full": True}, {"fn": "buildWarmup", "range": {"low": 50, "high": 56, "tessLo": 52, "tessHi": 54}},
 ]
 case("music/theory", "theory", requests=[json.dumps(r, separators=(",", ":")) for r in THEORY])
 

@@ -112,7 +112,7 @@ CI fails if either differs from what the script writes.
 | Pitch | `Yin.h` | the pitch detector, with its settings for following a voice, the tuner and singing |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction: its detector and its real-time engine |
 | | `TunerPitch.h`, `Tunings.h` | the tuner, and its instruments and tunings |
-| | `VoiceTracker.h` | following a singing voice and measuring it, and played notes |
+| | `VoiceTracker.h` | following a singing voice and measuring it, played notes, and the notes of warm-ups, sing-back and the keys that suit a range |
 | | `DrumPitch.h` | drum tuning |
 | Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
@@ -124,10 +124,10 @@ CI fails if either differs from what the script writes.
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library |
 | | `ChordTypes.h` | the chord types: formulas, symbols, numerals, families, the picker's groups |
-| | `Harmony.h` | chords: degrees, symbols, naming a set of notes, numerals, the map of a key, key changes, the moves between chords and the facts behind them, transposing |
+| | `Harmony.h` | chords: degrees, symbols, naming a set of notes, numerals, the map of a key, key changes, the moves between chords and the facts behind them, transposing, guessing a song's key from its chords, a capo for a shift |
 | | `Voicings.h` | chord shapes on fretted instruments (courses, fingerings, the shape search, capo choices) and the piano |
 | | `ScaleTheory.h` | scales on a root: spelling, steps, comparing, modes and parents, the chords they build, which scale fits a chord or a progression, the neck (box positions, notes per string) |
-| | `TheoryCalls.h` | the theory as JSON requests and answers, for the browser and the reference set |
+| | `TheoryCalls.h` | the theory and the voice exercises as JSON requests and answers, for the browser and the reference set |
 | | `Scales.h` | pitch correction's keys, scales and harmony intervals |
 | | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids |
 
