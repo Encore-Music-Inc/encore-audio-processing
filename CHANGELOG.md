@@ -4,6 +4,72 @@ Each release's notes, newest first. When a release is published, the release
 job puts its section on the GitHub release (see "Release notes" in
 `CLAUDE.md`).
 
+## v3.0.0
+
+One implementation of everything: what the plugins, Basement Studio and the
+ENCORE. app still worked out on their own is here now, and this repository's
+own second copies are merged into one each. Most results stay as they were;
+the metronome's clicks sound slightly different, and some processing moves a
+little, so products re-check before they use it.
+
+### What's new
+- For a DAW: a clip's fade worked out section by section, the de-click when
+  playback jumps, the level while scrubbing, the clean-up of what goes to the
+  sound card (everything that isn't a normal number becomes zero), a meter's
+  highest level since it was last read, and the click's soft count.
+- The denormal guard (`Denormals.h`): turns the processor's denormals off
+  while audio code runs, on x86 and Arm. It does nothing in the browser.
+- For plugin editors: the reverb's decay picture, a note readout held through
+  short gaps, and the curve Body applies.
+- For the ENCORE. app, through `th_call`: guessing a song's key from its
+  chords, the capo that plays a shift with the same shapes, the keys that suit
+  a vocal range, and the notes of warm-ups, sing-back and the note-matching
+  drill. An exercise's random numbers come with the request, so it can be
+  repeated.
+
+### What's changed
+- The metronome's clicks are the drum synthesizer's sounds. Each sound set
+  keeps its character, its lengths and its peaks, but sounds slightly
+  different. The drum kits don't change.
+- The reverb's modulation and the harmony voices' drift run on the one
+  oscillator, counting in double precision. The reverb's tails and the
+  mastering styles that use the reverb move slightly; the harmony output's
+  peak is about 0.16 dB lower.
+- Smaller moves, inside the reference set's allowances: the EQ's steep cuts,
+  the compressor, the chorus, the pan law of the synth, sampler and harmony
+  voices, and the waveform picture's band levels.
+- The reference set (`reference.json`) has the new results and the new
+  requests.
+
+### What's fixed
+- A compressor curve with a hard knee no longer divides 0 by 0 at the
+  threshold.
+- A meter no longer takes a NaN as its loudest reading in a fast-math build.
+
+### Downloads
+- `master.wasm`: the browser engine, with `master.wasm.sha256`.
+- `tunings.json`, `scales.json`, `chords.json`, `presets.json`: the tuner's
+  instruments and tunings, the scale library, the chord types and the chains'
+  presets for the browser, each with its `.sha256`.
+- `reference.json`: the reference set, with `reference.json.sha256`.
+
+### Using it
+Pin `external/encore-audio-processing` to `v3.0.0`, then fetch its JUCE by
+path:
+
+```
+git -C external/encore-audio-processing submodule update --init --depth 1 external/JUCE
+```
+
+On Apple systems, link the Accelerate framework (JUCE products already do).
+Green Room pins `master.wasm`, `tunings.json`, `scales.json`, `chords.json`
+and `reference.json` by their SHA-256 and runs `wasm/reference.mjs` on them.
+
+### Built on
+JUCE 9.0.5. `master.wasm` is built without JUCE, with Emscripten 6.0.13.
+
+Questions or problems: support@encoremusic.studio
+
 ## v2.3.0
 
 Adds the effects, instruments, mixer and hosting laws a DAW needs, the
