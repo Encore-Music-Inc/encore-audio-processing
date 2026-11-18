@@ -587,6 +587,12 @@ THEORY = [
     {"fn": "nextMatchNote", "level": 4, "range": VOICE_RANGE, "prev": 55, "rand": RAND},
     {"fn": "buildSingBack", "level": 5, "range": VOICE_RANGE, "rand": RAND},
     {"fn": "buildWarmup", "range": VOICE_RANGE, "full": True}, {"fn": "buildWarmup", "range": {"low": 50, "high": 56, "tessLo": 52, "tessHi": 54}},
+    {"fn": "patternSeconds", "pattern": {"notes": [{"midi": 60, "at": 0, "dur": 0.6}, {"midi": 62, "at": 0.6, "dur": 0.6}, {"midi": 64, "at": 1.1, "dur": 0.4}]}},
+    {"fn": "patternSeconds", "pattern": {"glide": {"from": 52, "to": 67, "up": 2.5, "down": 2}}},
+    {"fn": "patternSeconds", "pattern": {"notes": []}},
+    {"fn": "glideAt", "glide": {"from": 52, "to": 67, "up": 2.5, "down": 2}, "t": 1},
+    {"fn": "glideAt", "glide": {"from": 52, "to": 67, "up": 2.5, "down": 2}, "t": 3.5},
+    {"fn": "glideAt", "glide": {"from": 52, "to": 67, "up": 2.5, "down": 2}, "t": 9},
 ]
 case("music/theory", "theory", requests=[json.dumps(r, separators=(",", ":")) for r in THEORY])
 

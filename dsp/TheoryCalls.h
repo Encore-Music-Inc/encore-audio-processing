@@ -15,6 +15,9 @@
 //   a fit chord: the text readChord reads ("C7alt")
 //   range   {"low", "high", "tessLo", "tessHi"}: a saved vocal range, MIDI notes
 //   rand    [numbers 0..1]: the random numbers an exercise uses, in order
+//   pattern a warm-up pattern as buildWarmup answers it: {"notes": [{"midi", "at", "dur"}]}
+//           or {"glide": glide}
+//   glide   {"from", "to", "up", "down"}: a siren, MIDI notes and seconds
 // The answer is the result as JSON, or {"error": "..."} for a request it can't
 // read. Numbers are written rounded to nine decimals, so every build writes
 // the same text. Plain C++20, no JUCE.
@@ -93,6 +96,22 @@ namespace vs::theorycalls
         inline voice::VocalRange rangeFrom (const Json& v)
         {
             return { numArg (v, "low", 0), numArg (v, "high", 0), numArg (v, "tessLo", 0), numArg (v, "tessHi", 0) };
+        }
+
+        inline voice::Glide glideFrom (const Json& v)
+        {
+            return { numArg (v, "from", 0), numArg (v, "to", 0), numArg (v, "up", 0), numArg (v, "down", 0) };
+        }
+
+        // A warm-up pattern as buildWarmup gives it: { notes: [{ midi, at, dur }] } or { glide: {...} }
+        inline voice::WarmupPattern patternFrom (const Json& v)
+        {
+            voice::WarmupPattern p;
+            if (const auto* g = v.get ("glide"); g && ! g->isNull()) p.glide = glideFrom (*g);
+            else if (const auto* ns = v.get ("notes"); ns && ns->type == Json::Type::array && ! ns->items.empty())
+                for (const auto& n : ns->items) p.notes.push_back ({ numArg (n, "midi", 0), numArg (n, "at", 0), numArg (n, "dur", 0) });
+            else fail ("a pattern needs notes or a glide");
+            return p;
         }
 
         // The request's random numbers, handed out in order (0 and a problem once they run out)
@@ -771,6 +790,10 @@ namespace vs::theorycalls
                     });
                     o.close ('}');
                 });
+            else if (fn == "patternSeconds")
+                o.num (voice::patternSeconds (patternFrom (need (q, "pattern"))));
+            else if (fn == "glideAt")
+                o.num (voice::glideAt (glideFrom (need (q, "glide")), numArg (q, "t", 0)));
             else fail ("no such function: " + fn);
         }
     }
