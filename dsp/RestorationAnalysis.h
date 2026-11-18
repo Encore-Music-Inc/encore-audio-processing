@@ -717,86 +717,7 @@ namespace vs
         struct Span { double start, end; };
         struct Tracks { std::vector<Span> tracks, gaps; double seconds = 0; std::optional<double> floorDb, musicDb; };
 
-        // The songs on an LP or tape side are separated by a few seconds of groove
-        // noise or hiss: quieter than any music, louder than silence. Frames well
-        // below the music and near the side's own noise floor, for long enough, are
-        // a gap. The tracks butt together, each split just before the next song.
-        inline Tracks findTracks (const std::vector<float>& mid, double fsd, double minGap = 1.2, double minSong = 20)
-        {
-            std::vector<double> y (mid.begin(), mid.end());
-            BiquadChain (butterworth (BiquadCoefs::Type::highPass, fsd, 100.0, 2), 1).process (0, y.data(), (int) y.size());
-            const int hop = (int) roundUp (0.05 * fsd), nf = (int) y.size() / hop;
-            std::vector<double> lv ((size_t) nf);
-            for (int j = 0; j < nf; ++j)
-            {
-                double s = 0;
-                for (int i = j * hop; i < (j + 1) * hop; ++i) s += y[(size_t) i] * y[(size_t) i];
-                lv[(size_t) j] = dbPower (s / hop);
-            }
-            Tracks out;
-            out.seconds = nf * 0.05;
-            if (nf < 40) { out.tracks.push_back ({ 0, out.seconds }); return out; }
-            std::vector<double> live;
-            for (double v : lv) if (v > -120) live.push_back (v);
-            const double floor = stats::percentile (live.data(), (int) live.size(), 0.05), music = stats::percentile (live.data(), (int) live.size(), 0.9);
-            const double thr = floor + std::max (6.0, 0.3 * (music - floor));
-            // smoothed a little so one loud click in a gap doesn't split it
-            std::vector<double> sm ((size_t) nf);
-            for (int j = 0; j < nf; ++j)
-            {
-                const int a = std::max (0, j - 3), b = std::min (nf, j + 4);
-                std::vector<double> t (lv.begin() + a, lv.begin() + b);
-                sm[(size_t) j] = stats::medianInPlace (t.data(), (int) t.size());
-            }
-            // music runs, joined across short dips
-            std::vector<std::pair<int, int>> runs;
-            for (int j = 0; j < nf;)
-            {
-                if (sm[(size_t) j] < thr) { ++j; continue; }
-                int k = j;
-                while (k < nf && ! (sm[(size_t) k] < thr)) ++k;
-                runs.push_back ({ j, k });
-                j = k;
-            }
-            const int gapF = (int) roundUp (minGap / 0.05);
-            std::vector<std::pair<int, int>> joined;
-            for (const auto& r : runs)
-            {
-                if (! joined.empty() && r.first - joined.back().second < gapF) joined.back().second = r.second;
-                else joined.push_back (r);
-            }
-            // drop slivers (a needle drop, a thump) and merge songs shorter than minSong into a neighbour
-            std::vector<std::pair<int, int>> songs;
-            for (const auto& r : joined) if ((r.second - r.first) * 0.05 >= 3) songs.push_back (r);
-            for (bool changed = true; changed && songs.size() > 1;)
-            {
-                changed = false;
-                for (size_t i = 0; i < songs.size(); ++i)
-                {
-                    if ((songs[i].second - songs[i].first) * 0.05 >= minSong) continue;
-                    const double prevGap = i > 0 ? songs[i].first - songs[i - 1].second : 1e9;
-                    const double nextGap = i < songs.size() - 1 ? songs[i + 1].first - songs[i].second : 1e9;
-                    if (prevGap <= nextGap && i > 0) { songs[i - 1].second = songs[i].second; songs.erase (songs.begin() + (long) i); }
-                    else if (i < songs.size() - 1) { songs[i + 1].first = songs[i].first; songs.erase (songs.begin() + (long) i); }
-                    else continue;
-                    changed = true;
-                    break;
-                }
-            }
-            if (songs.empty()) { out.tracks.push_back ({ 0, out.seconds }); return out; }
-            for (size_t i = 1; i < songs.size(); ++i) out.gaps.push_back ({ rounded (songs[i - 1].second * 0.05, 2), rounded (songs[i].first * 0.05, 2) });
-            for (size_t i = 0; i < songs.size(); ++i)
-            {
-                const double start = i == 0 ? std::max (0.0, songs[i].first * 0.05 - 0.5)
-                                            : std::max (out.gaps[i - 1].start, out.gaps[i - 1].end - std::min (0.5, (out.gaps[i - 1].end - out.gaps[i - 1].start) / 3));
-                out.tracks.push_back ({ rounded (start, 2), 0 });
-            }
-            for (size_t i = 0; i < out.tracks.size(); ++i)
-                out.tracks[i].end = i + 1 < out.tracks.size() ? out.tracks[i + 1].start : rounded (std::min (out.seconds, songs[i].second * 0.05 + 2), 2);
-            out.floorDb = rounded (floor, 1);
-            out.musicDb = rounded (music, 1);
-            return out;
-        }
+        // (findTracks is below, with the gaps it is built on)
 
         // ---- the quietest spots, for the noise profile
 
@@ -1058,29 +979,50 @@ namespace vs
         // scored (deeper and longer is likelier), and where the music starts and
         // ends on the side. The next song starts at the end of a dip; its split
         // sits a moment before that.
-        inline Gaps gapCandidates (const std::vector<float>& lv, double hop = 0.05)
+        // A side's level envelope median-smoothed over seven steps (so one click in a
+        // gap doesn't split it), and its noise floor and music level: what the songs
+        // and the gaps between them are both judged on.
+        struct SideLevels
+        {
+            std::vector<float> sm;
+            double floor = -120, music = -120;
+            // quieter than this is not music (well below the music, near the floor)
+            double quiet() const { return floor + std::max (6.0, 0.3 * (music - floor)); }
+        };
+
+        inline SideLevels sideLevels (const std::vector<float>& lv)
         {
             const int n = (int) lv.size();
-            const double seconds = n * hop;
-            // median-smoothed over seven
-            std::vector<float> sm ((size_t) n);
+            SideLevels out;
+            out.sm.resize ((size_t) n);
             std::vector<float> buf;
             for (int j = 0; j < n; ++j)
             {
                 buf.assign (lv.begin() + std::max (0, j - 3), lv.begin() + std::min (n - 1, j + 3) + 1);
                 std::sort (buf.begin(), buf.end());
-                sm[(size_t) j] = buf[buf.size() >> 1];
+                out.sm[(size_t) j] = buf[buf.size() >> 1];
             }
             std::vector<double> live;
-            for (float v : sm) if (v > -120) live.push_back (v);
+            for (float v : out.sm) if (v > -120) live.push_back (v);
             std::sort (live.begin(), live.end());
             auto pct = [&] (double p) { return live.empty() ? -120.0 : live[(size_t) std::min ((double) live.size() - 1, std::max (0.0, std::floor (p * ((double) live.size() - 1))))]; };
-            const double floor = pct (0.05), music = pct (0.9), range = music - floor;
+            out.floor = pct (0.05);
+            out.music = pct (0.9);
+            return out;
+        }
+
+        inline Gaps gapCandidates (const std::vector<float>& lv, double hop = 0.05)
+        {
+            const int n = (int) lv.size();
+            const double seconds = n * hop;
+            const auto side = sideLevels (lv);
+            const auto& sm = side.sm;
+            const double floor = side.floor, music = side.music, range = music - floor;
             Gaps out;
             out.floor = floor;
             out.music = music;
             if (n < 20 || range < 6) { out.musicEnd = seconds; out.seconds = seconds; return out; }
-            const double strict = floor + std::max (6.0, 0.3 * range), loose = floor + 0.55 * range;
+            const double strict = side.quiet(), loose = floor + 0.55 * range;
             int ms = 0;
             while (ms < n && sm[(size_t) ms] < strict) ++ms;
             int me = n - 1;
@@ -1107,6 +1049,78 @@ namespace vs
             out.floor = rounded (floor, 1);
             out.music = rounded (music, 1);
             return out;
+        }
+
+        // The songs on an LP or tape side are separated by a few seconds of groove
+        // noise or hiss: quieter than any music, louder than silence. Stretches of the
+        // level envelope below the music and near the side's own noise floor, for at
+        // least `minGap` seconds, are a gap. The tracks butt together, each split just
+        // before the next song (where gapCandidates puts its split).
+        inline Tracks findTracks (const std::vector<float>& lv, double hop, double minGap = 1.2, double minSong = 20)
+        {
+            const int nf = (int) lv.size();
+            Tracks out;
+            out.seconds = nf * hop;
+            if (out.seconds < 2) { out.tracks.push_back ({ 0, out.seconds }); return out; }
+            const auto side = sideLevels (lv);
+            const double thr = side.quiet();
+            // music runs, joined across short dips
+            std::vector<std::pair<int, int>> runs;
+            for (int j = 0; j < nf;)
+            {
+                if (side.sm[(size_t) j] < thr) { ++j; continue; }
+                int k = j;
+                while (k < nf && ! (side.sm[(size_t) k] < thr)) ++k;
+                runs.push_back ({ j, k });
+                j = k;
+            }
+            const int gapF = (int) roundUp (minGap / hop);
+            std::vector<std::pair<int, int>> joined;
+            for (const auto& r : runs)
+            {
+                if (! joined.empty() && r.first - joined.back().second < gapF) joined.back().second = r.second;
+                else joined.push_back (r);
+            }
+            // drop slivers (a needle drop, a thump) and merge songs shorter than minSong into a neighbour
+            std::vector<std::pair<int, int>> songs;
+            for (const auto& r : joined) if ((r.second - r.first) * hop >= 3) songs.push_back (r);
+            for (bool changed = true; changed && songs.size() > 1;)
+            {
+                changed = false;
+                for (size_t i = 0; i < songs.size(); ++i)
+                {
+                    if ((songs[i].second - songs[i].first) * hop >= minSong) continue;
+                    const double prevGap = i > 0 ? songs[i].first - songs[i - 1].second : 1e9;
+                    const double nextGap = i < songs.size() - 1 ? songs[i + 1].first - songs[i].second : 1e9;
+                    if (prevGap <= nextGap && i > 0) { songs[i - 1].second = songs[i].second; songs.erase (songs.begin() + (long) i); }
+                    else if (i < songs.size() - 1) { songs[i + 1].first = songs[i].first; songs.erase (songs.begin() + (long) i); }
+                    else continue;
+                    changed = true;
+                    break;
+                }
+            }
+            if (songs.empty()) { out.tracks.push_back ({ 0, out.seconds }); return out; }
+            for (size_t i = 1; i < songs.size(); ++i) out.gaps.push_back ({ rounded (songs[i - 1].second * hop, 2), rounded (songs[i].first * hop, 2) });
+            for (size_t i = 0; i < songs.size(); ++i)
+            {
+                const double start = i == 0 ? std::max (0.0, songs[i].first * hop - 0.5)
+                                            : std::max (out.gaps[i - 1].start, out.gaps[i - 1].end - std::min (0.5, (out.gaps[i - 1].end - out.gaps[i - 1].start) / 3));
+                out.tracks.push_back ({ rounded (start, 2), 0 });
+            }
+            for (size_t i = 0; i < out.tracks.size(); ++i)
+                out.tracks[i].end = i + 1 < out.tracks.size() ? out.tracks[i + 1].start : rounded (std::min (out.seconds, songs[i].second * hop + 2), 2);
+            out.floorDb = rounded (side.floor, 1);
+            out.musicDb = rounded (side.music, 1);
+            return out;
+        }
+
+        // The songs on a side from its mid channel at rate fs (the analyzer's lowMid),
+        // through the same level envelope a recording keeps.
+        inline Tracks findTracksIn (const std::vector<float>& mid, double fs, double minGap = 1.2, double minSong = 20)
+        {
+            LevelEnvelope env (fs);
+            env.push (mid.data(), nullptr, (int) mid.size());
+            return findTracks (env.levels(), env.hopSeconds(), minGap, minSong);
         }
     }
 }

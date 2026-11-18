@@ -412,7 +412,7 @@ namespace
         expect ("wow: found, about 0.55 times a second", w.found && std::abs (w.hz - 0.55) < 0.1, "(%.2f Hz, peak %.1f cents)", w.hz, w.peak);
         expect ("and its curve covers the file, 50 values a second", std::abs ((double) w.cents.size() - 40 * 50) <= 2, "(%.0f values)", (double) w.cents.size());
 
-        const auto tr = vs::restore::findTracks (a.lowMid(), a.lowRate(), 1.2, 5);
+        const auto tr = vs::restore::findTracksIn (a.lowMid(), a.lowRate(), 1.2, 5);
         expect ("songs: three, split in the two gaps", tr.tracks.size() == 3 && tr.gaps.size() == 2
                 && tr.gaps[0].start >= 11.5 && tr.gaps[0].end <= 16.5 && tr.gaps[1].start >= 25.5 && tr.gaps[1].end <= 30.5,
                 "(%.0f songs)", (double) tr.tracks.size());

@@ -222,7 +222,7 @@ extern "C"
         }
         else if (w == "tracks")
         {
-            const auto t = vs::restore::findTracks (a.lowMid(), a.lowRate(), option ("minGap", 1.2), option ("minSong", 20.0));
+            const auto t = vs::restore::findTracksIn (a.lowMid(), a.lowRate(), option ("minGap", 1.2), option ("minSong", 20.0));
             o.open ('{').key ("tracks").open ('[');
             for (const auto& s : t.tracks) o.next().open ('{').key ("start").num (s.start).key ("end").num (s.end).close ('}');
             o.close (']').key ("gaps").open ('[');

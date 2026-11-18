@@ -530,7 +530,7 @@ namespace
             out.push_back ({ "tuning.found", t.found ? 1.0 : 0.0 });
             out.push_back ({ "tuning.cents", t.cents });
             out.push_back ({ "wow.found", vs::restore::detectWow (a.lowMid(), a.lowRate()).found ? 1.0 : 0.0 });
-            const auto tr = vs::restore::findTracks (a.lowMid(), a.lowRate(), 1.2, 3);
+            const auto tr = vs::restore::findTracksIn (a.lowMid(), a.lowRate(), 1.2, 3);
             out.push_back ({ "tracks.tracks", (double) tr.tracks.size() });
             out.push_back ({ "tracks.gapStart", tr.gaps.empty() ? -1.0 : tr.gaps[0].start });
             out.push_back ({ "tracks.gapEnd", tr.gaps.empty() ? -1.0 : tr.gaps[0].end });
