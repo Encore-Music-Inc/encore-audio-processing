@@ -178,6 +178,7 @@ extern "C"
     // 36 firstSampleDb   37 lastSampleDb    38 headRmsDb       39 endRmsDb
     // 40 endDecayDb      41 has spectrum    42 cliffHz         43 cliff drop
     // 44 has padded16    45 padded16        46 dcLDb           47 dcRDb
+    // 48 low sideToMidDb
     // 100 + 3 band + k: band 0..4 (sub, bass, low mids, mids, highs), k 0 corr, 1 monoLossDb, 2 shareDb
     EMSCRIPTEN_KEEPALIVE double ms_an_value (void* p, int what)
     {
@@ -238,6 +239,7 @@ extern "C"
             case 45: return m.padded16 ? 1 : 0;
             case 46: return m.dcLDb;
             case 47: return m.dcRDb;
+            case 48: return m.low.sideToMidDb;
             default: return 0.0;
         }
     }
@@ -393,6 +395,14 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE void ms_tonal_balance (const float* mid, double n, double sampleRate, double* out)
     {
         const auto t = vs::tonalBalance (mid, (std::int64_t) n, sampleRate);
+        for (int b = 0; b < vs::TonalBalance::numBands; ++b) { out[b] = t.levelDb[b]; out[10 + b] = t.relDb[b]; }
+        out[20] = t.lows; out[21] = t.mud; out[22] = t.harsh; out[23] = t.top;
+    }
+
+    // The same from a song's channels (r 0: one channel), judged on its mid
+    EMSCRIPTEN_KEEPALIVE void ms_tonal_balance_lr (const float* l, const float* r, double n, double sampleRate, double* out)
+    {
+        const auto t = vs::tonalBalance (l, r, (std::int64_t) n, sampleRate);
         for (int b = 0; b < vs::TonalBalance::numBands; ++b) { out[b] = t.levelDb[b]; out[10 + b] = t.relDb[b]; }
         out[20] = t.lows; out[21] = t.mud; out[22] = t.harsh; out[23] = t.top;
     }

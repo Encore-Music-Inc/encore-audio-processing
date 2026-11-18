@@ -400,6 +400,15 @@ namespace vs
         return t;
     }
 
+    // The same from a song's channels (r null: one channel), judged on its mid
+    inline TonalBalance tonalBalance (const float* l, const float* r, std::int64_t n, double fs)
+    {
+        if (r == nullptr) return tonalBalance (l, n, fs);
+        std::vector<float> mid ((size_t) std::max<std::int64_t> (0, n));
+        for (std::int64_t i = 0; i < n; ++i) mid[(size_t) i] = midOf (l[i], r[i]);
+        return tonalBalance (mid.data(), n, fs);
+    }
+
     // Where a song's highs stop like a wall, and how far they drop there (dB).
     struct SpectrumCliff
     {

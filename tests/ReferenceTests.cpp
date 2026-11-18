@@ -379,7 +379,7 @@ namespace
         "shortTermMaxAt", "lra", "balanceDb", "truePeakDb", "truePeakAt", "tpOverCount", "tpOverZeroCount", "clipRuns",
         "clipEvents", "clipLongest", "clipHasLevel", "clipLevelDb", "lowCorr", "lowMonoLossDb", "lowShareDb", "leadSec",
         "tailSec", "firstSampleDb", "lastSampleDb", "headRmsDb", "endRmsDb", "endDecayDb", "hasSpectrum", "cliffHz",
-        "cliffDrop", "hasPadded16", "padded16", "dcLDb", "dcRDb" };
+        "cliffDrop", "hasPadded16", "padded16", "dcLDb", "dcRDb", "lowSideToMidDb" };
     constexpr int numAnalysis = (int) std::size (analysisNames);
 
     double analysisValue (const vs::analysis::Measurements& m, int what)
@@ -434,6 +434,7 @@ namespace
             case 45: return m.padded16 ? 1 : 0;
             case 46: return m.dcLDb;
             case 47: return m.dcRDb;
+            case 48: return m.low.sideToMidDb;
             default: return 0.0;
         }
     }
@@ -640,7 +641,9 @@ namespace
         }
         else if (op == "tonal-balance")
         {
-            const auto t = vs::tonalBalance (in->l.data(), n, fs);
+            // "lr": judged on the mid of both channels, as a song is
+            const auto t = c.get ("lr", 0) != 0 && stereo ? vs::tonalBalance (in->l.data(), in->r.data(), n, fs)
+                                                                    : vs::tonalBalance (in->l.data(), n, fs);
             for (int b = 0; b < vs::TonalBalance::numBands; ++b)
             {
                 out.push_back ({ "level" + std::to_string (b), t.levelDb[b] });

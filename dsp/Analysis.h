@@ -44,6 +44,7 @@ namespace vs
         struct LowEnd
         {
             double corr = 1.0, monoLossDb = 0.0, shareDb = 0.0;
+            double sideToMidDb = 0.0;      // how far the side sits under (negative) the mid, under 120 Hz
             std::vector<int> outTimes;     // seconds where under 120 Hz is out of phase
         };
 
@@ -387,6 +388,7 @@ namespace vs
             for (int b = 0; b < analysis::numBands; ++b)
                 measure (band[b], analysis::bands[b].low ? (double) decCount : nd, m.band[b].corr, m.band[b].monoLossDb, m.band[b].shareDb);
             measure (low, (double) decCount, m.low.corr, m.low.monoLossDb, m.low.shareDb);
+            m.low.sideToMidDb = db10 ((low.ll + low.rr - 2.0 * low.lr) / 4.0) - db10 ((low.ll + low.rr + 2.0 * low.lr) / 4.0);
             {
                 double sum = 0.0;
                 for (const auto& s : low.secs) sum += s[0] + s[1];

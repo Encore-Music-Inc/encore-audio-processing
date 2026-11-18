@@ -151,7 +151,7 @@ const ANALYSIS = ['empty', 'duration', 'samplePeakDb', 'samplePeakAt', 'peakLDb'
   'shortTermMaxAt', 'lra', 'balanceDb', 'truePeakDb', 'truePeakAt', 'tpOverCount', 'tpOverZeroCount', 'clipRuns',
   'clipEvents', 'clipLongest', 'clipHasLevel', 'clipLevelDb', 'lowCorr', 'lowMonoLossDb', 'lowShareDb', 'leadSec',
   'tailSec', 'firstSampleDb', 'lastSampleDb', 'headRmsDb', 'endRmsDb', 'endDecayDb', 'hasSpectrum', 'cliffHz',
-  'cliffDrop', 'hasPadded16', 'padded16', 'dcLDb', 'dcRDb'];
+  'cliffDrop', 'hasPadded16', 'padded16', 'dcLDb', 'dcRDb', 'lowSideToMidDb'];
 
 // text written by a mu_* function into a buffer
 const textBuf = X.malloc(256), intBuf = X.malloc(64);
@@ -330,8 +330,9 @@ function runMore(c, sig, out) {
       return true;
     }
     case 'tonal-balance': {
-      const buf = alloc([sig.l]), res = X.malloc(8 * 24);
-      X.ms_tonal_balance(buf.ptrs[0], n, fs, res);
+      const lr = c.lr && sig.channels > 1, buf = alloc(lr ? [sig.l, sig.r] : [sig.l]), res = X.malloc(8 * 24);
+      if (lr) X.ms_tonal_balance_lr(buf.ptrs[0], buf.ptrs[1], n, fs, res);
+      else X.ms_tonal_balance(buf.ptrs[0], n, fs, res);
       const v = f64(res, 24);
       for (let b = 0; b < 10; b++) out.push([`level${b}`, v[b]], [`rel${b}`, v[10 + b]]);
       out.push(['lows', v[20]], ['mud', v[21]], ['harsh', v[22]], ['top', v[23]]);

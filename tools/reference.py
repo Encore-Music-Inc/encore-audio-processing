@@ -408,6 +408,7 @@ case("analysis/spectrum/web-audio", "spectrum", TONES, block=1024, mode="analyse
 case("analysis/welch/song", "welch", SONG, size=4096, maxSegments=16, bins=[1, 10, 100, 1000])
 case("analysis/welch/at", "welch", SONG, size=2048, starts=[0, 44100, 88200, 300000], bins=[1, 10, 100])
 case("analysis/tonal-balance/song", "tonal-balance", SONG)
+case("analysis/tonal-balance/song-lr", "tonal-balance", SONG, lr=1)
 case("analysis/waveform/song", "waveform", SONG, block=4096, columns=16, rms=1, bands=1)
 case("analysis/waveform/mono-stride", "waveform", SPARSE, block=4096, columns=12, stride=4)
 case("analysis/block-peaks/song", "block-peaks", SONG, block=4096, blockSize=441, points=200, width=64)
