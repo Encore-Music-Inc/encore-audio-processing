@@ -284,6 +284,8 @@ namespace
         expect ("survey: a pair moving together correlates fully", std::abs (s.nextCorr (0) - 1.0) < 1e-9, "%.6f", s.nextCorr (0));
         expect ("survey: levels, 6 dB apart for half the signal", std::abs ((s.levelDb (0) - s.levelDb (1)) - 6.0206) < 1e-3, "%.4f dB", s.levelDb (0) - s.levelDb (1));
         expect ("survey: the last input has no next", s.nextCorr (2) == 0.0);
+        expect ("survey: a pair's level is both inputs' power together",
+                std::abs (s.pairLevelDb (0) - 10 * std::log10 (std::pow (10.0, s.levelDb (0) / 10) + std::pow (10.0, s.levelDb (1) / 10))) < 1e-9, "%.6f dB", s.pairLevelDb (0));
         expect ("survey: a dozen 2 s windows spread across the file",
                 vs::channels::InputSurvey::windowLength (480000, 48000) == 96000 && vs::channels::InputSurvey::windowStart (0, 480000, 48000) == 0
                     && vs::channels::InputSurvey::windowStart (11, 480000, 48000) == 412000,

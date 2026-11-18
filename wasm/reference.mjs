@@ -265,7 +265,10 @@ function runMore(c, sig, out) {
         i32(table, ch.length).set(buf.ptrs.map((p) => p + 4 * at));
         X.lv_survey_add(sv, table, Math.min(win, n - at));
       }
-      ch.forEach((_, k) => out.push([`input${k}.levelDb`, X.lv_survey_level_db(sv, k)], [`input${k}.corr`, X.lv_survey_next_corr(sv, k)]));
+      ch.forEach((_, k) => {
+        out.push([`input${k}.levelDb`, X.lv_survey_level_db(sv, k)], [`input${k}.corr`, X.lv_survey_next_corr(sv, k)]);
+        if (k + 1 < ch.length) out.push([`input${k}.pairLevelDb`, X.lv_survey_pair_level_db(sv, k)]);
+      });
       X.lv_survey_destroy(sv); X.free(table); buf.free();
       return true;
     }

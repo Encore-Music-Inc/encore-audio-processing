@@ -569,6 +569,7 @@ namespace
             {
                 out.push_back ({ "input" + std::to_string (k) + ".levelDb", sv.levelDb (k) });
                 out.push_back ({ "input" + std::to_string (k) + ".corr", sv.nextCorr (k) });
+                if (k + 1 < (int) ch.size()) out.push_back ({ "input" + std::to_string (k) + ".pairLevelDb", sv.pairLevelDb (k) });
             }
             return true;
         }

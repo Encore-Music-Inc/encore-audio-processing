@@ -114,4 +114,5 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE void lv_survey_add (void* p, const float* const* raw, int n) { static_cast<vs::channels::InputSurvey*> (p)->add (raw, n); }
     EMSCRIPTEN_KEEPALIVE double lv_survey_level_db (void* p, int c) { return static_cast<vs::channels::InputSurvey*> (p)->levelDb (c); }
     EMSCRIPTEN_KEEPALIVE double lv_survey_next_corr (void* p, int c) { return static_cast<vs::channels::InputSurvey*> (p)->nextCorr (c); }
+    EMSCRIPTEN_KEEPALIVE double lv_survey_pair_level_db (void* p, int c) { return static_cast<vs::channels::InputSurvey*> (p)->pairLevelDb (c); }
 }

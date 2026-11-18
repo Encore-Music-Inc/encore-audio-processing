@@ -504,6 +504,12 @@ namespace vs
             }
 
             double levelDb (int c) const { return db10 (pow[(size_t) c] / std::max<double> (1.0, (double) count), 1e-12); }
+            // An input and the next together (dB): their powers summed, for finding the loudest pair
+            double pairLevelDb (int c) const
+            {
+                const double p = pow[(size_t) c] + (c + 1 < (int) pow.size() ? pow[(size_t) c + 1] : 0.0);
+                return db10 (p / std::max<double> (1.0, (double) count), 1e-12);
+            }
             double nextCorr (int c) const
             {
                 return c + 1 < (int) pow.size() ? xy[(size_t) c] / std::sqrt (pow[(size_t) c] * pow[(size_t) c + 1] + 1e-20) : 0.0;
