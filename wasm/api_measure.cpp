@@ -18,6 +18,7 @@
 #include "dsp/Spectrum.h"
 #include "dsp/TruePeak.h"
 #include "dsp/Waveform.h"
+#include "dsp/Channels.h"
 
 namespace
 {
@@ -500,5 +501,12 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE double ms_playback_gain (double lufs, double truePeakDb, double refLufs, int turnsUp, double ceilingDb)
     {
         return vs::loudness::playbackGainDb (lufs, truePeakDb, refLufs, turnsUp != 0, ceilingDb);
+    }
+
+    // ---- a batch of input: each channel's peak and its samples at full scale
+
+    EMSCRIPTEN_KEEPALIVE void ms_peaks_overloads (const float* interleaved, int frames, int numCh, float* peaks, int* overloads)
+    {
+        vs::channels::peaksAndOverloads (interleaved, frames, numCh, peaks, overloads);
     }
 }

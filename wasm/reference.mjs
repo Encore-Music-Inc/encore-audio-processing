@@ -207,6 +207,95 @@ function runMore(c, sig, out) {
 
   switch (c.op) {
     // ---- restoration of record and tape transfers
+    // ---- live recordings
+    case 'live-set': {
+      const h = X.lv_set_create(fs, block);
+      blocks(n, block, (s, k) => {
+        f32(X.lv_set_input(h, 0), k).set(sig.l.subarray(s, s + k));
+        if (stereo) f32(X.lv_set_input(h, 1), k).set(sig.r.subarray(s, s + k));
+        X.lv_set_push(h, k, stereo ? 1 : 0);
+      });
+      const set = answer((b, cap) => X.lv_set_finish(h, c.minSong ?? 40, c.mergeGap ?? 6, b, cap));
+      X.lv_set_destroy(h);
+      const kinds = ['quiet', 'music', 'applause', 'talk', 'noodling'];
+      out.push(['seconds', set.seconds], ['judged', set.judged ? 1 : 0], ['threshold', set.threshold ?? 0], ['peak', set.peak ?? 0], ['songs', set.songs.length]);
+      set.songs.forEach((x, i) => out.push([`song${i}.start`, x.start], [`song${i}.end`, x.end], [`song${i}.confidence`, x.confidence], [`song${i}.level`, x.level]));
+      out.push(['gaps', set.gaps.length]);
+      set.gaps.forEach((g, i) => out.push([`gap${i}.kind`, kinds.indexOf(g.kind)]));
+      for (const k of kinds) out.push([`timeline.${k}`, set.timeline.filter((t) => t === k).length]);
+      return true;
+    }
+    case 'live-ride': {
+      const h = X.lv_ride_create(fs, c.target ?? -18, c.range ?? 12, block);
+      blocks(n, block, (s, k) => {
+        f32(X.lv_ride_input(h, 0), k).set(sig.l.subarray(s, s + k));
+        if (stereo) f32(X.lv_ride_input(h, 1), k).set(sig.r.subarray(s, s + k));
+        X.lv_ride_push(h, k, stereo ? 1 : 0);
+      });
+      const t = f32(X.lv_ride_track(h), X.lv_ride_count(h));
+      let sum = 0, peak = 0;
+      for (const v of t) { sum += Math.abs(v); peak = Math.max(peak, Math.abs(v)); }
+      out.push(['count', t.length], ['track.sum', sum], ['track.peak', peak], ['levelDb', X.lv_ride_level_db(h)]);
+      X.lv_ride_destroy(h);
+      return true;
+    }
+    case 'gain-track': {
+      const ch = channelsOf(sig).map((x) => x.slice()), buf = alloc(ch), db = nums('db');
+      const dp = X.malloc(4 * Math.max(1, db.length));
+      f32(dp, db.length).set(db);
+      blocks(n, block, (s, k) => X.pr_apply_gain_track(dp, db.length, c.hop ?? 0.1, c.offset ?? 0, fs, (c.start ?? 0) + s, buf.ptrs[0] + 4 * s, ch.length > 1 ? buf.ptrs[1] + 4 * s : 0, k));
+      fingerprintAudio(out, '', buf.read(n), fs);
+      buf.free(); X.free(dp);
+      return true;
+    }
+    case 'live-route': {
+      const delay = c.delay ?? 0, count = n - delay, pair = channelsOf(sig), r = pair[1] ?? pair[0];
+      const buf = alloc([sig.l, r, sig.l, r]), oL = X.malloc(4 * count + 4), oR = X.malloc(4 * count + 4);
+      const main = nums('main'), room = nums('room');
+      X.lv_route(buf.table, c.inputs ?? 4, count, delay, main[0], main[1], c.mono ? 1 : 0, room.length ? room[0] : -1, room.length ? room[1] : -1, c.roomDb ?? -6, oL, oR);
+      fingerprintAudio(out, '', [f32(oL, count).slice(), f32(oR, count).slice()], fs);
+      buf.free(); X.free(oL); X.free(oR);
+      return true;
+    }
+    case 'input-survey': {
+      const ch = channelsOf(sig), buf = alloc(ch), sv = X.lv_survey_create(ch.length), win = X.lv_survey_window_length(n, fs);
+      const table = X.malloc(4 * ch.length);
+      for (let k = 0; k < X.lv_survey_spots(); k++) {
+        const at = X.lv_survey_window_start(k, n, fs);
+        i32(table, ch.length).set(buf.ptrs.map((p) => p + 4 * at));
+        X.lv_survey_add(sv, table, Math.min(win, n - at));
+      }
+      ch.forEach((_, k) => out.push([`input${k}.levelDb`, X.lv_survey_level_db(sv, k)], [`input${k}.corr`, X.lv_survey_next_corr(sv, k)]));
+      X.lv_survey_destroy(sv); X.free(table); buf.free();
+      return true;
+    }
+    case 'delay-between': {
+      const lag = c.lag ?? 0, buf = alloc([sig.l]), a = buf.ptrs[0] + 4 * lag, b = buf.ptrs[0];
+      out.push(['lag', X.rh_delay_between(a, a, b, b, n - lag, fs, c.maxSec ?? 0.15)]);
+      buf.free();
+      return true;
+    }
+    case 'peaks-overloads': {
+      const ch = channelsOf(sig), nc = ch.length, inter = new Float32Array(n * nc);
+      for (let i = 0; i < n; i++) for (let k = 0; k < nc; k++) inter[i * nc + k] = ch[k][i];
+      const buf = alloc([inter]), pk = X.malloc(4 * nc), ov = X.malloc(4 * nc);
+      X.ms_peaks_overloads(buf.ptrs[0], n, nc, pk, ov);
+      const peaks = f32(pk, nc).slice(), overloads = i32(ov, nc).slice();
+      for (let k = 0; k < nc; k++) out.push([`input${k}.peak`, peaks[k]], [`input${k}.overloads`, overloads[k]]);
+      buf.free(); X.free(pk); X.free(ov);
+      return true;
+    }
+    case 'rumble': {
+      const ch = channelsOf(sig).map((x) => x.slice()), h = X.pr_rumble_create(fs, c.hz ?? 30, block);
+      blocks(n, block, (s, k) => {
+        ch.forEach((x, ci) => f32(X.pr_rumble_input(h, ci), k).set(x.subarray(s, s + k)));
+        X.pr_rumble_process(h, k, ch.length > 1 ? 1 : 0);
+        ch.forEach((x, ci) => x.set(f32(X.pr_rumble_input(h, ci), k), s));
+      });
+      X.pr_rumble_destroy(h);
+      fingerprintAudio(out, '', ch, fs);
+      return true;
+    }
     case 'restore-chain': {
       // the noise profile learned from 20 frames, half a frame apart, from learnFrom seconds on
       const N = X.rs_denoise_frame(fs), from = Math.round((c.learnFrom ?? 0) * fs);

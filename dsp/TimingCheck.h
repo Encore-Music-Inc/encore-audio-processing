@@ -400,4 +400,57 @@ namespace vs::timing
         }
         return out;
     }
+
+    // How many frames later the second of two recordings of one performance hears
+    // it (a room pair against the board's feed): each pair's mid, summed over
+    // ~8 kHz steps, cross-correlated for lags up to maxSec, then refined at full
+    // rate within a step either side over the first fineSec. 0 to maxSec only
+    // (the second is the later). n frames of each.
+    inline int delayBetween (const float* aL, const float* aR, const float* bL, const float* bR, int n, double fs,
+                             double maxSec = 0.15, double fineSec = 2.0)
+    {
+        std::vector<float> a ((size_t) n), b ((size_t) n);
+        for (int i = 0; i < n; ++i)
+        {
+            a[(size_t) i] = (float) (0.5 * ((double) aL[i] + (double) aR[i]));
+            b[(size_t) i] = (float) (0.5 * ((double) bL[i] + (double) bR[i]));
+        }
+        const int dec = std::max (1, (int) std::floor (fs / 8000.0 + 0.5));
+        const auto down = [&] (const std::vector<float>& x)
+        {
+            std::vector<float> y ((size_t) (n / dec));
+            for (size_t i = 0; i < y.size(); ++i)
+            {
+                double s = 0;
+                for (int k = 0; k < dec; ++k) s += x[i * (size_t) dec + (size_t) k];
+                y[i] = (float) s;
+            }
+            return y;
+        };
+        const auto A = down (a), B = down (b);
+        const int maxLag = (int) std::floor ((maxSec * fs) / dec + 0.5);
+        const auto corr = [] (const std::vector<float>& x, const std::vector<float>& y, int lag, int from, int to)
+        {
+            double s = 0;
+            for (int i = from; i < to; ++i) s += (double) x[(size_t) i] * (double) y[(size_t) (i + lag)];
+            return s;
+        };
+        int best = 0;
+        double bestV = -std::numeric_limits<double>::infinity();
+        for (int lag = 0; lag <= maxLag; ++lag)
+        {
+            const double v = corr (A, B, lag, 0, (int) A.size() - maxLag);
+            if (v > bestV) { bestV = v; best = lag; }
+        }
+        int fine = best * dec;
+        double fineV = -std::numeric_limits<double>::infinity();
+        const int span = (int) std::floor (fs * fineSec + 0.5);
+        for (int lag = std::max (0, best * dec - dec); lag <= best * dec + dec; ++lag)
+        {
+            if (span + lag > n) break;
+            const double v = corr (a, b, lag, 0, span);
+            if (v > fineV) { fineV = v; fine = lag; }
+        }
+        return fine;
+    }
 }

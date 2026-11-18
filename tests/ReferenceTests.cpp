@@ -59,12 +59,14 @@
 #include "dsp/ReferenceSignals.h"
 #include "dsp/Resampler.h"
 #include "dsp/ReverbEngine.h"
+#include "dsp/LiveSet.h"
 #include "dsp/Rider.h"
 #include "dsp/Saturator.h"
 #include "dsp/ScaleLibrary.h"
 #include "dsp/Space.h"
 #include "dsp/Spectrum.h"
 #include "dsp/Tempo.h"
+#include "dsp/TimingCheck.h"
 #include "dsp/TruePeak.h"
 #include "dsp/TunerPitch.h"
 #include "dsp/TheoryCalls.h"
@@ -480,6 +482,129 @@ namespace
     {
         const std::int64_t n = in != nullptr ? (std::int64_t) in->l.size() : 0;
         const bool stereo = in != nullptr && in->channels > 1;
+
+        // ---- live recordings
+        if (op == "live-set")
+        {
+            vs::LiveSetAnalyzer a (fs);
+            blocks (n, block, [&] (std::int64_t s, int k) { a.push (in->l.data() + s, stereo ? in->r.data() + s : nullptr, k); });
+            vs::liveset::Options o;
+            o.minSongSec = c.get ("minSong", 40);
+            o.mergeGapSec = c.get ("mergeGap", 6);
+            const auto set = a.finish (o);
+            out.push_back ({ "seconds", (double) set.seconds });
+            out.push_back ({ "judged", set.judged ? 1.0 : 0.0 });
+            out.push_back ({ "threshold", set.threshold });
+            out.push_back ({ "peak", set.peak });
+            out.push_back ({ "songs", (double) set.songs.size() });
+            for (size_t i = 0; i < set.songs.size(); ++i)
+            {
+                const auto& x = set.songs[i];
+                const std::string p = "song" + std::to_string (i) + ".";
+                out.push_back ({ p + "start", x.start });
+                out.push_back ({ p + "end", x.end });
+                out.push_back ({ p + "confidence", x.confidence });
+                out.push_back ({ p + "level", x.level });
+            }
+            out.push_back ({ "gaps", (double) set.gaps.size() });
+            for (size_t i = 0; i < set.gaps.size(); ++i) out.push_back ({ "gap" + std::to_string (i) + ".kind", (double) (int) set.gaps[i].kind });
+            for (int k = 0; k < 5; ++k)
+                out.push_back ({ std::string ("timeline.") + vs::liveset::kindName ((vs::liveset::Kind) k),
+                                 (double) std::count (set.timeline.begin(), set.timeline.end(), (vs::liveset::Kind) k) });
+            return true;
+        }
+        if (op == "live-ride")
+        {
+            vs::LevelRider r (fs, c.get ("target", -18), c.get ("range", 12));
+            blocks (n, block, [&] (std::int64_t s, int k) { r.push (in->l.data() + s, stereo ? in->r.data() + s : nullptr, k); });
+            out.push_back ({ "count", (double) r.track().size() });
+            double sum = 0.0, peak = 0.0;
+            for (float v : r.track()) { sum += std::abs ((double) v); peak = std::max (peak, std::abs ((double) v)); }
+            out.push_back ({ "track.sum", sum });
+            out.push_back ({ "track.peak", peak });
+            out.push_back ({ "levelDb", r.levelDb() });
+            return true;
+        }
+        if (op == "gain-track")
+        {
+            auto ch = copyOf (*in);
+            std::vector<float> db;
+            for (double v : nums (c, "db")) db.push_back ((float) v);
+            const auto start = (std::int64_t) c.get ("start", 0);
+            blocks (n, block, [&] (std::int64_t s, int k)
+            {
+                vs::mix::applyGainTrack (db.data(), (int) db.size(), c.get ("hop", 0.1), c.get ("offset", 0), fs, start + s,
+                                         ch[0].data() + s, ch.size() > 1 ? ch[1].data() + s : nullptr, k);
+            });
+            fingerprintAudio (out, "", ch, fs);
+            return true;
+        }
+        if (op == "live-route")
+        {
+            // four inputs: the signal's pair as the board, and again as the room
+            const int delay = (int) c.get ("delay", 0);
+            const int count = (int) n - delay;
+            const float* raw[4] { in->l.data(), (stereo ? in->r : in->l).data(), in->l.data(), (stereo ? in->r : in->l).data() };
+            Channels o (2, std::vector<float> ((size_t) std::max (0, count)));
+            const auto main = nums (c, "main");
+            const auto room = nums (c, "room");
+            vs::channels::routeLive (raw, (int) c.get ("inputs", 4), count, delay, (int) main[0], (int) main[1], c.get ("mono", 0) != 0,
+                                     room.empty() ? -1 : (int) room[0], room.empty() ? -1 : (int) room[1], c.get ("roomDb", -6), o[0].data(), o[1].data());
+            fingerprintAudio (out, "", o, fs);
+            return true;
+        }
+        if (op == "input-survey")
+        {
+            const Channels ch = copyOf (*in);
+            vs::channels::InputSurvey sv ((int) ch.size());
+            const int win = vs::channels::InputSurvey::windowLength (n, fs);
+            for (int k = 0; k < vs::channels::InputSurvey::spots; ++k)
+            {
+                const auto at = vs::channels::InputSurvey::windowStart (k, n, fs);
+                std::vector<const float*> p;
+                for (const auto& x : ch) p.push_back (x.data() + at);
+                sv.add (p.data(), (int) std::min<std::int64_t> (win, n - at));
+            }
+            for (int k = 0; k < (int) ch.size(); ++k)
+            {
+                out.push_back ({ "input" + std::to_string (k) + ".levelDb", sv.levelDb (k) });
+                out.push_back ({ "input" + std::to_string (k) + ".corr", sv.nextCorr (k) });
+            }
+            return true;
+        }
+        if (op == "delay-between")
+        {
+            // the board hears the signal `lag` frames sooner than the room
+            const int lag = (int) c.get ("lag", 0);
+            const float* a = in->l.data() + lag;
+            const float* b = in->l.data();
+            out.push_back ({ "lag", (double) vs::timing::delayBetween (a, a, b, b, (int) n - lag, fs, c.get ("maxSec", 0.15)) });
+            return true;
+        }
+        if (op == "peaks-overloads")
+        {
+            const Channels ch = copyOf (*in);
+            const int nc = (int) ch.size();
+            std::vector<float> inter ((size_t) n * (size_t) nc);
+            for (std::int64_t i = 0; i < n; ++i) for (int k = 0; k < nc; ++k) inter[(size_t) i * (size_t) nc + (size_t) k] = ch[(size_t) k][(size_t) i];
+            std::vector<float> peaks ((size_t) nc);
+            std::vector<int> overloads ((size_t) nc);
+            vs::channels::peaksAndOverloads (inter.data(), (int) n, nc, peaks.data(), overloads.data());
+            for (int k = 0; k < nc; ++k)
+            {
+                out.push_back ({ "input" + std::to_string (k) + ".peak", (double) peaks[(size_t) k] });
+                out.push_back ({ "input" + std::to_string (k) + ".overloads", (double) overloads[(size_t) k] });
+            }
+            return true;
+        }
+        if (op == "rumble")
+        {
+            auto ch = copyOf (*in);
+            vs::BiquadChain f (vs::restore::rumbleSections (fs, true, c.get ("hz", 30), false), 2);
+            for (int k = 0; k < (int) ch.size(); ++k) blocks (n, block, [&] (std::int64_t s, int len) { f.process (k, ch[(size_t) k].data() + s, len); });
+            fingerprintAudio (out, "", ch, fs);
+            return true;
+        }
 
         // ---- restoration of record and tape transfers
         if (op == "restore-chain" || op == "restore-analysis")

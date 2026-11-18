@@ -22,6 +22,7 @@
 #include "dsp/VocalEq.h"
 #include "dsp/Lpc.h"
 #include "dsp/Windows.h"
+#include "dsp/Restoration.h"
 
 namespace
 {
@@ -47,6 +48,7 @@ namespace
         for (auto& c : b) p.push_back (c.data());
         return p;
     }
+    struct Rumble { vs::BiquadChain f; std::vector<std::vector<float>> io; };
 }
 
 extern "C"
@@ -399,5 +401,30 @@ extern "C"
             count = order;
         });
         return count;
+    }
+
+    // ---- a gain track (input volume and a ride's moves), on audio
+
+    // db: count values (dB) every hopSec, each plus offsetDb; none: offsetDb alone. start:
+    // the first sample's frame in the track's time. r may be 0.
+    EMSCRIPTEN_KEEPALIVE void pr_apply_gain_track (const float* db, int count, double hopSec, double offsetDb, double fs, double start, float* l, float* r, int n)
+    {
+        vs::mix::applyGainTrack (db, count, hopSec, offsetDb, fs, (std::int64_t) start, l, r, n);
+    }
+
+    // ---- the rumble filter (24 dB an octave below hz), streamed
+
+    EMSCRIPTEN_KEEPALIVE void* pr_rumble_create (double fs, double hz, int maxBlock)
+    {
+        return new Rumble { vs::BiquadChain (vs::restore::rumbleSections (fs, true, hz, false), 2), std::vector<std::vector<float>> (2, std::vector<float> ((size_t) std::max (1, maxBlock), 0.0f)) };
+    }
+    EMSCRIPTEN_KEEPALIVE void pr_rumble_destroy (void* p) { delete static_cast<Rumble*> (p); }
+    EMSCRIPTEN_KEEPALIVE float* pr_rumble_input (void* p, int c) { return static_cast<Rumble*> (p)->io[(size_t) c].data(); }
+    // Filters the first n samples of each channel's input in place (stereo 0: the left alone)
+    EMSCRIPTEN_KEEPALIVE void pr_rumble_process (void* p, int n, int stereo)
+    {
+        auto* h = static_cast<Rumble*> (p);
+        h->f.process (0, h->io[0].data(), n);
+        if (stereo) h->f.process (1, h->io[1].data(), n);
     }
 }

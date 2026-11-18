@@ -130,6 +130,14 @@ def rule(op, name):
     stem = last.rstrip("0123456789")
     if op == "lpc":
         return "exact" if last == "orders" else "lpc"
+    if op == "live-set":
+        return {"confidence": "restore-rounded", "level": "restore-tenth", "threshold": "ratio", "peak": "level"}.get(last, "exact")
+    if op == "live-ride":
+        return {"count": "exact", "levelDb": "db", "sum": "proc-sum", "peak": "proc-peak"}[last]
+    if op == "input-survey":
+        return "ratio" if last == "corr" else "db"
+    if op in ("delay-between", "peaks-overloads"):
+        return "exact"
     if op == "restore-chain":
         return {"events": "restore-count", "length": "exact"}.get(last, "proc-peak" if last.startswith("peak") else "proc-sum")
     if op == "restore-analysis":
@@ -152,7 +160,8 @@ def rule(op, name):
         return "exact" if parts[0] in ("tempo", "tuner") else "law"
     if op == "levels":
         return {"rms": "level", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
-    if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument"):
+    if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument",
+              "gain-track", "live-route", "rumble"):
         if op == "vocoder" and last == "peak":
             return "vocoder-peak"
         if last in ("sum", "peak", "lufs"):
@@ -669,6 +678,35 @@ for rate in (44100, 96000):
     case(f"restore/chain/lp-{rate // 1000}k", "restore-chain", transfer(rate), settings=json.dumps(RESTORE_LP), learnFrom=5.2, block=65536)
     case(f"restore/chain/78-{rate // 1000}k", "restore-chain", transfer(rate), settings=json.dumps(RESTORE_78), learnFrom=5.2, block=65536)
     case(f"restore/analysis/side-{rate // 1000}k", "restore-analysis", transfer(rate), block=65536)
+
+
+# ---- live recordings (lv_*, with the gain track and the rumble filter (pr_*), the room's delay (rh_*) and a
+# batch's full-scale samples (ms_*)): a short set, two songs with applause between them, room tone all through
+
+def show(rate):
+    songs = []
+    for frm, to in ((1, 11), (15, 25)):
+        span = {"from": frm, "to": to}
+        songs += [voiced(196, 0.12, REED, attack=0.005, decay=14, every=0.5, **span),
+                  voiced(247, 0.08, PLUCKED, attack=0.005, decay=13, every=0.5, **span),
+                  voiced(98, 0.15, [1, 0.4, 0.2], attack=0.005, decay=15, every=1, **span)]
+    clapping = noise(401, 0.25, 0.22, highpass=1, **{"from": 11.5, "to": 14.5})
+    return signal(rate, 28, 2, songs, clapping, noise(402, 0.002, 0.002))
+
+
+for rate in (44100, 48000):
+    case(f"live/set/show-{rate // 1000}k", "live-set", show(rate), minSong=5, mergeGap=2, block=65536)
+    case(f"live/ride/show-{rate // 1000}k", "live-ride", show(rate), block=65536)
+case("live/gain-track/song", "gain-track", SONG, db=[0, -3, 2.5, 6, -1], hop=0.1, offset=1.5, start=1234)
+case("live/gain-track/volume-alone", "gain-track", SONG, db=[], offset=-4)
+case("live/route/board-and-room", "live-route", SONG, main=[0, 1], room=[2, 3], roomDb=-6, delay=37)
+case("live/route/blend", "live-route", SONG, main=[0, 1], mono=1, delay=0)
+case("live/route/one-input", "live-route", SONG, main=[1, 1], delay=0)
+case("live/survey/song", "input-survey", SONG)
+case("live/delay/song", "delay-between", SONG, lag=777)
+# the left clipped at full scale, the right well under it
+case("live/peaks/clipped", "peaks-overloads", signal(48000, 1, 2, tone(220, 1.2, 0.6), dict(type="clip", l=0.9995)))
+case("live/rumble/song", "rumble", SONG, hz=30)
 
 
 # ---- writing

@@ -94,7 +94,7 @@ The headers, by area (each header's top comment says more):
 | | `Oversampler.h` | power-of-two oversampling |
 | | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), its live form for playback, and integer decimation |
 | | `Ramp.h` | a value ramping to a new target, linearly or by equal ratios, and automation curves |
-| | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels and a rack return's ramps |
+| | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels, a rack return's ramps and a gain track |
 | | `Oscillator.h`, `Envelope.h` | band-limited oscillators (the one polyBLEP), and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut, and the dynamic EQ bell |
 | | `Lpc.h` | linear prediction (gap and click repair, onsets, FLAC) |
@@ -113,7 +113,7 @@ The headers, by area (each header's top comment says more):
 | | `Meters.h` | how a meter moves on screen: ballistics, peak hold, its scale; the volume fader's law |
 | Processing and mastering | `EqBand.h` | one band of a parametric EQ |
 | | `VocalEq.h` | the vocal EQ (low cut and four bands) |
-| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider |
+| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider (and its slow form, a gain track for a whole recording) |
 | | `Saturator.h` | preamp drive |
 | | `ReverbEngine.h`, `Space.h` | the reverb, and the delay (the vocal delay and reverb send) |
 | | `Chorus.h`, `Phaser.h` | the chorus and the phaser |
@@ -122,7 +122,7 @@ The headers, by area (each header's top comment says more):
 | | `MasterChain.h` | the one-knob mastering chain |
 | | `Mastering.h` | the one way to master a whole song with the chain |
 | | `Dither.h` | the one float to integer conversion, with dither |
-| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing and the clean-up after a plugin |
+| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing, the clean-up after a plugin, and a live recording's inputs (routing, what's on each, samples at full scale) |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
 | | `Dsd.h` | DSD (one-bit SACD audio, .dsf and .dff) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
@@ -131,6 +131,7 @@ The headers, by area (each header's top comment says more):
 | | `NoiseReduction.h` | spectral noise reduction and the noise profile it learns |
 | | `Restoration.h` | the restoration chain for record and tape transfers (rumble, channels, de-click, de-hum, noise, playback curves, speed and wow), its settings and the sources' starting points |
 | | `RestorationAnalysis.h` | what's wrong with a transfer: the analysis pass, hum, tuning, wow, dropouts, the songs on a side, the noise's quiet spots, the channels, the clicks, a side's level envelope and its gaps |
+| Live recordings | `LiveSet.h` | the songs in a live set, and what's between them (applause, talk, tuning, quiet) |
 | Pitch | `Yin.h` | the one pitch detector, with its follow, tuner and voice settings |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction's detector and its real-time engine |
 | | `TunerPitch.h` | the tuner's pitch and what it means on the instrument |
@@ -139,7 +140,7 @@ The headers, by area (each header's top comment says more):
 | | `DrumPitch.h` | drum tuning |
 | Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
-| | `TimingCheck.h` | latency and playing in time with a click |
+| | `TimingCheck.h` | latency, playing in time with a click, and how much later a second recording of a performance hears it |
 | | `Metronome.h` | the beat grid, sequencer, click sounds, click engine and its voices for a host's timeline |
 | Sound | `Synth.h`, `Sampler.h` | the synth and the sampler |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
@@ -163,7 +164,7 @@ own (`pr_*`), `api_pitch.cpp` pitch (`pi_*`), `api_tuner.cpp` the tuner
 music vocabulary and note editing (`mu_*`), `api_effects.cpp` the effects
 (`fx_*`), `api_instruments.cpp` the synth and the sampler (`in_*`),
 `api_theory.cpp` the chord and scale theory (`th_*`), `api_restore.cpp` the restoration of record
-and tape transfers (`rs_*`). The lists
+and tape transfers (`rs_*`), `api_live.cpp` live recordings (`lv_*`). The lists
 (scales, tunings, presets, chord types) are `data/*.json`
 files, not functions. A new area is a new file with its own prefix.
 

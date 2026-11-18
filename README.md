@@ -78,7 +78,7 @@ CI fails if either differs from what the script writes.
 | | `Oversampler.h` | power-of-two oversampling |
 | | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), its live form for playback, and decimation |
 | | `Ramp.h` | a value ramping to a new target, and how automation moves between its points |
-| | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels and a rack return's ramps |
+| | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels, a rack return's ramps and a gain track |
 | | `Oscillator.h`, `Envelope.h` | band-limited oscillators, and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut and the dynamic EQ bell that turn a sound down by its level |
 | | `Lpc.h` | linear prediction, and filling a gap from the audio around it |
@@ -96,7 +96,7 @@ CI fails if either differs from what the script writes.
 | | `Waveform.h` | waveform overviews for drawing, and a DAW's waveform picture at any zoom |
 | | `Meters.h` | how a meter moves on screen (ballistics, peak hold, its scale) and the volume fader's law |
 | Processing and mastering | `EqBand.h`, `VocalEq.h` | a parametric EQ band, and the vocal EQ |
-| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider |
+| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider (and its slow form, a gain track for a whole recording) |
 | | `Saturator.h` | preamp drive |
 | | `ReverbEngine.h`, `Space.h` | the reverb, and the delay (the vocal send, with its reverb) |
 | | `Chorus.h`, `Phaser.h` | the chorus and the phaser |
@@ -105,7 +105,7 @@ CI fails if either differs from what the script writes.
 | | `MasterChain.h` | the one-knob mastering chain |
 | | `Mastering.h` | mastering a whole song with the chain |
 | | `Dither.h` | float to integer samples, with dither |
-| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing and the clean-up after a plugin |
+| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing, the clean-up after a plugin, and a live recording's inputs (routing, what's on each, samples at full scale) |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
 | | `Dsd.h` | DSD (the one-bit audio of SACDs, .dsf and .dff files) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
@@ -114,6 +114,7 @@ CI fails if either differs from what the script writes.
 | | `NoiseReduction.h` | spectral noise reduction, and the noise profile it learns from the quiet stretches |
 | | `Restoration.h` | the restoration chain for record and tape transfers: rumble, channels, de-click, de-hum, noise reduction, 78 playback curves, speed and wow |
 | | `RestorationAnalysis.h` | what's wrong with a transfer: hum, tuning (speed), wow, tape dropouts, the songs on a side, how the channels compare, how clicky it is |
+| Live recordings | `LiveSet.h` | the songs in a live set, and what's between them: applause, talk, tuning, quiet |
 | Pitch | `Yin.h` | the pitch detector, with its settings for following a voice, the tuner and singing |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction: its detector and its real-time engine |
 | | `TunerPitch.h`, `Tunings.h` | the tuner, and its instruments and tunings |
@@ -121,7 +122,7 @@ CI fails if either differs from what the script writes.
 | | `DrumPitch.h` | drum tuning |
 | Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
-| | `TimingCheck.h` | the speaker-to-mic latency and playing in time with a click |
+| | `TimingCheck.h` | the speaker-to-mic latency, playing in time with a click, and how much later a second recording of a performance hears it |
 | | `Metronome.h` | the beat grid, the sequencer, the click sounds, the click engine and its voices for a host's own timeline |
 | Sound | `Synth.h` | the synth |
 | | `Sampler.h` | the sampler |
@@ -154,6 +155,7 @@ CI fails if either differs from what the script writes.
 | `wasm/api_music.cpp` | `mu_` | note names, spelled notes and the sounds they make, keys and the key lists, Hz and MIDI, note editing on a grid |
 | `wasm/api_theory.cpp` | `th_` | the chord and scale theory: one function that answers a JSON request (`dsp/TheoryCalls.h` lists them) |
 | `wasm/api_restore.cpp` | `rs_` | the restoration of record and tape transfers: the chain, the analysis and its detectors, the noise profile, the clip check, a side's level envelope |
+| `wasm/api_live.cpp` | `lv_` | live recordings: the songs in a set, the slow ride's gain track, the inputs routed to the two channels heard and what's on each |
 
 The lists (tunings, scales, presets, chord types) are the `data/*.json` files, not functions.
 

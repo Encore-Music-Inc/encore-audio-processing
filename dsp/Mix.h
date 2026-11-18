@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include "Ramp.h"
@@ -185,6 +186,28 @@ namespace vs
             {
                 if (std::abs (wet) < std::numeric_limits<float>::min()) { std::fill (ch[c], ch[c] + n, 0.0f); continue; }
                 for (int i = 0; i < n; ++i) ch[c][i] *= wet;
+            }
+        }
+
+        // A gain track on audio: db[k] (plus offsetDb, the sum kept as float) is
+        // the gain at k * hopSec, moved in a straight line in dB to the next value
+        // and held after the last. start: the first sample's frame in the track's
+        // time. No values: offsetDb alone. Applied to l and r (r may be null).
+        inline void applyGainTrack (const float* db, int count, double hopSec, double offsetDb, double fs, std::int64_t start, float* l, float* r, int n)
+        {
+            const float only = (float) offsetDb;
+            if (count <= 0 && only == 0.0f) return;
+            const auto at = [&] (int k) { return count > 0 ? (float) (db[k] + offsetDb) : only; };
+            const int last = std::max (1, count) - 1;
+            const double per = hopSec * fs;
+            for (int i = 0; i < n; ++i)
+            {
+                const double pos = (double) (start + i) / per;
+                const int k = std::min (last, (int) std::floor (pos));
+                const double f = std::min (1.0, pos - k);
+                const double g = std::pow (10.0, ((double) at (k) + f * ((double) at (std::min (last, k + 1)) - (double) at (k))) / 20.0);
+                l[i] = (float) ((double) l[i] * g);
+                if (r != nullptr) r[i] = (float) ((double) r[i] * g);
             }
         }
     }

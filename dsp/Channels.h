@@ -7,6 +7,7 @@
 #include <limits>
 #include <vector>
 #include "Loudness.h"
+#include "Meters.h"
 #include "Util.h"
 
 namespace vs
@@ -421,5 +422,96 @@ namespace vs
                     for (int i = 0; i < n; ++i) ch[c][i] = (float) (ch[c][i] * g);
             return r;
         }
+
+        // A batch of interleaved input (frames of numCh samples): each channel's
+        // peak, and how many of its samples sit at full scale (at or over the
+        // meter's overload level), which only a device driven past its maximum
+        // gives in a row.
+        inline void peaksAndOverloads (const float* interleaved, int frames, int numCh, float* peaks, int* overloads)
+        {
+            for (int c = 0; c < numCh; ++c) { peaks[c] = 0.0f; overloads[c] = 0; }
+            for (int i = 0; i < frames; ++i)
+                for (int c = 0; c < numCh; ++c)
+                {
+                    const float m = std::abs (interleaved[(size_t) i * (size_t) numCh + (size_t) c]);
+                    if (m > peaks[c]) peaks[c] = m;
+                    if (m >= meters::overloadGain) ++overloads[c];
+                }
+        }
+
+        // A live recording's inputs as the two channels heard: the main pair (the
+        // same input twice for one heard in both ears), or its two inputs blended
+        // to the centre (two separate mics or instruments, not a stereo pair),
+        // with a room pair (roomL < 0: none) blended in at roomDb when there are
+        // more than two inputs, and the main held back `delay` frames to line up
+        // with the room. raw: every input for the stretch starting `delay`
+        // frames early (count + delay frames each); channel numbers outside the
+        // inputs are taken as the nearest one.
+        inline void routeLive (const float* const* raw, int numCh, int count, int delay, int mainL, int mainR, bool mono,
+                               int roomL, int roomR, double roomDb, float* outL, float* outR)
+        {
+            const auto pick = [&] (int c) { return raw[std::max (0, std::min (numCh - 1, c))]; };
+            const float* mL = pick (mainL);
+            const float* mR = pick (mainR < 0 ? mainL : mainR);
+            if (mono && mL != mR)
+                for (int i = 0; i < count; ++i) { const float m = (float) midOf ((double) mL[i], (double) mR[i]); outL[i] = m; outR[i] = m; }
+            else
+                for (int i = 0; i < count; ++i) { outL[i] = mL[i]; outR[i] = mR[i]; }
+            if (roomL >= 0 && numCh > 2)
+            {
+                const double g = std::pow (10.0, roomDb / 20.0);
+                const float* rL = pick (roomL);
+                const float* rR = pick (roomR < 0 ? roomL : roomR);
+                for (int i = 0; i < count; ++i)
+                {
+                    outL[i] = (float) ((double) outL[i] + g * (double) rL[i + delay]);
+                    outR[i] = (float) ((double) outR[i] + g * (double) rR[i + delay]);
+                }
+            }
+        }
+
+        // What's on each input of a recording, from a dozen short windows spread
+        // across it: each input's level (dB, every other sample's power) and how
+        // alike each input is to the next (their correlation; 0 for the last).
+        class InputSurvey
+        {
+        public:
+            static constexpr int spots = 12;
+            InputSurvey (int numChannels) : pow ((size_t) numChannels, 0.0), xy ((size_t) numChannels, 0.0) {}
+
+            // Where window k of the dozen starts, and how long each is (frames)
+            static int windowLength (std::int64_t frames, double fs) { return (int) std::min<std::int64_t> ((std::int64_t) std::floor (fs * 2 + 0.5), frames); }
+            static std::int64_t windowStart (int k, std::int64_t frames, double fs)
+            {
+                const int win = windowLength (frames, fs);
+                return std::max<std::int64_t> (0, (std::int64_t) std::floor (((k + 0.5) / spots) * (double) frames + 0.5) - (std::int64_t) std::floor (win / 2.0 + 0.5));
+            }
+
+            // One window, every input (n frames each)
+            void add (const float* const* raw, int n)
+            {
+                const int ch = (int) pow.size();
+                for (int i = 0; i < n; i += 2)
+                {
+                    for (int c = 0; c < ch; ++c)
+                    {
+                        const double v = raw[c][i];
+                        pow[(size_t) c] += v * v;
+                        if (c + 1 < ch) xy[(size_t) c] += v * (double) raw[c + 1][i];
+                    }
+                    ++count;
+                }
+            }
+
+            double levelDb (int c) const { return db10 (pow[(size_t) c] / std::max<double> (1.0, (double) count), 1e-12); }
+            double nextCorr (int c) const
+            {
+                return c + 1 < (int) pow.size() ? xy[(size_t) c] / std::sqrt (pow[(size_t) c] * pow[(size_t) c + 1] + 1e-20) : 0.0;
+            }
+
+        private:
+            std::vector<double> pow, xy;
+            std::int64_t count = 0;
+        };
     }
 }

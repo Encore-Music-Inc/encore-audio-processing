@@ -328,4 +328,11 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE double rh_tempo_max() { return vs::tempo::maxBpm; }
     EMSCRIPTEN_KEEPALIVE double rh_clamp_tempo (double bpm) { return vs::tempo::clampTempo (bpm); }
     EMSCRIPTEN_KEEPALIVE int rh_is_tempo (double bpm) { return vs::tempo::isTempo (bpm) ? 1 : 0; }
+
+    // ---- how many frames later a second recording of one performance hears it (0 to maxSec)
+
+    EMSCRIPTEN_KEEPALIVE int rh_delay_between (const float* aL, const float* aR, const float* bL, const float* bR, int n, double fs, double maxSec)
+    {
+        return vs::timing::delayBetween (aL, aR, bL, bR, n, fs, maxSec);
+    }
 }
