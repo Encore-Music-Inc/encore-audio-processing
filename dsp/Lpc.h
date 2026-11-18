@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace vs
@@ -113,6 +115,81 @@ namespace vs
             levinson (r, p, 1e-4, 1e-12, a, err, [] (int, const double*, double) {});
             a[0] = 1.0;
             for (int k = 1; k <= p; ++k) a[k] = -a[k];
+        }
+
+        // Rebuilds the samples of x listed in `missing` (sorted indices into
+        // x[0..length)) from the audio around them: the values that make the
+        // prediction error of the predictor a (a[1..p], a[0] unused) over the
+        // surrounding stretch as small as possible (least-squares
+        // autoregressive interpolation). The normal equations are banded
+        // Toeplitz in the error filter's autocorrelation, solved by a banded
+        // Cholesky factorisation. x is changed in place; samples before 0 or
+        // from `length` on count as absent.
+        template <typename T>
+        void gapFill (T* x, long length, const std::vector<long>& missing, const double* a, int p)
+        {
+            const int m = (int) missing.size();
+            if (m == 0) return;
+            std::vector<double> b ((size_t) p + 1), rb ((size_t) p + 1);
+            b[0] = 1.0;
+            for (int k = 1; k <= p; ++k) b[(size_t) k] = -a[k];
+            for (int k = 0; k <= p; ++k)
+            {
+                double s = 0.0;
+                for (int l = 0; l + k <= p; ++l) s += b[(size_t) l] * b[(size_t) (l + k)];
+                rb[(size_t) k] = s;
+            }
+            for (long t : missing) x[t] = (T) 0;
+            // the prediction errors that touch a missing sample, with those at zero
+            const long t0 = missing.front(), t1 = missing.back() + p;
+            std::vector<double> e0 ((size_t) (t1 - t0 + 1));
+            for (long n = t0; n <= t1; ++n)
+            {
+                double s = 0.0;
+                for (int k = 0; k <= p; ++k)
+                {
+                    const long at = n - k;
+                    if (at >= 0 && at < length) s += b[(size_t) k] * (double) x[at];
+                }
+                e0[(size_t) (n - t0)] = s;
+            }
+            std::vector<double> rhs ((size_t) m);
+            for (int i = 0; i < m; ++i)
+            {
+                double s = 0.0;
+                for (int k = 0; k <= p; ++k) s += b[(size_t) k] * e0[(size_t) (missing[(size_t) i] + k - t0)];
+                rhs[(size_t) i] = -s;
+            }
+            // R[i][j] = rb[|ti - tj|]: banded, at most p either side in index space
+            const int bw = std::min (p, m - 1), w = bw + 1;
+            std::vector<double> L ((size_t) m * (size_t) w, 0.0);
+            auto at = [&] (int i, int j) -> double& { return L[(size_t) i * (size_t) w + (size_t) (i - j)]; };
+            for (int i = 0; i < m; ++i)
+            {
+                for (int j = std::max (0, i - bw); j <= i; ++j)
+                {
+                    const long d = missing[(size_t) i] - missing[(size_t) j];
+                    double s = d <= p ? rb[(size_t) d] : 0.0;
+                    if (i == j) s *= 1 + 1e-9;
+                    for (int k = std::max (0, i - bw); k < j; ++k) s -= at (i, k) * at (j, k);
+                    if (i == j) at (i, i) = std::sqrt (std::max (s, 1e-24));
+                    else at (i, j) = s / at (j, j);
+                }
+            }
+            std::vector<double> y ((size_t) m);
+            for (int i = 0; i < m; ++i)
+            {
+                double s = rhs[(size_t) i];
+                for (int k = std::max (0, i - bw); k < i; ++k) s -= at (i, k) * y[(size_t) k];
+                y[(size_t) i] = s / at (i, i);
+            }
+            for (int i = m - 1; i >= 0; --i)
+            {
+                double s = y[(size_t) i];
+                for (int k = i + 1; k <= std::min (m - 1, i + bw); ++k) s -= at (k, i) * y[(size_t) k];
+                y[(size_t) i] = s / at (i, i);
+            }
+            for (int i = 0; i < m; ++i) x[missing[(size_t) i]] = (T) y[(size_t) i];
         }
     }
 }

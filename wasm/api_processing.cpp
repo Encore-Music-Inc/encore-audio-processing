@@ -174,6 +174,10 @@ extern "C"
         vs::channels::crossfade (into, from, numCh, len, (vs::channels::FadeCurve) curve, (vs::channels::FadePoint) point);
     }
     EMSCRIPTEN_KEEPALIVE float pr_peak (const float* const* chans, int numCh, int n) { return vs::channels::peakOf (chans, numCh, n); }
+    // n samples of each channel times a fixed gain, in place
+    EMSCRIPTEN_KEEPALIVE void pr_apply_gain (float* const* chans, int numCh, int n, float gain) { vs::mix::applyGain (gain, chans, numCh, n); }
+    // n samples of src times a gain added into dst (a gain of -1: dst minus src, what one version took out of another)
+    EMSCRIPTEN_KEEPALIVE void pr_add_with_gain (const float* src, float* dst, int n, float gain) { vs::mix::addWithGain (src, dst, n, gain); }
     // mode: 0 off, 1 peak (-1 dBFS), 2 LUFS (-14, capped at -1 dBFS peak). out: four doubles,
     // gain dB, outcome (0 unchanged, 1 applied, 2 silent, 3 too quiet, 4 stopped at the peak), measured LUFS, LUFS reached when stopped
     EMSCRIPTEN_KEEPALIVE void pr_normalize (float* const* chans, int numCh, int n, double fs, int mode, double* out)

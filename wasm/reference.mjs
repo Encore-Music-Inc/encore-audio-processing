@@ -190,7 +190,90 @@ function runMore(c, sig, out) {
   const stereo = sig !== null && sig.channels > 1;
   const nums = (k) => c[k] ?? [];
 
+  // JSON an rs_* function writes (out, cap), with a second try when it needs more room
+  const answer = (fn) => {
+    let cap = 1 << 16, b = X.malloc(cap), k = fn(b, cap);
+    if (k < 0) { X.free(b); cap = -k; b = X.malloc(cap); k = fn(b, cap); }
+    const v = JSON.parse(cstr(b));
+    X.free(b);
+    return v;
+  };
+  // feeds n samples from `at` of both channels into an rs_* object's inputs, then calls run (count)
+  const feed = (input, h, at, count, run) => {
+    f32(input(h, 0), count).set(sig.l.subarray(at, at + count));
+    f32(input(h, 1), count).set((stereo ? sig.r : sig.l).subarray(at, at + count));
+    run(count);
+  };
+
   switch (c.op) {
+    // ---- restoration of record and tape transfers
+    case 'restore-chain': {
+      // the noise profile learned from 20 frames, half a frame apart, from learnFrom seconds on
+      const N = X.rs_denoise_frame(fs), from = Math.round((c.learnFrom ?? 0) * fs);
+      const lp = X.rs_profile_create(fs, N, 0, 0);
+      for (let k = 0; k < 20 && from + k * (N >> 1) + N <= n; k++) feed(X.rs_profile_input, lp, from + k * (N >> 1), N, () => X.rs_profile_add(lp));
+      const bins = X.rs_profile_finish(lp);
+      const settings = JSON.parse(c.settings);
+      if (bins > 0) settings.denoise = { ...settings.denoise, profile: Array.from(f32(X.rs_profile_data(lp), bins)) };
+      X.rs_profile_destroy(lp);
+      const q = text(JSON.stringify(settings));
+      const h = X.rs_chain_create(fs, q, 0, 0, 0, 0, 0, block);
+      X.free(q);
+      let length = 0, sumL = 0, sumR = 0, peakL = 0, peakR = 0;
+      const take = (got) => {
+        const a = f32(X.rs_chain_output(h, 0), got), b = f32(X.rs_chain_output(h, 1), got);
+        for (let i = 0; i < got; i++) { sumL += Math.abs(a[i]); sumR += Math.abs(b[i]); peakL = Math.max(peakL, Math.abs(a[i])); peakR = Math.max(peakR, Math.abs(b[i])); }
+        length += got;
+      };
+      blocks(n, block, (at, k) => feed(X.rs_chain_input, h, at, k, (m) => take(X.rs_chain_push(h, m))));
+      take(X.rs_chain_flush(h));
+      const clicks = answer((b, cap) => X.rs_chain_clicks(h, b, cap));
+      X.rs_chain_destroy(h);
+      out.push(['length', length], ['events', clicks.length], ['sumL', sumL], ['sumR', sumR], ['peakL', peakL], ['peakR', peakR]);
+      return true;
+    }
+    case 'restore-analysis': {
+      const a = X.rs_analyzer_create(fs, n, 3000, block);
+      blocks(n, block, (at, k) => feed(X.rs_analyzer_input, a, at, k, (m) => X.rs_analyzer_push(a, m)));
+      X.rs_analyzer_finish(a);
+      const report = (what, options = {}) => { const w = text(JSON.stringify({ what, ...options })); const v = answer((b, cap) => X.rs_analyzer_report(a, w, b, cap)); X.free(w); return v; };
+      const summary = report('summary'), hum = report('hum'), tuning = report('tuning'), wow = report('wow'), spots = report('quietSpots'), wins = report('checkWindows');
+      out.push(['summary.peakDb', summary.peakDb], ['summary.musicDb', summary.musicDb ?? -200]);
+      out.push(['hum.found', hum.found ? 1 : 0], ['hum.hz', hum.hz], ['hum.harmonics', hum.harmonics.length]);
+      out.push(['tuning.found', tuning.found ? 1 : 0], ['tuning.cents', tuning.cents], ['wow.found', wow.found ? 1 : 0]);
+      const tracks = report('tracks', { minGap: 1.2, minSong: 3 });   // songs at least 3 s long, as the native run asks
+      X.rs_analyzer_destroy(a);
+      out.push(['tracks.tracks', tracks.tracks.length], ['tracks.gapStart', tracks.gaps[0]?.start ?? -1], ['tracks.gapEnd', tracks.gaps[0]?.end ?? -1]);
+      out.push(['spots.spots', spots.length]);
+      const hz = hum.harmonics.map((x) => x.hz), hp = X.malloc(8 * Math.max(1, hz.length));
+      f64(hp, hz.length).set(hz);
+      const N = summary.N, lp = X.rs_profile_create(fs, N, hp, hz.length);
+      X.free(hp);
+      let taken = 0;
+      for (const at of spots) { if (at + N > n) continue; feed(X.rs_profile_input, lp, at, N, () => X.rs_profile_add(lp)); if (++taken >= 300) break; }
+      const bins = X.rs_profile_finish(lp);
+      out.push(['noise.frames', X.rs_profile_frames(lp)], ['noise.profileDb', bins > 0 ? X.rs_profile_db_of(X.rs_profile_data(lp), bins, N) : -200]);
+      X.rs_profile_destroy(lp);
+      const most = Math.max(1, ...wins.map((w) => w.length));
+      const cc = X.rs_channels_create(fs, most), counter = X.rs_clicks_create(fs, 50, 40, most);
+      for (const w of wins) {
+        feed(X.rs_channels_input, cc, w.at, Math.min(w.length, Math.trunc(fs / 2)), (m) => X.rs_channels_add(cc, m));
+        feed(X.rs_clicks_input, counter, w.at, w.length, (m) => X.rs_clicks_add(counter, m, w.at));
+      }
+      const ch = answer((b, cap) => X.rs_channels_result(cc, b, cap)), clicks = answer((b, cap) => X.rs_clicks_result(counter, b, cap));
+      X.rs_channels_destroy(cc);
+      X.rs_clicks_destroy(counter);
+      out.push(['channels.corr', ch.corr], ['channels.balanceDb', ch.balanceDb], ['channels.delay', ch.delay], ['channels.mono', ch.mono ? 1 : 0]);
+      out.push(['clicks.perMinute', clicks.perMinute[0]]);
+      const env = X.rs_envelope_create(fs, 0.05, n);
+      feed(X.rs_envelope_input, env, 0, n, (m) => X.rs_envelope_push(env, m));
+      const count = X.rs_envelope_count(env);
+      const gaps = answer((b, cap) => X.rs_gap_candidates(X.rs_envelope_levels(env), count, X.rs_envelope_hop(env), b, cap));
+      X.rs_envelope_destroy(env);
+      out.push(['envelope.levels', count], ['envelope.candidates', gaps.cands.length], ['envelope.candidateAt', gaps.cands[0]?.at ?? -1]);
+      return true;
+    }
+
     // ---- measurement
     case 'file-analysis': {
       const a = X.ms_an_create(fs, sig.channels, n, c.bitDepth ?? 0, c.isFloat ?? 0, block);

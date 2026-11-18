@@ -90,6 +90,12 @@ TOLERANCES = {
             "why": "Gains and positions from the pan, fader, fade and automation laws and the drawing axes: float sin, cos, pow, exp and log, which maths libraries round differently in the last place."},
     "lpc": {"abs": 1e-7, "rel": 1e-7,
             "why": "Linear prediction's coefficients and errors: double-precision sums and a cosine window, which maths libraries and compilers round differently in the last places, and the recursion through the orders magnifies that on a block whose predictors are nearly ill-conditioned (MSVC's /fp:fast moves them by about 1e-8). An encoder quantizes the coefficients far more coarsely than this."},
+    "restore-count": {"abs": 2, "rel": 0,
+                      "why": "Clicks found or counted by the de-clicker: a click whose jump sits right at the threshold can tip either way when a compiler orders the predictors' sums differently; the inputs keep every click well clear of it."},
+    "restore-rounded": {"abs": 0.011, "rel": 0,
+                        "why": "Restoration analysis results rounded as the reports give them (Hz and seconds to 0.01, cents and dB to 0.1 on a tenfold scale): rounding can tip one step either way when the unrounded value moves in its last places."},
+    "restore-tenth": {"abs": 0.11, "rel": 0,
+                      "why": "Restoration analysis results rounded to 0.1 (cents, dB, prominence): rounding can tip one step either way when the unrounded value moves in its last places."},
     "dsd": {"abs": 1e-6, "rel": 1e-6,
             "why": "DSD to PCM: the low-pass is designed in double with sin and cos, which maths libraries round differently in the last place, so its float tables can differ in the last place, and a sample (a sum of up to 512 of them) by a few float steps."},
 }
@@ -124,6 +130,22 @@ def rule(op, name):
     stem = last.rstrip("0123456789")
     if op == "lpc":
         return "exact" if last == "orders" else "lpc"
+    if op == "restore-chain":
+        return {"events": "restore-count", "length": "exact"}.get(last, "proc-peak" if last.startswith("peak") else "proc-sum")
+    if op == "restore-analysis":
+        if last in ("perMinute", "clicks"):
+            return "restore-count"
+        if last in ("found", "harmonics", "tracks", "spots", "levels", "candidates", "frames", "mono"):
+            return "exact"
+        if last in ("cents", "musicDbRounded", "profileDb", "sideDb", "prominence", "peakCents"):
+            return "restore-tenth"
+        if last in ("hz", "gapStart", "gapEnd", "wowHz", "balanceDb", "delay", "candidateAt"):
+            return "restore-rounded"
+        if last in ("musicDb", "peakDb"):
+            return "db"
+        if last == "corr":
+            return "ratio"
+        return "proc-sum"
     if last in EXACT_WORDS or stem in ("pad", "midi", "trim"):
         return "exact"
     if op == "laws":
@@ -608,6 +630,38 @@ native("native/pitch-engine/correction", VOX, "pitch-engine", key=0, scale=0, sp
 native("native/pitch-engine/harmony", VOX, "pitch-engine", key=0, scale=0, speedMs=20, harmony=1, interval=3, block=512)
 native("native/body/guitar", GUITAR, "body", block=512)
 case("native/host-mix/song", "host-mix", SONG, block=512, native=True)
+
+
+# ---- restoration of record and tape transfers (rs_*): a short side, damaged: two songs with a
+# gap between them, played 18 cents sharp, with hiss, 60.4 Hz mains hum and clicks
+
+def transfer(rate):
+    sharp = 2 ** (18 / 1200)
+    notes = []
+    for frm, to in ((0, 5), (7, 12)):
+        span = {"from": frm, "to": to}
+        notes += [voiced(233.082 * sharp, 0.14, REED, attack=0.005, decay=13, every=0.5, **span),
+                  voiced(293.665 * sharp, 0.1, PLUCKED, attack=0.005, decay=13, every=0.5, **span),
+                  voiced(349.228 * sharp, 0.08, SUNG, attack=0.005, decay=12, every=0.25, **span),
+                  voiced(58.270 * sharp, 0.2, [1, 0.4, 0.2], attack=0.005, decay=14, every=1, **span)]
+    hum = [tone(60.4, 0.006), tone(60.4, 0.003, mult=2), tone(60.4, 0.004, mult=3)]
+    clicks = [dict(type="samples", l=1, r=1, values=[0.45, -0.3, 0.2, -0.1, 0.05], **{"from": t})
+              for t in (1.137, 2.711, 3.902, 8.213, 9.557, 11.104)]
+    return signal(rate, 12, 2, notes, noise(301, 0.003, 0.003), hum, clicks)
+
+
+RESTORE_LP = {"rumble": {"on": True, "hz": 20, "dc": True}, "declick": {"on": True, "clicks": 50, "crackle": 40, "maxMs": 4},
+              "dehum": {"on": True, "hz": 60.4, "harmonics": [1, 2, 3], "width": 0.6}, "denoise": {"on": True, "amount": 40}}
+RESTORE_78 = {"source": "78", "rumble": {"on": True, "hz": 40, "dc": True},
+              "channels": {"on": True, "mode": "sum", "balanceOn": True, "balanceDb": 1.5},
+              "declick": {"on": True, "clicks": 65, "crackle": 60, "maxMs": 4}, "denoise": {"on": True, "amount": 55},
+              "eq": {"on": True, "curve": "aes", "shelf": 50, "riaaApplied": True, "air": 2},
+              "speed": {"on": True, "cents": -18, "rpm": "none"}}
+for rate in (44100, 96000):
+    # the noise profile is learned from the gap (5.2 s on), as the settings' denoise.profile
+    case(f"restore/chain/lp-{rate // 1000}k", "restore-chain", transfer(rate), settings=json.dumps(RESTORE_LP), learnFrom=5.2, block=65536)
+    case(f"restore/chain/78-{rate // 1000}k", "restore-chain", transfer(rate), settings=json.dumps(RESTORE_78), learnFrom=5.2, block=65536)
+    case(f"restore/analysis/side-{rate // 1000}k", "restore-analysis", transfer(rate), block=65536)
 
 
 # ---- writing

@@ -19,6 +19,6 @@ exports="$(echo "$names" | paste -sd, -),_malloc,_free"
 em++ "${sources[@]}" -O3 -msimd128 -std=c++20 -fno-exceptions -fno-rtti \
     -DVS_NO_JUCE=1 -I "$root" \
     -sSTANDALONE_WASM=1 --no-entry "-sEXPORTED_FUNCTIONS=$exports" \
-    -sINITIAL_MEMORY=134217728 -sALLOW_MEMORY_GROWTH=0 -sFILESYSTEM=0 \
+    -sINITIAL_MEMORY=134217728 -sALLOW_MEMORY_GROWTH=1 -sMAXIMUM_MEMORY=4294967296 -sFILESYSTEM=0 \
     -o "$out"
 echo "built $out ($(( $(stat -c %s "$out") / 1024 )) KB, $(echo "$names" | wc -l) functions)"

@@ -69,7 +69,7 @@ CI fails if either differs from what the script writes.
 |---|---|---|
 | Building blocks | `Fft.h` | the FFT, complex and real input |
 | | `Windows.h` | window functions and the windowed-sinc table |
-| | `Biquad.h` | second-order filter designs (the RBJ cookbook) and their curves |
+| | `Biquad.h` | second-order filter designs (the RBJ cookbook) and their curves, first-order sections, zero-phase filtering |
 | | `Crossover.h` | Linkwitz-Riley band splits that recombine flat |
 | | `Svf.h` | the state-variable filter |
 | | `Convolution.h` | zero-latency convolution, with crossfaded filter changes |
@@ -81,10 +81,11 @@ CI fails if either differs from what the script writes.
 | | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels and a rack return's ramps |
 | | `Oscillator.h`, `Envelope.h` | band-limited oscillators, and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut and the dynamic EQ bell that turn a sound down by its level |
-| | `Lpc.h` | linear prediction |
+| | `Lpc.h` | linear prediction, and filling a gap from the audio around it |
 | | `Random.h` | seeded random numbers, the same on every system |
 | | `Stats.h` | median, percentile, mean, deviation and a least-squares line |
 | | `Util.h` | smoothers, decibels, mid and side, rounding |
+| | `Json.h` | a small JSON reader and writer, for the browser's calls that take and give text |
 | | `Denormals.h` | the denormal guard: turns the processor's denormals off while audio code runs |
 | Measurement | `Loudness.h` | the loudness meter (ITU-R BS.1770, EBU R128), and the true-peak limiter the mastering chain ends with |
 | | `LoudnessReport.h` | a song's loudness report |
@@ -109,6 +110,10 @@ CI fails if either differs from what the script writes.
 | | `Dsd.h` | DSD (the one-bit audio of SACDs, .dsf and .dff files) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
 | | `Presets.h` | the presets of the Vox, Verb, Equalize, Master and Strum chains (written by `tools/presets.py`) |
+| Restoration | `Declicker.h` | de-click and de-crackle for transfers of records |
+| | `NoiseReduction.h` | spectral noise reduction, and the noise profile it learns from the quiet stretches |
+| | `Restoration.h` | the restoration chain for record and tape transfers: rumble, channels, de-click, de-hum, noise reduction, 78 playback curves, speed and wow |
+| | `RestorationAnalysis.h` | what's wrong with a transfer: hum, tuning (speed), wow, tape dropouts, the songs on a side, how the channels compare, how clicky it is |
 | Pitch | `Yin.h` | the pitch detector, with its settings for following a voice, the tuner and singing |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction: its detector and its real-time engine |
 | | `TunerPitch.h`, `Tunings.h` | the tuner, and its instruments and tunings |
@@ -139,7 +144,7 @@ CI fails if either differs from what the script writes.
 | `wasm/api_mastering.cpp` | `mt_` | whole-song mastering |
 | `wasm/api_loudness.cpp` | `lm_` | the loudness meter |
 | `wasm/api_measure.cpp` | `ms_` | true peak, the loudness report, the analysis, spectrum, waveforms, meters on screen, the band that tames a resonance |
-| `wasm/api_processing.cpp` | `pr_` | resampling, delays, dither, channel work, device simulation, the vocal EQ, "hear the original", DSD to PCM, the true-peak limiter on its own, an MP3's sample rate |
+| `wasm/api_processing.cpp` | `pr_` | resampling, delays, dither, channel work, gains, device simulation, the vocal EQ, "hear the original", DSD to PCM, the true-peak limiter on its own, an MP3's sample rate |
 | `wasm/api_effects.cpp` | `fx_` | the chorus, phaser, filter, pitch shifter, time stretch, compressor, delay and reverb, and the send law |
 | `wasm/api_instruments.cpp` | `in_` | the synth and the sampler |
 | `wasm/api_pitch.cpp` | `pi_` | voice pitch and its measurements, played notes, drum tuning |
@@ -148,6 +153,7 @@ CI fails if either differs from what the script writes.
 | `wasm/api_sound.cpp` | `sd_` | the drums and the metronome (its sounds, its click engine and mending its settings) |
 | `wasm/api_music.cpp` | `mu_` | note names, spelled notes and the sounds they make, keys and the key lists, Hz and MIDI, note editing on a grid |
 | `wasm/api_theory.cpp` | `th_` | the chord and scale theory: one function that answers a JSON request (`dsp/TheoryCalls.h` lists them) |
+| `wasm/api_restore.cpp` | `rs_` | the restoration of record and tape transfers: the chain, the analysis and its detectors, the noise profile, the clip check, a side's level envelope |
 
 The lists (tunings, scales, presets, chord types) are the `data/*.json` files, not functions.
 
@@ -257,6 +263,10 @@ This writes `wasm/master.wasm` (not committed). The same Emscripten version
 gives the same bytes, so a release's `master.wasm.sha256` can be checked
 against a local build. A release's `.json` files are the `data/*.json` files
 from the same commit.
+
+Its memory can grow as a call needs it (`wasm/build.sh` sets how), and
+growing replaces the module's memory buffer, so a product makes its view of
+that memory afresh after every call rather than keeping one across calls.
 
 ## Versioning
 

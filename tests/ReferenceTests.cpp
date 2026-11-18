@@ -74,6 +74,8 @@
 #include "dsp/BodyMatch.h"
 #include "dsp/DeEsser.h"
 #include "dsp/PitchEngine.h"
+#include "dsp/Restoration.h"
+#include "dsp/RestorationAnalysis.h"
 
 namespace
 {
@@ -477,6 +479,93 @@ namespace
     {
         const std::int64_t n = in != nullptr ? (std::int64_t) in->l.size() : 0;
         const bool stereo = in != nullptr && in->channels > 1;
+
+        // ---- restoration of record and tape transfers
+        if (op == "restore-chain" || op == "restore-analysis")
+        {
+            const float* l = in->l.data();
+            const float* r = stereo ? in->r.data() : in->l.data();
+            if (op == "restore-chain")
+            {
+                // the noise profile learned from 20 frames, half a frame apart, from learnFrom seconds on
+                const int N = vs::denoise::frameSize (fs);
+                vs::NoiseProfileLearner learner (fs, N);
+                const std::int64_t from = (std::int64_t) std::llround (c.get ("learnFrom", 0) * fs);
+                for (int k = 0; k < 20 && from + k * (N / 2) + N <= n; ++k) learner.add (l + from + k * (N / 2), r + from + k * (N / 2));
+                auto s = vs::restore::settingsFromJson (*vs::json::parse (c.text ("settings")));
+                if (const auto prof = learner.profile()) s.denoise.profile = *prof;
+                vs::restore::Chain chain (fs, s);
+                std::vector<float> L, R;
+                for (std::int64_t p = 0; p < n; p += block)
+                {
+                    const int m = (int) std::min<std::int64_t> (block, n - p);
+                    const int got = chain.push (l + p, r + p, m);
+                    L.insert (L.end(), chain.output (0).begin(), chain.output (0).begin() + got);
+                    R.insert (R.end(), chain.output (1).begin(), chain.output (1).begin() + got);
+                }
+                const int got = chain.flush();
+                L.insert (L.end(), chain.output (0).begin(), chain.output (0).begin() + got);
+                R.insert (R.end(), chain.output (1).begin(), chain.output (1).begin() + got);
+                double sumL = 0, sumR = 0;
+                float peakL = 0, peakR = 0;
+                for (size_t i = 0; i < L.size(); ++i) { sumL += std::abs (L[i]); sumR += std::abs (R[i]); peakL = std::max (peakL, std::abs (L[i])); peakR = std::max (peakR, std::abs (R[i])); }
+                out.push_back ({ "length", (double) L.size() });
+                out.push_back ({ "events", (double) chain.clicks().size() });
+                out.push_back ({ "sumL", sumL });
+                out.push_back ({ "sumR", sumR });
+                out.push_back ({ "peakL", (double) peakL });
+                out.push_back ({ "peakR", (double) peakR });
+                return true;
+            }
+            vs::restore::RestoreAnalyzer a (fs, n);
+            for (std::int64_t p = 0; p < n; p += block) a.push (l + p, r + p, (int) std::min<std::int64_t> (block, n - p));
+            a.finish();
+            out.push_back ({ "summary.peakDb", a.peakDb() });
+            out.push_back ({ "summary.musicDb", a.musicDb().value_or (-200) });
+            const auto hum = vs::restore::detectHum (a.lowLeft(), a.lowRight(), a.lowRate());
+            out.push_back ({ "hum.found", hum.found ? 1.0 : 0.0 });
+            out.push_back ({ "hum.hz", hum.hz });
+            out.push_back ({ "hum.harmonics", (double) hum.harmonics.size() });
+            const auto t = vs::restore::detectTuning (a.lowMid(), a.lowRate());
+            out.push_back ({ "tuning.found", t.found ? 1.0 : 0.0 });
+            out.push_back ({ "tuning.cents", t.cents });
+            out.push_back ({ "wow.found", vs::restore::detectWow (a.lowMid(), a.lowRate()).found ? 1.0 : 0.0 });
+            const auto tr = vs::restore::findTracks (a.lowMid(), a.lowRate(), 1.2, 3);
+            out.push_back ({ "tracks.tracks", (double) tr.tracks.size() });
+            out.push_back ({ "tracks.gapStart", tr.gaps.empty() ? -1.0 : tr.gaps[0].start });
+            out.push_back ({ "tracks.gapEnd", tr.gaps.empty() ? -1.0 : tr.gaps[0].end });
+            const auto spots = vs::restore::quietSpots (a.hopEnergy(), a.hopSize());
+            out.push_back ({ "spots.spots", (double) spots.size() });
+            std::vector<double> humHz;
+            for (const auto& h : hum.harmonics) humHz.push_back (h.hz);
+            vs::NoiseProfileLearner learner (fs, a.frameSize(), humHz);
+            int taken = 0;
+            for (auto at : spots) { if (at + a.frameSize() > n) continue; learner.add (l + at, r + at); if (++taken >= 300) break; }
+            const auto prof = learner.profile();
+            out.push_back ({ "noise.frames", (double) learner.framesKept() });
+            out.push_back ({ "noise.profileDb", prof ? vs::restore::rounded (vs::denoise::profileDb (*prof, a.frameSize()), 1) : -200.0 });
+            const auto wins = vs::restore::checkWindows (n, fs);
+            vs::restore::ChannelCompare cc (fs);
+            vs::restore::ClickCounter counter (fs);
+            for (const auto& w : wins)
+            {
+                cc.add (l + w.at, r + w.at, std::min (w.length, (int) fs / 2));
+                counter.add (l + w.at, r + w.at, w.length, w.at);
+            }
+            const auto ch = cc.result();
+            out.push_back ({ "channels.corr", ch.corr });
+            out.push_back ({ "channels.balanceDb", ch.balanceDb });
+            out.push_back ({ "channels.delay", ch.delay });
+            out.push_back ({ "channels.mono", ch.mono ? 1.0 : 0.0 });
+            out.push_back ({ "clicks.perMinute", counter.result().perMinute[0] });
+            vs::restore::LevelEnvelope env (fs);
+            env.push (l, r, (int) n);
+            const auto g = vs::restore::gapCandidates (env.levels(), env.hopSeconds());
+            out.push_back ({ "envelope.levels", (double) env.levels().size() });
+            out.push_back ({ "envelope.candidates", (double) g.cands.size() });
+            out.push_back ({ "envelope.candidateAt", g.cands.empty() ? -1.0 : g.cands[0].at });
+            return true;
+        }
 
         // ---- measurement
         if (op == "file-analysis")

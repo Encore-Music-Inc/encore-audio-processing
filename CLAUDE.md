@@ -85,7 +85,7 @@ The headers, by area (each header's top comment says more):
 |---|---|---|
 | Building blocks | `Fft.h` | the one FFT (complex and real input), on Apple's Accelerate framework on Apple systems |
 | | `Windows.h` | window functions and the shared windowed-sinc table |
-| | `Biquad.h` | second-order filter coefficients (the RBJ cookbook designs) and their curves |
+| | `Biquad.h` | second-order filter coefficients (the RBJ cookbook designs) and their curves, first-order sections, zero-phase filtering |
 | | `Crossover.h` | Linkwitz-Riley band splits that recombine flat |
 | | `Svf.h` | the state-variable filter (the de-esser's split, and the step the Linkwitz-Riley splits use) |
 | | `Convolution.h` | zero-latency convolution, with crossfaded filter changes (Body match) |
@@ -101,6 +101,7 @@ The headers, by area (each header's top comment says more):
 | | `Random.h` | seeded random number generators, the same on every system |
 | | `Stats.h` | median, percentile, mean, deviation, least-squares line |
 | | `Util.h` | smoothers, envelope steps, decibels, mid and side, rounding |
+| | `Json.h` | a small JSON reader and writer, for the browser's calls that take and give text |
 | | `Denormals.h` | the denormal guard: turns the processor's denormals off while audio code runs |
 | Measurement | `Loudness.h` | the BS.1770 / EBU R128 loudness meter, and the mastering chain's true-peak limiter |
 | | `LoudnessReport.h` | a song's loudness report |
@@ -126,6 +127,10 @@ The headers, by area (each header's top comment says more):
 | | `Dsd.h` | DSD (one-bit SACD audio, .dsf and .dff) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
 | | `Presets.h` | the chains' presets (written by `tools/presets.py`) |
+| Restoration | `Declicker.h` | de-click and de-crackle (found by prediction error, rebuilt by gap fill) |
+| | `NoiseReduction.h` | spectral noise reduction and the noise profile it learns |
+| | `Restoration.h` | the restoration chain for record and tape transfers (rumble, channels, de-click, de-hum, noise, playback curves, speed and wow), its settings and the sources' starting points |
+| | `RestorationAnalysis.h` | what's wrong with a transfer: the analysis pass, hum, tuning, wow, dropouts, the songs on a side, the noise's quiet spots, the channels, the clicks, a side's level envelope and its gaps |
 | Pitch | `Yin.h` | the one pitch detector, with its follow, tuner and voice settings |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction's detector and its real-time engine |
 | | `TunerPitch.h` | the tuner's pitch and what it means on the instrument |
@@ -157,7 +162,8 @@ own (`pr_*`), `api_pitch.cpp` pitch (`pi_*`), `api_tuner.cpp` the tuner
 `api_sound.cpp` sounds and the metronome's settings (`sd_*`), `api_music.cpp`
 music vocabulary and note editing (`mu_*`), `api_effects.cpp` the effects
 (`fx_*`), `api_instruments.cpp` the synth and the sampler (`in_*`),
-`api_theory.cpp` the chord and scale theory (`th_*`). The lists
+`api_theory.cpp` the chord and scale theory (`th_*`), `api_restore.cpp` the restoration of record
+and tape transfers (`rs_*`). The lists
 (scales, tunings, presets, chord types) are `data/*.json`
 files, not functions. A new area is a new file with its own prefix.
 
