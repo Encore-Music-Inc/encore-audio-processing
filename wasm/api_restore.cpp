@@ -387,6 +387,13 @@ extern "C"
         return give (o.text, out, cap);
     }
 
+    // ---- recording a side: is it over?
+
+    EMSCRIPTEN_KEEPALIVE void* rs_runout_create (double seconds, double minMusic) { return new vs::restore::RunoutWatch (seconds, minMusic); }
+    EMSCRIPTEN_KEEPALIVE void rs_runout_destroy (void* p) { delete static_cast<vs::restore::RunoutWatch*> (p); }
+    // The next batch's level (dB) and length (seconds): 1 once the side is over.
+    EMSCRIPTEN_KEEPALIVE int rs_runout_push (void* p, double db, double seconds) { return static_cast<vs::restore::RunoutWatch*> (p)->push (db, seconds) ? 1 : 0; }
+
     // ---- a waveform overview of a stretch of known length (the restored file's)
 
     EMSCRIPTEN_KEEPALIVE void* rs_overview_create (double frames, int columns, int maxBlock)

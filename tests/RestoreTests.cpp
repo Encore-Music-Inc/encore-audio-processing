@@ -461,6 +461,32 @@ namespace
         for (const auto& cand : g.cands) if ((cand.at > 12 && cand.at < 16.5) || (cand.at > 26 && cand.at < 30.5)) ++hits;
         expect ("a side's level envelope: 20 levels a second, its best dips the two gaps", std::abs ((double) env.levels().size() - 800) <= 1 && hits == 2,
                 "(%.0f levels, %.0f candidates)", (double) env.levels().size(), (double) g.cands.size());
+        // recording a side: quarter-second batches of a lead-in, four songs with short gaps, the run-out
+        auto run = [] (double floorDb, double musicDb, double seconds, double gapLen)
+        {
+            vs::restore::RunoutWatch q (seconds, 20);
+            double t = 0, stopAt = -1;
+            unsigned rnd = 1;
+            auto r = [&] { rnd = rnd * 1664525u + 1013904223u; return rnd / 4294967296.0 - 0.5; };
+            auto feed = [&] (double db) { t += 0.25; if (q.push (db + 2 * r(), 0.25) && stopAt < 0) stopAt = t; };
+            for (int i = 0; i < 8; ++i) feed (floorDb);
+            for (int song = 0; song < 4; ++song)
+            {
+                for (int i = 0; i < 160; ++i) feed (musicDb + 4 * std::sin (i / 3.0));
+                if (song < 3) for (int i = 0; i < (int) (4 * gapLen); ++i) feed (floorDb);
+            }
+            const double end = t;
+            for (int i = 0; i < 120; ++i) feed (floorDb + 1);
+            return std::pair<double, double> { stopAt, end };
+        };
+        const auto lp = run (-55, -16, 15, 3), hiss78 = run (-34, -15, 15, 3), long12 = run (-52, -18, 15, 12);
+        expect ("recording stops by itself 15 s into the run-out, hissy 78 too, never in a 12 s gap",
+                lp.first > 0 && std::abs (lp.first - lp.second - 15) < 2.5 && hiss78.first > hiss78.second && long12.first > long12.second,
+                "(LP %.2f s after the music)", lp.first - lp.second);
+        vs::restore::RunoutWatch silent (5, 20);
+        bool stopped = false;
+        for (int i = 0; i < 240; ++i) stopped = silent.push (-140, 0.25) || stopped;
+        expect ("and not before there has been music", ! stopped, "");
         expect ("an export over -0.1 dBFS is brought down to it, under it left alone",
                 std::abs (20 * std::log10 (vs::restore::exportGain (1.0)) - (-1.1)) < 1e-9 && vs::restore::exportGain (-3) == 1.0, "");
     }

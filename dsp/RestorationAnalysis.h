@@ -1003,6 +1003,54 @@ namespace vs
             std::vector<float> out;
         };
 
+        // Recording a side: is it over (the run-out groove, or the tape running on)?
+        // Fed the level (dB) of each short batch while recording, and its length. Says
+        // it's over once the last `seconds` have all sat down at the side's own noise
+        // floor (the quietest it has been, from a half-dB histogram), well under its
+        // music, or in digital silence, and only after `minMusic` seconds of music.
+        // Judged against the side itself, so a hissy 78 or a humming transfer stops as
+        // surely as a quiet LP.
+        class RunoutWatch
+        {
+        public:
+            RunoutWatch (double seconds = 15, double minMusic = 20) : wantQuiet (seconds), wantMusic (minMusic) {}
+
+            // The next batch's level and length; true once the side is over.
+            bool push (double db, double sec)
+            {
+                ++hist[(size_t) std::max (0, std::min ((int) hist.size() - 1, (int) roundUp ((db + 120) * 2)))];
+                ++count;
+                recent.push_back (db);
+                if (recent.size() > 8) recent.erase (recent.begin());
+                std::vector<double> sorted (recent);
+                std::sort (sorted.begin(), sorted.end());
+                const double med = sorted[sorted.size() >> 1];
+                const double floor = percentile (0.03), ref = percentile (0.95), range = ref - floor;
+                if (range >= 12 && med > floor + 0.5 * range) music += sec;
+                const bool quiet = med < -90 || (range >= 12 && med < floor + std::max (3.0, 0.25 * range));
+                quietFor = quiet ? quietFor + sec : 0;
+                return music >= wantMusic && quietFor >= wantQuiet;
+            }
+
+        private:
+            double wantQuiet, wantMusic, music = 0, quietFor = 0;
+            std::vector<unsigned> hist = std::vector<unsigned> (240, 0);   // -120..0 dBFS in half dB
+            long count = 0;
+            std::vector<double> recent;
+
+            double percentile (double p) const
+            {
+                const long want = std::max (1L, (long) std::ceil ((double) count * p));
+                long acc = 0;
+                for (size_t i = 0; i < hist.size(); ++i)
+                {
+                    acc += hist[i];
+                    if (acc >= want) return -120 + (double) i * 0.5;
+                }
+                return 0;
+            }
+        };
+
         struct GapCandidate { double start, end, at, min, depth, score; };
         struct Gaps { std::vector<GapCandidate> cands; double musicStart = 0, musicEnd = 0, seconds = 0, floor = -120, music = -120; };
 
