@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "dsp/Ensemble.h"
 #include "dsp/Instruments.h"
 
 namespace
@@ -312,7 +313,7 @@ namespace
         expect ("a velocity picks its layer", std::abs (q / l - want) < 0.01, "%.4f (%.4f)", q / l, want);
         // the recording is 0.125 s; its loop (1000 to 5800) keeps the note at its level
         expect ("a looped zone keeps sounding past its recording's length", std::abs (rms (ll, 0.3, 0.5) / rms (ll, 0.05, 0.1) - 1.0) < 0.02, "%.3f", rms (ll, 0.3, 0.5) / rms (ll, 0.05, 0.1));
-        expect ("a zone at the centre plays the same on both sides", ql == qr);
+        expect ("a zone at the centre plays the same on both sides, 3 dB down", ql == qr && std::abs (rms (ql, 0.1, 0.5) / (0.62 * 0.5 * std::pow (50.0 / 127, 1.7) * std::sqrt (0.5) * std::sqrt (0.5)) - 1.0) < 0.02);
 
         const auto [hl, hr] = play (s, 72, 0.8f, 1.0, 0.0);
         expect ("a zone panned hard left is silent on the right", rms (hl, 0.0, 0.2) > 0.1 && rms (hr, 0.0, 1.0) == 0.0);
@@ -367,6 +368,55 @@ namespace
         const auto [rl, rr] = play (s, 60, 100.0f / 127, 0.3, 0.5);
         expect ("a released note fades over its release, then stops", rms (rl, 0.32, 0.34) > rms (rl, 0.45, 0.47) && rms (rl, 0.7, 0.8) == 0.0);
     }
+
+    // ---- a score played by its instruments
+
+    void ensemble()
+    {
+        auto notesOf = [] (int part, int inst)
+        {
+            std::vector<vs::Ensemble::Note> v;
+            for (int k = 0; k < 4; ++k)
+            {
+                vs::Ensemble::Note n;
+                n.time = 0.5 * k; n.dur = 0.45; n.midi = 60 + 2 * k; n.velocity = 90; n.part = part; n.instrument = inst;
+                v.push_back (n);
+            }
+            return v;
+        };
+        vs::Ensemble e;
+        e.prepare (fs);
+        const int piano = e.addSynth ("piano"), strings = e.addSynth ("strings");
+        expect ("an unknown family is no instrument", e.addSynth ("kazoo") == -1);
+        e.setParts ({ { 0.8f, -0.5f }, { 0.8f, 0.5f } });
+        auto notes = notesOf (0, piano);
+        for (auto n : notesOf (1, strings)) notes.push_back (n);
+        auto [l, r] = e.render (notes);
+        const double end = 1.5 + 0.45;
+        expect ("a score is its notes, then the tail", l.size() == (size_t) std::ceil ((end + vs::Ensemble::tailSeconds) * fs), "%.0f frames", (double) l.size());
+        float peak = 0;
+        for (size_t i = 0; i < l.size(); ++i) peak = std::max (peak, std::max (std::abs (l[i]), std::abs (r[i])));
+        expect ("brought to -1 dB sample peak", std::abs (20 * std::log10 (peak) + 1.0) < 1e-3, "%.4f dB", 20 * std::log10 (peak));
+        expect ("nothing before the lead-in", rms (l, 0.0, 0.04) == 0.0 && rms (l, 0.06, 0.2) > 0.0);
+        expect ("the hall rings on after the last note", rms (l, end + 0.05 + 0.4, end + 0.05 + 0.6) > 1e-4, "%.2e", rms (l, end + 0.45, end + 0.65));
+        // the piano panned left, the strings right: each louder on its side
+        auto [pl, pr] = e.render (notes, false, { 0 });
+        auto [sl, sr] = e.render (notes, false, { 1 });
+        expect ("a part's stem leaves the others out, and sits where its part is panned", rms (pl, 0.1, 1.9) > 2 * rms (pr, 0.1, 1.9) && rms (sr, 0.1, 1.9) > 2 * rms (sl, 0.1, 1.9));
+
+        // a recorded instrument whose recordings haven't come plays its family's synth sound
+        vs::Ensemble a, b;
+        a.prepare (fs);
+        b.prepare (fs);
+        const int rec = a.addRecorded (manifest, [] (int) { return std::shared_ptr<const std::vector<float>> {}; }, 0.0, "strings");
+        const int syn = b.addSynth ("strings");
+        a.setParts ({ {} });
+        b.setParts ({ {} });
+        auto [al, ar] = a.render (notesOf (0, rec), false);
+        auto [bl, br] = b.render (notesOf (0, syn), false);
+        expect ("a recorded instrument plays its synth sound until its recordings come", rec == 0 && al == bl && rms (al, 0.1, 1.0) > 0.01);
+        expect ("a manifest it can't read is no instrument", a.addRecorded ("{}", nullptr, 0.0, "strings") == -1);
+    }
 }
 
 int main()
@@ -377,6 +427,7 @@ int main()
     expression();
     families();
     recorded();
+    ensemble();
     std::printf ("%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
     return failures == 0 ? 0 : 1;
 }

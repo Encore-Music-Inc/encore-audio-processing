@@ -165,7 +165,7 @@ def rule(op, name):
     if op == "levels":
         return {"rms": "level", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
     if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument",
-              "gain-track", "live-route", "rumble", "pad-loop", "soft-clip"):
+              "gain-track", "live-route", "rumble", "pad-loop", "soft-clip", "ensemble"):
         if op == "vocoder" and last == "peak":
             return "vocoder-peak"
         if last in ("sum", "peak", "lufs"):
@@ -728,6 +728,26 @@ case("pads/loop/pile-up", "pad-loop", HIT, pads=[36, 0, 0, 0, 0, 1, 0, 0, 0], hi
 case("pads/soft-clip/song", "soft-clip", SONG, gain=2.5)
 case("pads/trim-start/hit", "trim-start", signal(48000, 0.5, 2, tone(0, 0.0004), noise(502, 0.3, 0.1, decay=9, **{"from": 0.1})), thresholds=[-20, -40, -60], lead=0.0005)
 case("pads/timing", "loop-timing", None, bpm=127, loopBeats=8, times=[0, 0.3, 1.234, 3.9, 7.5, 11.11], beats=[0, 0.5, 1.75, 3, 7.9], **{"from": 3.1, "to": 9.7})
+
+# ---- a score played by its instruments (in_ensemble_*): two synth sounds and a recorded instrument whose one
+# recording is the input (two velocity layers of it, a loop, a slurred note, a glide, a swell, a muted note,
+# pizzicato on the synth), three parts across the stereo field, through the hall and the compressor
+NOTE = signal(48000, 0.5, 1, voiced(220, 0.5, [1, 0.4, 0.2], attack=0.005, decay=14))
+MANIFEST = {"v": 1, "gain": 1, "zones": [
+    {"lo": 0, "hi": 127, "vlo": 1, "vhi": 80, "s": 0, "root": 57, "tune": 0, "scale": 100, "gain": 0.6, "pan": -0.3, "fc": 4000, "q": 3, "mode": 1, "excl": 0,
+     "ls": 0, "le": 0, "env": {"delay": 0, "attack": 0.004, "hold": 0.05, "decay": 1.2, "sustain": 0.4, "release": 0.3}},
+    {"lo": 0, "hi": 127, "vlo": 81, "vhi": 127, "s": 0, "root": 57, "tune": 5, "scale": 100, "gain": 1, "pan": 0.3, "fc": 0, "q": 0, "mode": 1, "excl": 0,
+     "ls": 0, "le": 0, "env": {"delay": 0.01, "attack": 0.02, "hold": 0, "decay": 0, "sustain": 1, "release": 0.2}}],
+    "samples": [{"c": 0, "o": 0, "n": 1, "rate": 48000, "ls": 12000, "le": 21600}], "chunks": [{"file": "x", "bytes": 1}]}
+# each note: time, dur, midi, velocity, swell's end, part, instrument, flags (1 slurred, 2 muted), technique, glide's note, where it starts
+SCORE = [0.0, 0.6, 60, 90, 0, 0, 0, 0, 0, -1, 0.35,   0.5, 0.5, 64, 70, 0, 0, 0, 1, 0, -1, 0.35,   0.0, 1.5, 48, 60, 110, 1, 1, 0, 0, -1, 0.35,
+         0.2, 0.8, 57, 50, 0, 2, 2, 0, 0, 62, 0.4,   1.0, 0.6, 69, 110, 0, 2, 2, 0, 0, -1, 0.35,   1.2, 0.4, 67, 90, 0, 1, 1, 2, 1, -1, 0.35,
+         1.4, 0.3, 72, 80, 0, 0, 0, 0, 3, -1, 0.35]
+case("ensemble/score", "ensemble", NOTE, parts=[0.8, -0.5, 0.7, 0.0, 0.9, 0.5], synths=["piano", "strings"], manifest=json.dumps(MANIFEST), trimDb=-2, family="strings",
+     notes=SCORE, normalize=1)
+case("ensemble/stem", "ensemble", NOTE, parts=[0.8, -0.5, 0.7, 0.0, 0.9, 0.5], synths=["piano", "strings"], manifest=json.dumps(MANIFEST), trimDb=-2, family="strings",
+     notes=SCORE, normalize=0, only=[2])
+
 
 
 # ---- writing

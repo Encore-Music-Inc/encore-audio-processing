@@ -146,6 +146,7 @@ The headers, by area (each header's top comment says more):
 | | `NoteExpression.h` | how a score plays one note (gain, brightness, a slur, a glide, a swell), for the synth and the sampler |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
+| | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library (written by `tools/scales.py`) |
 | | `ChordTypes.h` | the chord types (written by `tools/chords.py`) |
@@ -164,7 +165,7 @@ own (`pr_*`), `api_pitch.cpp` pitch (`pi_*`), `api_tuner.cpp` the tuner
 (`tp_*`), `api_rhythm.cpp` rhythm and the beat grid's meters (`rh_*`),
 `api_sound.cpp` sounds and the metronome's settings (`sd_*`), `api_music.cpp`
 music vocabulary and note editing (`mu_*`), `api_effects.cpp` the effects
-(`fx_*`), `api_instruments.cpp` the synth and the sampler (`in_*`),
+(`fx_*`), `api_instruments.cpp` the synth, the sampler and a score played by its instruments (`in_*`),
 `api_theory.cpp` the chord and scale theory (`th_*`), `api_restore.cpp` the restoration of record
 and tape transfers (`rs_*`), `api_live.cpp` live recordings (`lv_*`). The lists
 (scales, tunings, presets, chord types) are `data/*.json`

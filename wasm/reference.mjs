@@ -30,6 +30,7 @@ const f32 = (p, n) => new Float32Array(X.memory.buffer, p, n);
 const f64 = (p, n) => new Float64Array(X.memory.buffer, p, n);
 const i32 = (p, n) => new Int32Array(X.memory.buffer, p, n);
 const text = (s) => { const b = Buffer.from(s + '\0'); const p = X.malloc(b.length); new Uint8Array(X.memory.buffer, p, b.length).set(b); return p; };
+const withText = (s, f) => { const p = text(s); try { return f(p); } finally { X.free(p); } };
 const cstr = (p) => { const u = new Uint8Array(X.memory.buffer); let e = p; while (u[e]) e++; return Buffer.from(u.subarray(p, e)).toString(); };
 
 // ---- inputs (the fields in dsp/ReferenceSignals.h's order)
@@ -221,6 +222,29 @@ function runMore(c, sig, out) {
       const len = X.in_sampler_render_loop(h, np, bp, vp, m, c.bpm ?? 120, c.loopBeats ?? 4, fs, c.tail ?? 3, c.busGain ?? 0.85);
       fingerprintAudio(out, '', [f32(X.in_sampler_loop_left(h), len).slice(), f32(X.in_sampler_loop_right(h), len).slice()], fs);
       X.free(np); X.free(bp); X.free(vp); X.in_sampler_destroy(h);
+      return true;
+    }
+    case 'ensemble': {
+      const h = X.in_ensemble_create(fs);
+      for (const f of c.synths || []) withText(f, (fp) => X.in_ensemble_add_synth(h, fp));
+      f32(X.in_ensemble_recording(h, 0, n), n).set(sig.l);
+      withText(c.family, (fp) => withText(c.manifest, (mp) => X.in_ensemble_add_recorded(h, mp, c.trimDb ?? 0, fp)));
+      const pv = nums('parts'), np = pv.length / 2, vp = X.malloc(4 * np + 4), pp = X.malloc(4 * np + 4);
+      for (let k = 0; k < np; k++) { f32(vp, np)[k] = pv[2 * k]; f32(pp, np)[k] = pv[2 * k + 1]; }
+      X.in_ensemble_parts(h, np, vp, pp);
+      const nv = nums('notes'), m = nv.length / 11, only = c.only || [];
+      const T = X.malloc(8 * m + 8), Dd = X.malloc(8 * m + 8), M = X.malloc(4 * m + 4), V = X.malloc(4 * m + 4), VE = X.malloc(4 * m + 4), P = X.malloc(4 * m + 4),
+        I = X.malloc(4 * m + 4), F = X.malloc(4 * m + 4), TE = X.malloc(4 * m + 4), B = X.malloc(4 * m + 4), BA = X.malloc(4 * m + 4), O = X.malloc(4 * only.length + 4);
+      for (let k = 0; k < m; k++) {
+        const r = nv.slice(11 * k, 11 * k + 11);
+        f64(T, m)[k] = r[0]; f64(Dd, m)[k] = r[1]; i32(M, m)[k] = r[2]; f32(V, m)[k] = r[3]; f32(VE, m)[k] = r[4]; i32(P, m)[k] = r[5]; i32(I, m)[k] = r[6];
+        i32(F, m)[k] = r[7]; i32(TE, m)[k] = r[8]; i32(B, m)[k] = r[9]; f32(BA, m)[k] = r[10];
+      }
+      only.forEach((x, k) => { i32(O, only.length)[k] = x; });
+      const len = X.in_ensemble_render(h, m, T, Dd, M, V, VE, P, I, F, TE, B, BA, c.normalize ?? 1, only.length, O);
+      fingerprintAudio(out, '', [f32(X.in_ensemble_left(h), len).slice(), f32(X.in_ensemble_right(h), len).slice()], fs);
+      for (const q of [vp, pp, T, Dd, M, V, VE, P, I, F, TE, B, BA, O]) X.free(q);
+      X.in_ensemble_destroy(h);
       return true;
     }
     case 'soft-clip': {

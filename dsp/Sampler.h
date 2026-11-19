@@ -19,8 +19,9 @@
 // softer notes close, and an exclusive group. A note plays the zones its key
 // and velocity fall in (the nearest velocity layer if none does; the nearest
 // key's zones for a note out of the recorded range), each through its
-// envelope and filter, with the note's expression (NoteExpression.h). A zone at
-// the centre plays the same on both sides; panned, by the equal-power law.
+// envelope and filter, with the note's expression (NoteExpression.h), panned by
+// the equal-power law (a mono recording at the centre 3 dB down each side, as
+// it sits in a mix; one panned hard to a side at full level there).
 //
 //     Sampler s; s.prepare (fs); s.addSound (sound);
 //     s.noteOn (36, 1.0f); ... s.render (l, r, n) (adds into l and r);
@@ -313,10 +314,10 @@ namespace vs
                                                         std::pow (10.0, (z.lowPassQDb != 0.0 ? z.lowPassQDb : 0.0001) / 20.0));
                     lp.c = BiquadCoefs::make (k.b0, k.b1, k.b2, k.a0, k.a1, k.a2);
                 }
-                // at the centre, the same on both sides; panned, the equal-power law
-                const double p = std::clamp ((double) sound->pan, -1.0, 1.0);
-                if (p == 0.0) gainL = gainR = 1.0f;
-                else { const double x = (p + 1.0) * 0.25 * 3.141592653589793; gainL = (float) std::cos (x); gainR = (float) std::sin (x); }
+                // the equal-power law
+                const auto pg = mix::panGains (1.0f, std::clamp (sound->pan, -1.0f, 1.0f), mix::PanLaw::centre3dB);
+                gainL = pg.left;
+                gainR = pg.right;
             }
 
             // The zone's level t seconds into the note

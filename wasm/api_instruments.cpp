@@ -1,11 +1,16 @@
-// The browser's instruments (in_*): the synth and the sampler. Plain C
+// The browser's instruments (in_*): the synth, the sampler and a score played
+// by its instruments (the ensemble). Plain C
 // functions; notes go in as calls (in_synth_note_on (h, note, velocity)) at
 // the block they start in, and in_<instrument>_render (h, n) writes n samples
 // into its own left and right buffers (up to maxBlock).
 // Built with the other wasm/api_*.cpp files into master.wasm by wasm/build.sh.
 #include <emscripten/emscripten.h>
 #include <algorithm>
+#include <map>
+#include <memory>
+#include <string>
 #include <vector>
+#include "dsp/Ensemble.h"
 #include "dsp/Sampler.h"
 #include "dsp/Synth.h"
 
@@ -13,6 +18,12 @@ namespace
 {
     struct SynthIn { vs::Synth s; std::vector<float> l, r; };
     struct SamplerIn { vs::Sampler s; std::vector<float> l, r, loadL, loadR, loopL, loopR; };
+    struct EnsembleIn
+    {
+        vs::Ensemble e;
+        std::map<int, std::shared_ptr<std::vector<float>>> staged;   // a recorded instrument's recordings, by sample
+        std::vector<float> l, r;
+    };
     template <typename T> T* as (void* p) { return static_cast<T*> (p); }
 }
 
@@ -160,4 +171,65 @@ extern "C"
     }
     EMSCRIPTEN_KEEPALIVE const float* in_sampler_loop_left (void* p) { return as<SamplerIn> (p)->loopL.data(); }
     EMSCRIPTEN_KEEPALIVE const float* in_sampler_loop_right (void* p) { return as<SamplerIn> (p)->loopR.data(); }
+
+    // ---- a score played by its instruments (vs::Ensemble)
+    EMSCRIPTEN_KEEPALIVE void* in_ensemble_create (double fs)
+    {
+        auto* x = new EnsembleIn;
+        x->e.prepare (fs);
+        return x;
+    }
+    EMSCRIPTEN_KEEPALIVE void in_ensemble_destroy (void* p) { delete as<EnsembleIn> (p); }
+    // a family's synth sound (Instruments.h); returns the instrument, or -1
+    EMSCRIPTEN_KEEPALIVE int in_ensemble_add_synth (void* p, const char* family) { return as<EnsembleIn> (p)->e.addSynth (family); }
+    // n samples of a recorded instrument's recording (by its manifest's sample index), to fill before in_ensemble_add_recorded
+    EMSCRIPTEN_KEEPALIVE float* in_ensemble_recording (void* p, int sample, int n)
+    {
+        auto v = std::make_shared<std::vector<float>> ((size_t) std::max (0, n), 0.0f);
+        as<EnsembleIn> (p)->staged[sample] = v;
+        return v->data();
+    }
+    // a recorded instrument from its manifest (JSON text) and the recordings filled in so far, at trimDb, with the
+    // family's synth sound for notes those can't play; returns the instrument, or -1
+    EMSCRIPTEN_KEEPALIVE int in_ensemble_add_recorded (void* p, const char* manifest, double trimDb, const char* family)
+    {
+        auto* x = as<EnsembleIn> (p);
+        auto have = std::make_shared<std::map<int, std::shared_ptr<std::vector<float>>>> (std::move (x->staged));
+        x->staged.clear();
+        return x->e.addRecorded (manifest, [have] (int i) -> std::shared_ptr<const std::vector<float>> {
+            const auto it = have->find (i);
+            return it == have->end() ? nullptr : it->second;
+        }, trimDb, family);
+    }
+    // the parts: count volumes (0.8: as recorded) and pans (-1 .. 1)
+    EMSCRIPTEN_KEEPALIVE void in_ensemble_parts (void* p, int count, const float* volumes, const float* pans)
+    {
+        std::vector<vs::Ensemble::Part> parts;
+        for (int i = 0; i < count; ++i) parts.push_back ({ volumes[i], pans[i] });
+        as<EnsembleIn> (p)->e.setParts (std::move (parts));
+    }
+    // count notes (times and durations in seconds, MIDI notes, velocities 1..127 and where a swell ends (0: none),
+    // parts, instruments, flags: 1 slurred, 2 muted; techniques: 0 none, 1 pizz, 2 harmonic, 3 bright, 4 dark;
+    // a glide's note (-1: none) and where it starts) rendered at once; normalize: to -1 dB sample peak; onlyCount
+    // parts in only (0: every part). Returns the frames, then at in_ensemble_left / _right.
+    EMSCRIPTEN_KEEPALIVE int in_ensemble_render (void* p, int count, const double* times, const double* durs, const int* midis, const float* vels,
+                                                 const float* velEnds, const int* parts, const int* insts, const int* flags, const int* techs,
+                                                 const int* bendTos, const float* bendAts, int normalize, int onlyCount, const int* only)
+    {
+        auto* x = as<EnsembleIn> (p);
+        std::vector<vs::Ensemble::Note> notes ((size_t) std::max (0, count));
+        for (int i = 0; i < count; ++i)
+        {
+            auto& n = notes[(size_t) i];
+            n.time = times[i]; n.dur = durs[i]; n.midi = midis[i]; n.velocity = vels[i]; n.velocityEnd = velEnds[i];
+            n.part = parts[i]; n.instrument = insts[i]; n.slurred = (flags[i] & 1) != 0; n.muted = (flags[i] & 2) != 0;
+            n.technique = (vs::Ensemble::Technique) std::clamp (techs[i], 0, 4); n.bendTo = bendTos[i]; n.bendAt = bendAts[i];
+        }
+        auto [l, r] = x->e.render (std::move (notes), normalize != 0, std::vector<int> (only, only + std::max (0, onlyCount)));
+        x->l = std::move (l);
+        x->r = std::move (r);
+        return (int) x->l.size();
+    }
+    EMSCRIPTEN_KEEPALIVE const float* in_ensemble_left (void* p) { return as<EnsembleIn> (p)->l.data(); }
+    EMSCRIPTEN_KEEPALIVE const float* in_ensemble_right (void* p) { return as<EnsembleIn> (p)->r.data(); }
 }

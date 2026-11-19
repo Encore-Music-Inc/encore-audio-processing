@@ -29,6 +29,7 @@
 #include "dsp/AbCompare.h"
 #include "dsp/Chorus.h"
 #include "dsp/Phaser.h"
+#include "dsp/Ensemble.h"
 #include "dsp/Sampler.h"
 #include "dsp/Synth.h"
 #include "dsp/TimeStretch.h"
@@ -508,6 +509,34 @@ namespace
             std::vector<vs::sampler::LoopHit> loopHits;
             for (size_t k = 0; k + 2 < hits.size(); k += 3) loopHits.push_back ({ (int) hits[k], hits[k + 1], (float) hits[k + 2] });
             auto [L, R] = vs::sampler::renderLoop (smp, loopHits, c.get ("bpm", 120), c.get ("loopBeats", 4), fs, c.get ("tail", 3), (float) c.get ("busGain", 0.85));
+            fingerprintAudio (out, "", { L, R }, fs);
+            return true;
+        }
+        if (op == "ensemble")
+        {
+            // a score: parts [volume, pan], synth sounds, a recorded instrument (its one recording the input), notes of 11 numbers each
+            vs::Ensemble e;
+            e.prepare (fs);
+            if (const auto* syn = c.find ("synths")) for (const auto& f : syn->items) e.addSynth (f.str);
+            const auto rec = std::make_shared<const std::vector<float>> (in->l);
+            e.addRecorded (c.text ("manifest"), [rec] (int i) -> std::shared_ptr<const std::vector<float>> { return i == 0 ? rec : nullptr; }, c.get ("trimDb", 0), c.text ("family"));
+            const auto pv = nums (c, "parts");
+            std::vector<vs::Ensemble::Part> parts;
+            for (size_t k = 0; k + 1 < pv.size(); k += 2) parts.push_back ({ (float) pv[k], (float) pv[k + 1] });
+            e.setParts (parts);
+            const auto nv = nums (c, "notes");
+            std::vector<vs::Ensemble::Note> notes;
+            for (size_t k = 0; k + 10 < nv.size(); k += 11)
+            {
+                vs::Ensemble::Note n;
+                n.time = nv[k]; n.dur = nv[k + 1]; n.midi = (int) nv[k + 2]; n.velocity = (float) nv[k + 3]; n.velocityEnd = (float) nv[k + 4];
+                n.part = (int) nv[k + 5]; n.instrument = (int) nv[k + 6]; n.slurred = ((int) nv[k + 7] & 1) != 0; n.muted = ((int) nv[k + 7] & 2) != 0;
+                n.technique = (vs::Ensemble::Technique) (int) nv[k + 8]; n.bendTo = (int) nv[k + 9]; n.bendAt = (float) nv[k + 10];
+                notes.push_back (n);
+            }
+            std::vector<int> only;
+            for (double x : nums (c, "only")) only.push_back ((int) x);
+            auto [L, R] = e.render (notes, c.get ("normalize", 1) != 0, only);
             fingerprintAudio (out, "", { L, R }, fs);
             return true;
         }

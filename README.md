@@ -129,6 +129,7 @@ CI fails if either differs from what the script writes.
 | | `NoteExpression.h` | how a score plays one note (gain, brightness, a slur, a glide, a swell) |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
+| | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library |
 | | `ChordTypes.h` | the chord types: formulas, symbols, numerals, families, the picker's groups |
@@ -149,7 +150,7 @@ CI fails if either differs from what the script writes.
 | `wasm/api_measure.cpp` | `ms_` | true peak, the loudness report, the analysis, spectrum, waveforms, meters on screen, the band that tames a resonance |
 | `wasm/api_processing.cpp` | `pr_` | resampling, delays, dither, channel work, gains, device simulation, the vocal EQ, "hear the original", DSD to PCM, the true-peak limiter on its own, an MP3's sample rate |
 | `wasm/api_effects.cpp` | `fx_` | the chorus, phaser, filter, pitch shifter, time stretch, compressor, delay and reverb, and the send law |
-| `wasm/api_instruments.cpp` | `in_` | the synth and the sampler |
+| `wasm/api_instruments.cpp` | `in_` | the synth, the sampler and a score played by its instruments |
 | `wasm/api_pitch.cpp` | `pi_` | voice pitch and its measurements, played notes, drum tuning |
 | `wasm/api_tuner.cpp` | `tp_` | the tuner, the block averaging before a reading, and following its readings |
 | `wasm/api_rhythm.cpp` | `rh_` | tempo, onsets, timing, the beat grid's meters (groupings, accents, note values, subdivisions, tempo names) |
