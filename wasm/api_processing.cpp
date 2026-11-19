@@ -436,8 +436,8 @@ extern "C"
     }
 
     // ---- where a sound first gets loud: the first sample, in any channel, at thresholdDb under the loudest or more
-    EMSCRIPTEN_KEEPALIVE int pr_onset_index (const float* const* chans, int numCh, int n, double thresholdDb)
+    EMSCRIPTEN_KEEPALIVE double pr_trim_start (const float* const* chans, int numCh, int n, double fs, double thresholdDb, double leadSeconds)
     {
-        return vs::channels::onsetIndex (chans, numCh, n, std::pow (10.0, thresholdDb / 20.0));
+        return vs::channels::trimStart (chans, numCh, n, fs, std::pow (10.0, thresholdDb / 20.0), leadSeconds);
     }
 }

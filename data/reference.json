@@ -5327,10 +5327,10 @@
       "peak": [0.9999480247497559, "proc-peak"],
       "lufs": [-7.657321929931641, "proc-lufs"]
     }},
-    {"id": "pads/onset/hit", "op": "onset", "thresholds": [-20, -40, -60], "input": {"rate": 48000, "seconds": 0.5, "channels": 2, "parts": [{"type": "tone", "hz": 0, "l": 0.0004, "r": 0.0004}, {"type": "noise", "seed": 502, "l": 0.3, "r": 0.1, "decay": 9, "from": 0.1}]}, "inputHash": "ead2b8ee", "results": {
-      "at20": [4801, "exact"],
-      "at40": [4800, "exact"],
-      "at60": [4800, "exact"]
+    {"id": "pads/trim-start/hit", "op": "trim-start", "thresholds": [-20, -40, -60], "lead": 0.0005, "input": {"rate": 48000, "seconds": 0.5, "channels": 2, "parts": [{"type": "tone", "hz": 0, "l": 0.0004, "r": 0.0004}, {"type": "noise", "seed": 502, "l": 0.3, "r": 0.1, "decay": 9, "from": 0.1}]}, "inputHash": "ead2b8ee", "results": {
+      "at20": [0.09952083333333334, "exact"],
+      "at40": [0.0995, "exact"],
+      "at60": [0.0995, "exact"]
     }},
     {"id": "pads/timing", "op": "loop-timing", "bpm": 127, "loopBeats": 8, "times": [0, 0.3, 1.234, 3.9, 7.5, 11.11], "beats": [0, 0.5, 1.75, 3, 7.9], "from": 3.1, "to": 9.7, "results": {
       "beatAt0": [7.470833333333333, "seconds"],

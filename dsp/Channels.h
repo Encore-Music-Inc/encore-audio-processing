@@ -359,6 +359,16 @@ namespace vs
             return first;
         }
 
+        // Where a recorded hit should start (seconds): its onset at `fraction`
+        // of the peak, less `leadSeconds` so the front of the attack is kept
+        // (never before the start). 0 for silence.
+        inline double trimStart (const float* const* ch, int numCh, int n, double fs, double fraction, double leadSeconds)
+        {
+            const int first = onsetIndex (ch, numCh, n, fraction);
+            if (first >= n) return 0.0;
+            return std::max (0, first - (int) std::lround (leadSeconds * fs)) / fs;
+        }
+
         // A sound from where it first gets loud (0.3 of its peak), keeping
         // the two samples before: a synthesized hit lands right on its time.
         inline std::vector<float> fromOnset (const std::vector<float>& x)

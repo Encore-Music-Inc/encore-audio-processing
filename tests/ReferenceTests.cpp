@@ -519,12 +519,13 @@ namespace
             fingerprintAudio (out, "", ch, fs);
             return true;
         }
-        if (op == "onset")
+        if (op == "trim-start")
         {
             const Channels ch = copyOf (*in);
             const auto p = constPointers (ch);
             for (double db : nums (c, "thresholds"))
-                out.push_back ({ "at" + std::to_string ((int) -db), (double) vs::channels::onsetIndex (p.data(), (int) ch.size(), (int) n, std::pow (10.0, db / 20.0)) });
+                out.push_back ({ "at" + std::to_string ((int) -db),
+                                 vs::channels::trimStart (p.data(), (int) ch.size(), (int) n, fs, std::pow (10.0, db / 20.0), c.get ("lead", 0.0)) });
             return true;
         }
         if (op == "loop-timing")

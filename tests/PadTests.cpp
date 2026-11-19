@@ -169,6 +169,8 @@ namespace
         const std::vector<float> z (10, 0.0f);
         const float* zc[1] { z.data() };
         expect ("onset: silence starts at once", vs::channels::onsetIndex (zc, 1, 10, 0.3) == 0);
+        expect ("a hit trimmed to its onset less a lead-in, in seconds", vs::channels::trimStart (ch, 2, 1000, 1000.0, 0.1, 0.02) == 0.38
+                && vs::channels::trimStart (ch, 2, 1000, 1000.0, 0.01, 0.5) == 0.0 && vs::channels::trimStart (zc, 1, 10, 1000.0, 0.3, 0.001) == 0.0);
         std::vector<float> hit (20, 0.0f);
         hit[10] = 0.5f;
         expect ("a synthesized hit from its onset keeps the two samples before", vs::channels::fromOnset (hit).size() == 12);

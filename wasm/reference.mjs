@@ -230,9 +230,9 @@ function runMore(c, sig, out) {
       buf.free();
       return true;
     }
-    case 'onset': {
+    case 'trim-start': {
       const ch = channelsOf(sig), buf = alloc(ch);
-      for (const db of nums('thresholds')) out.push([`at${-db}`, X.pr_onset_index(buf.table, ch.length, n, db)]);
+      for (const db of nums('thresholds')) out.push([`at${-db}`, X.pr_trim_start(buf.table, ch.length, n, fs, db, c.lead ?? 0)]);
       buf.free();
       return true;
     }
