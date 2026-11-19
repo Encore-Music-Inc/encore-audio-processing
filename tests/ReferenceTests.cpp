@@ -54,6 +54,7 @@
 #include "dsp/Mastering.h"
 #include "dsp/Metronome.h"
 #include "dsp/Music.h"
+#include "dsp/NoteEdit.h"
 #include "dsp/Onsets.h"
 #include "dsp/PitchDetector.h"
 #include "dsp/ReferenceSignals.h"
@@ -482,6 +483,70 @@ namespace
     {
         const std::int64_t n = in != nullptr ? (std::int64_t) in->l.size() : 0;
         const bool stereo = in != nullptr && in->channels > 1;
+
+        // ---- a pad player
+        if (op == "pad-loop")
+        {
+            // pads: [note, start, end, fade, pitch, volume, pan, choke, retrigger], each playing the signal
+            vs::Sampler smp;
+            smp.prepare (fs);
+            smp.setVelocityCurve ((float) c.get ("velocityCurve", 1));
+            const auto pads = nums (c, "pads");
+            for (size_t k = 0; k + 8 < pads.size(); k += 9)
+            {
+                vs::Sampler::Sound snd;
+                snd.left = in->l;
+                if (stereo) snd.right = in->r;
+                snd.sampleRate = fs;
+                snd.rootNote = snd.lowNote = snd.highNote = (int) pads[k];
+                snd.startSeconds = pads[k + 1]; snd.endSeconds = pads[k + 2]; snd.fadeSeconds = pads[k + 3]; snd.pitchSemitones = pads[k + 4];
+                snd.gainDb = vs::ampToDb ((float) pads[k + 5], 0.0f); snd.pan = (float) pads[k + 6]; snd.choke = (int) pads[k + 7]; snd.retrigger = pads[k + 8] != 0;
+                snd.releaseSeconds = (float) c.get ("release", 0.005);
+                smp.addSound (std::move (snd));
+            }
+            const auto hits = nums (c, "hits");   // [note, beat, velocity] each
+            std::vector<vs::sampler::LoopHit> loopHits;
+            for (size_t k = 0; k + 2 < hits.size(); k += 3) loopHits.push_back ({ (int) hits[k], hits[k + 1], (float) hits[k + 2] });
+            auto [L, R] = vs::sampler::renderLoop (smp, loopHits, c.get ("bpm", 120), c.get ("loopBeats", 4), fs, c.get ("tail", 3), (float) c.get ("busGain", 0.85));
+            fingerprintAudio (out, "", { L, R }, fs);
+            return true;
+        }
+        if (op == "soft-clip")
+        {
+            auto ch = copyOf (*in);
+            const float gain = (float) c.get ("gain", 1);
+            for (auto& x : ch) for (auto& v : x) v = vs::softClip (v * gain, (float) c.get ("knee", 0.7));
+            fingerprintAudio (out, "", ch, fs);
+            return true;
+        }
+        if (op == "onset")
+        {
+            const Channels ch = copyOf (*in);
+            const auto p = constPointers (ch);
+            for (double db : nums (c, "thresholds"))
+                out.push_back ({ "at" + std::to_string ((int) -db), (double) vs::channels::onsetIndex (p.data(), (int) ch.size(), (int) n, std::pow (10.0, db / 20.0)) });
+            return true;
+        }
+        if (op == "loop-timing")
+        {
+            namespace lp = vs::noteedit::loop;
+            const double bpm = c.get ("bpm", 120), L = c.get ("loopBeats", 4);
+            const auto times = nums (c, "times");
+            for (size_t i = 0; i < times.size(); ++i)
+            {
+                out.push_back ({ "beatAt" + std::to_string (i), lp::beatAt (times[i], 0.25, bpm, L) });
+                for (int steps : { 2, 3, 4, 6 }) out.push_back ({ "snap" + std::to_string (steps) + "." + std::to_string (i), lp::snap (times[i], steps, L) });
+                out.push_back ({ "grid" + std::to_string (i), lp::nextGridTime (times[i], 0.1, 60.0 / bpm / 4) });
+            }
+            const auto beats = nums (c, "beats");
+            const auto due = lp::hitsBetween (beats.data(), nullptr, (int) beats.size(), c.get ("from", 0), c.get ("to", 4), 0.25, bpm, L);
+            out.push_back ({ "due", (double) due.size() });
+            for (size_t i = 0; i < due.size(); ++i) { out.push_back ({ "due" + std::to_string (i) + ".time", due[i].time }); out.push_back ({ "due" + std::to_string (i) + ".hit", (double) due[i].hit }); }
+            const auto clicks = lp::clicksBetween (c.get ("from", 0), c.get ("to", 4), 0.25, bpm, 4);
+            out.push_back ({ "clicks", (double) clicks.size() });
+            for (size_t i = 0; i < clicks.size(); ++i) { out.push_back ({ "click" + std::to_string (i) + ".time", clicks[i].time }); out.push_back ({ "click" + std::to_string (i) + ".down", clicks[i].down ? 1.0 : 0.0 }); }
+            return true;
+        }
 
         // ---- live recordings
         if (op == "live-set")

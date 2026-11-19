@@ -12,7 +12,7 @@
 namespace
 {
     struct SynthIn { vs::Synth s; std::vector<float> l, r; };
-    struct SamplerIn { vs::Sampler s; std::vector<float> l, r, loadL, loadR; };
+    struct SamplerIn { vs::Sampler s; std::vector<float> l, r, loadL, loadR, loopL, loopR; };
     template <typename T> T* as (void* p) { return static_cast<T*> (p); }
 }
 
@@ -125,4 +125,39 @@ extern "C"
         std::fill (x->r.begin(), x->r.begin() + n, 0.0f);
         x->s.render (x->l.data(), x->r.data(), n);
     }
+
+    // ---- a pad (a drum pad's sound): the region played (start, end seconds; end at or before start:
+    // to the recording's end), an end fade (seconds as heard), a tuning in semitones, its volume
+    // (linear gain), and whether a hit cuts its own earlier notes; it plays on `note` alone
+    EMSCRIPTEN_KEEPALIVE int in_sampler_add_pad (void* p, int stereo, double sampleRate, int note, float volume, float pan, int choke, int retrigger,
+                                                 double startSeconds, double endSeconds, double fadeSeconds, double pitchSemitones, float releaseSeconds)
+    {
+        auto* x = as<SamplerIn> (p);
+        vs::Sampler::Sound s;
+        s.left = std::move (x->loadL);
+        if (stereo) s.right = std::move (x->loadR);
+        x->loadL.clear(); x->loadR.clear();
+        s.sampleRate = sampleRate; s.rootNote = s.lowNote = s.highNote = note;
+        s.gainDb = vs::ampToDb (std::max (0.0f, volume), 0.0f); s.pan = pan; s.oneShot = true; s.choke = choke; s.retrigger = retrigger != 0;
+        s.startSeconds = startSeconds; s.endSeconds = endSeconds; s.fadeSeconds = fadeSeconds; s.pitchSemitones = pitchSemitones; s.releaseSeconds = releaseSeconds;
+        return x->s.addSound (std::move (s));
+    }
+    // velocity (0..1) to gain: velocity to the power `curve`
+    EMSCRIPTEN_KEEPALIVE void in_sampler_velocity_curve (void* p, float curve) { as<SamplerIn> (p)->s.setVelocityCurve (curve); }
+
+    // ---- a loop through the sampler (vs::sampler::renderLoop): count hits (notes, beats, velocities);
+    // returns the loop's length in frames, its left and right then at in_sampler_loop_left / _right
+    EMSCRIPTEN_KEEPALIVE int in_sampler_render_loop (void* p, const int* notes, const double* beats, const float* velocities, int count,
+                                                     double bpm, double loopBeats, double fs, double tailSeconds, float busGain)
+    {
+        auto* x = as<SamplerIn> (p);
+        std::vector<vs::sampler::LoopHit> hits;
+        for (int i = 0; i < count; ++i) hits.push_back ({ notes[i], beats[i], velocities[i] });
+        auto [l, r] = vs::sampler::renderLoop (x->s, std::move (hits), bpm, loopBeats, fs, tailSeconds, busGain);
+        x->loopL = std::move (l);
+        x->loopR = std::move (r);
+        return (int) x->loopL.size();
+    }
+    EMSCRIPTEN_KEEPALIVE const float* in_sampler_loop_left (void* p) { return as<SamplerIn> (p)->loopL.data(); }
+    EMSCRIPTEN_KEEPALIVE const float* in_sampler_loop_right (void* p) { return as<SamplerIn> (p)->loopR.data(); }
 }

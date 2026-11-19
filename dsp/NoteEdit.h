@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <vector>
 
 namespace vs
 {
@@ -51,5 +53,57 @@ namespace vs
             // A hit is a little shorter than its step, so hits on neighbouring steps never touch
             double hitLength() const { return grid * 0.9; }
         };
+
+        // A loop being played and recorded over and over (a pad player's loop
+        // recorder): positions are kept in beats, so changing the tempo keeps the
+        // groove; times are seconds on the player's clock, `start` being when
+        // beat 0 of the first pass is.
+        namespace loop
+        {
+            inline double wrap (double beat, double loopBeats) { return std::fmod (std::fmod (beat, loopBeats) + loopBeats, loopBeats); }
+
+            // Where a time falls in the loop, 0 to loopBeats
+            inline double beatAt (double time, double start, double bpm, double loopBeats) { return wrap ((time - start) * bpm / 60.0, loopBeats); }
+
+            // A beat snapped to the nearest 1/steps of a beat (0: left as it is), wrapping at the loop's end
+            inline double snap (double beat, int steps, double loopBeats) { return steps > 0 ? wrap (quantize (beat, 1.0 / steps), loopBeats) : beat; }
+
+            // A recorded hit's time in [from, to): which of the hits, and when, for every pass of the loop in that window
+            struct Due { double time; int hit; };
+
+            // beats: each hit's place; notBefore (may be null): a hit doesn't sound before this time (0: always)
+            inline std::vector<Due> hitsBetween (const double* beats, const double* notBefore, int count, double from, double to,
+                                                 double start, double bpm, double loopBeats)
+            {
+                std::vector<Due> out;
+                const double spb = 60.0 / bpm, len = loopBeats * spb;
+                if (to <= start) return out;
+                const double k0 = std::max (0.0, std::floor ((from - start) / len)), k1 = std::floor ((to - start) / len);
+                for (double k = k0; k <= k1; ++k)
+                    for (int h = 0; h < count; ++h)
+                    {
+                        const double t = start + k * len + beats[h] * spb;
+                        const double nb = notBefore != nullptr ? notBefore[h] : 0.0;
+                        if (t >= from && t < to && t >= start && ! (nb != 0.0 && ! std::isnan (nb) && t < nb)) out.push_back ({ t, h });
+                    }
+                std::stable_sort (out.begin(), out.end(), [] (const Due& a, const Due& b) { return a.time < b.time; });
+                return out;
+            }
+
+            // The beats' clicks in [from, to): when, which beat (counted from start), and whether it begins a bar
+            struct Click { double time; int beat; bool down; };
+
+            inline std::vector<Click> clicksBetween (double from, double to, double start, double bpm, int beatsPerBar = 4)
+            {
+                std::vector<Click> out;
+                const double spb = 60.0 / bpm;
+                for (auto b = (std::int64_t) std::ceil ((from - start) / spb - 1e-9); start + (double) b * spb < to; ++b)
+                    out.push_back ({ start + (double) b * spb, (int) b, ((b % beatsPerBar) + beatsPerBar) % beatsPerBar == 0 });
+                return out;
+            }
+
+            // The next time on a grid of `interval` seconds counted from `origin`, at or after t
+            inline double nextGridTime (double t, double origin, double interval) { return origin + std::ceil ((t - origin) / interval - 1e-9) * interval; }
+        }
     }
 }

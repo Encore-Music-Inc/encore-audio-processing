@@ -1,11 +1,23 @@
 #pragma once
 
+#include <cmath>
 #include "JuceInclude.h"
 #include "Oversampler.h"
 #include "Util.h"
 
 namespace vs
 {
+    // The safety curve on a bus where several sounds can pile up (a pad
+    // player's output): straight up to `knee`, then bending smoothly toward
+    // full scale (tanh over the last 1 - knee), so a pile-up never clips harshly.
+    inline float softClip (float x, float knee = 0.7f)
+    {
+        const float a = std::abs (x);
+        if (a < knee) return x;
+        const float room = 1.0f - knee;
+        return std::copysign (knee + room * std::tanh ((a - knee) / room), x);
+    }
+
     // Tube-ish preamp drive. Slightly asymmetric tanh (adds even harmonics),
     // run at 2x oversampling to keep the top end clean. Unity gain for quiet
     // signals, so turning it up adds grit without a big volume jump.

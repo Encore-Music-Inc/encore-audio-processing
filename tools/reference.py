@@ -130,6 +130,10 @@ def rule(op, name):
     stem = last.rstrip("0123456789")
     if op == "lpc":
         return "exact" if last == "orders" else "lpc"
+    if op == "onset":
+        return "exact"
+    if op == "loop-timing":
+        return "exact" if stem in ("due", "clicks", "hit", "down") else "seconds"
     if op == "live-set":
         return {"confidence": "restore-rounded", "level": "restore-tenth", "threshold": "ratio", "peak": "level"}.get(last, "exact")
     if op == "live-ride":
@@ -161,7 +165,7 @@ def rule(op, name):
     if op == "levels":
         return {"rms": "level", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
     if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument",
-              "gain-track", "live-route", "rumble"):
+              "gain-track", "live-route", "rumble", "pad-loop", "soft-clip"):
         if op == "vocoder" and last == "peak":
             return "vocoder-peak"
         if last in ("sum", "peak", "lufs"):
@@ -707,6 +711,23 @@ case("live/delay/song", "delay-between", SONG, lag=777)
 # the left clipped at full scale, the right well under it
 case("live/peaks/clipped", "peaks-overloads", signal(48000, 1, 2, tone(220, 1.2, 0.6), dict(type="clip", l=0.9995)))
 case("live/rumble/song", "rumble", SONG, hz=30)
+
+
+# ---- a pad player (in_sampler_* pads and loops, pr_soft_clip, pr_onset_index, mu_loop_*): a drum-like hit
+# played by three pads (a region with an end fade, retuned up, panned and choked), and a loop recorder's timing
+
+HIT = signal(48000, 0.6, 1, voiced(110, 0.6, [1, 0.5, 0.2], attack=0.002, decay=11, **{"from": 0.05}), noise(501, 0.2, highpass=1, decay=10, **{"from": 0.05}))
+PADS = [36, 0, 0, 0, 0, 1, 0, 0, 1,            # the whole hit, retriggering
+        38, 0.05, 0.3, 0.1, 7, 0.8, -0.5, 1, 0,  # a region, an end fade, up a fifth, left, choke group 1
+        42, 0.05, 0, 0.02, -5, 0.6, 0.6, 1, 0]   # down, right, cut by 38
+LOOP_HITS = [36, 0, 1, 38, 0.5, 0.7, 42, 1, 0.9, 36, 1.5, 0.5, 38, 2.25, 1, 36, 3, 1, 36, 3.5, 1, 42, 3.75, 0.3]
+for rate in (44100, 48000):
+    case(f"pads/loop/{rate // 1000}k", "pad-loop", dict(HIT, rate=rate), pads=PADS, hits=LOOP_HITS, bpm=127, loopBeats=4, velocityCurve=1.6, block=4096)
+# eight hits at once on a pad that doesn't cut itself: the safety curve holds the pile-up under full scale
+case("pads/loop/pile-up", "pad-loop", HIT, pads=[36, 0, 0, 0, 0, 1, 0, 0, 0], hits=[36, 0, 1] * 8, bpm=90, loopBeats=2, block=4096)
+case("pads/soft-clip/song", "soft-clip", SONG, gain=2.5)
+case("pads/onset/hit", "onset", signal(48000, 0.5, 2, tone(0, 0.0004), noise(502, 0.3, 0.1, decay=9, **{"from": 0.1})), thresholds=[-20, -40, -60])
+case("pads/timing", "loop-timing", None, bpm=127, loopBeats=8, times=[0, 0.3, 1.234, 3.9, 7.5, 11.11], beats=[0, 0.5, 1.75, 3, 7.9], **{"from": 3.1, "to": 9.7})
 
 
 # ---- writing

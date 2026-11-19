@@ -114,7 +114,7 @@ The headers, by area (each header's top comment says more):
 | Processing and mastering | `EqBand.h` | one band of a parametric EQ |
 | | `VocalEq.h` | the vocal EQ (low cut and four bands) |
 | | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider (and its slow form, a gain track for a whole recording) |
-| | `Saturator.h` | preamp drive |
+| | `Saturator.h` | preamp drive, and the safety curve on a bus where sounds pile up |
 | | `ReverbEngine.h`, `Space.h` | the reverb, and the delay (the vocal delay and reverb send) |
 | | `Chorus.h`, `Phaser.h` | the chorus and the phaser |
 | | `TimeStretch.h` | time stretching and pitch shifting |
@@ -142,7 +142,7 @@ The headers, by area (each header's top comment says more):
 | | `Onsets.h` | note onsets in a live stream |
 | | `TimingCheck.h` | latency, playing in time with a click, and how much later a second recording of a performance hears it |
 | | `Metronome.h` | the beat grid, sequencer, click sounds, click engine and its voices for a host's timeline |
-| Sound | `Synth.h`, `Sampler.h` | the synth and the sampler |
+| Sound | `Synth.h`, `Sampler.h` | the synth and the sampler (with a drum pad's options, and a loop rendered through it) |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library (written by `tools/scales.py`) |
@@ -152,7 +152,7 @@ The headers, by area (each header's top comment says more):
 | | `ScaleTheory.h` | scales on a root: spelling, modes, their chords, which scale fits a chord or a progression, the neck |
 | | `TheoryCalls.h` | the theory and the voice exercises as JSON requests and answers (the browser's `th_call`, and the reference set) |
 | | `Scales.h` | pitch correction's keys, scales and harmony intervals |
-| | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids |
+| | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids, a loop recorder's timing |
 
 The browser engine, by file and prefix: `api_master.cpp` the mastering chain
 (`mc_*`), `api_mastering.cpp` whole-song mastering (`mt_*`), `api_loudness.cpp`

@@ -97,7 +97,7 @@ CI fails if either differs from what the script writes.
 | | `Meters.h` | how a meter moves on screen (ballistics, peak hold, its scale) and the volume fader's law |
 | Processing and mastering | `EqBand.h`, `VocalEq.h` | a parametric EQ band, and the vocal EQ |
 | | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider (and its slow form, a gain track for a whole recording) |
-| | `Saturator.h` | preamp drive |
+| | `Saturator.h` | preamp drive, and the safety curve on a bus where sounds pile up |
 | | `ReverbEngine.h`, `Space.h` | the reverb, and the delay (the vocal send, with its reverb) |
 | | `Chorus.h`, `Phaser.h` | the chorus and the phaser |
 | | `TimeStretch.h` | time stretching and pitch shifting (on Signalsmith Stretch) |
@@ -125,7 +125,7 @@ CI fails if either differs from what the script writes.
 | | `TimingCheck.h` | the speaker-to-mic latency, playing in time with a click, and how much later a second recording of a performance hears it |
 | | `Metronome.h` | the beat grid, the sequencer, the click sounds, the click engine and its voices for a host's own timeline |
 | Sound | `Synth.h` | the synth |
-| | `Sampler.h` | the sampler |
+| | `Sampler.h` | the sampler, with a drum pad's options (region, end fade, tuning, cutting itself off) and a loop rendered through it |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library |
@@ -135,7 +135,7 @@ CI fails if either differs from what the script writes.
 | | `ScaleTheory.h` | scales on a root: spelling, steps, comparing, modes and parents, the chords they build, which scale fits a chord or a progression, the neck (box positions, notes per string) |
 | | `TheoryCalls.h` | the theory and the voice exercises as JSON requests and answers, for the browser and the reference set |
 | | `Scales.h` | pitch correction's keys, scales and harmony intervals |
-| | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids |
+| | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids, a loop recorder's timing |
 
 ### The browser engine
 

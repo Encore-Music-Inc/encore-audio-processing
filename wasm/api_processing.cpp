@@ -23,6 +23,7 @@
 #include "dsp/Lpc.h"
 #include "dsp/Windows.h"
 #include "dsp/Restoration.h"
+#include "dsp/Saturator.h"
 
 namespace
 {
@@ -426,5 +427,17 @@ extern "C"
         auto* h = static_cast<Rumble*> (p);
         h->f.process (0, h->io[0].data(), n);
         if (stereo) h->f.process (1, h->io[1].data(), n);
+    }
+
+    // ---- the safety curve on a bus (vs::softClip), in place
+    EMSCRIPTEN_KEEPALIVE void pr_soft_clip (float* const* chans, int numCh, int n, float knee)
+    {
+        for (int c = 0; c < numCh; ++c) for (int i = 0; i < n; ++i) chans[c][i] = vs::softClip (chans[c][i], knee);
+    }
+
+    // ---- where a sound first gets loud: the first sample, in any channel, at thresholdDb under the loudest or more
+    EMSCRIPTEN_KEEPALIVE int pr_onset_index (const float* const* chans, int numCh, int n, double thresholdDb)
+    {
+        return vs::channels::onsetIndex (chans, numCh, n, std::pow (10.0, thresholdDb / 20.0));
     }
 }

@@ -207,6 +207,54 @@ function runMore(c, sig, out) {
 
   switch (c.op) {
     // ---- restoration of record and tape transfers
+    // ---- a pad player
+    case 'pad-loop': {
+      const h = X.in_sampler_create(fs, block), pads = nums('pads'), hits = nums('hits');
+      X.in_sampler_velocity_curve(h, c.velocityCurve ?? 1);
+      for (let k = 0; k + 8 < pads.length; k += 9) {
+        f32(X.in_sampler_load_left(h, n), n).set(sig.l);
+        if (stereo) f32(X.in_sampler_load_right(h, n), n).set(sig.r);
+        X.in_sampler_add_pad(h, stereo ? 1 : 0, fs, pads[k], pads[k + 5], pads[k + 6], pads[k + 7], pads[k + 8], pads[k + 1], pads[k + 2], pads[k + 3], pads[k + 4], c.release ?? 0.005);
+      }
+      const m = hits.length / 3, np = X.malloc(4 * m + 4), bp = X.malloc(8 * m + 8), vp = X.malloc(4 * m + 4);
+      for (let k = 0; k < m; k++) { i32(np, m)[k] = hits[3 * k]; f64(bp, m)[k] = hits[3 * k + 1]; f32(vp, m)[k] = hits[3 * k + 2]; }
+      const len = X.in_sampler_render_loop(h, np, bp, vp, m, c.bpm ?? 120, c.loopBeats ?? 4, fs, c.tail ?? 3, c.busGain ?? 0.85);
+      fingerprintAudio(out, '', [f32(X.in_sampler_loop_left(h), len).slice(), f32(X.in_sampler_loop_right(h), len).slice()], fs);
+      X.free(np); X.free(bp); X.free(vp); X.in_sampler_destroy(h);
+      return true;
+    }
+    case 'soft-clip': {
+      const ch = channelsOf(sig).map((x) => Float32Array.from(x, (v) => Math.fround(v * Math.fround(c.gain ?? 1)))), buf = alloc(ch);
+      X.pr_soft_clip(buf.table, ch.length, n, c.knee ?? 0.7);
+      fingerprintAudio(out, '', buf.read(n), fs);
+      buf.free();
+      return true;
+    }
+    case 'onset': {
+      const ch = channelsOf(sig), buf = alloc(ch);
+      for (const db of nums('thresholds')) out.push([`at${-db}`, X.pr_onset_index(buf.table, ch.length, n, db)]);
+      buf.free();
+      return true;
+    }
+    case 'loop-timing': {
+      const bpm = c.bpm ?? 120, L = c.loopBeats ?? 4, times = nums('times');
+      times.forEach((t, i) => {
+        out.push([`beatAt${i}`, X.mu_loop_beat_at(t, 0.25, bpm, L)]);
+        for (const steps of [2, 3, 4, 6]) out.push([`snap${steps}.${i}`, X.mu_loop_snap(t, steps, L)]);
+        out.push([`grid${i}`, X.mu_next_grid_time(t, 0.1, 60 / bpm / 4)]);
+      });
+      const beats = nums('beats'), bp = X.malloc(8 * beats.length + 8), tp = X.malloc(8 * 256), wp = X.malloc(4 * 256);
+      f64(bp, beats.length).set(beats);
+      const due = X.mu_loop_hits(bp, 0, beats.length, c.from ?? 0, c.to ?? 4, 0.25, bpm, L, tp, wp, 256);
+      out.push(['due', due]);
+      for (let i = 0; i < due; i++) out.push([`due${i}.time`, f64(tp, due)[i]], [`due${i}.hit`, i32(wp, due)[i]]);
+      const cp = X.malloc(4 * 256), dp = X.malloc(4 * 256);
+      const k = X.mu_loop_clicks(c.from ?? 0, c.to ?? 4, 0.25, bpm, 4, tp, cp, dp, 256);
+      out.push(['clicks', k]);
+      for (let i = 0; i < k; i++) out.push([`click${i}.time`, f64(tp, k)[i]], [`click${i}.down`, i32(dp, k)[i]]);
+      [bp, tp, wp, cp, dp].forEach((p) => X.free(p));
+      return true;
+    }
     // ---- live recordings
     case 'live-set': {
       const h = X.lv_set_create(fs, block);

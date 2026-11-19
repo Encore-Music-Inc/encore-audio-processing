@@ -178,4 +178,24 @@ extern "C"
     // A step grid: how many steps a clip of `beats` beats has, and a hit's length
     EMSCRIPTEN_KEEPALIVE int mu_steps (double beats, double grid) { return vs::noteedit::StepGrid { grid, 0.0 }.steps (beats); }
     EMSCRIPTEN_KEEPALIVE double mu_hit_length (double grid) { return vs::noteedit::StepGrid { grid, 0.0 }.hitLength(); }
+
+    // ---- a loop being played and recorded over and over (vs::noteedit::loop)
+    EMSCRIPTEN_KEEPALIVE double mu_loop_beat_at (double time, double start, double bpm, double loopBeats) { return vs::noteedit::loop::beatAt (time, start, bpm, loopBeats); }
+    EMSCRIPTEN_KEEPALIVE double mu_loop_snap (double beat, int steps, double loopBeats) { return vs::noteedit::loop::snap (beat, steps, loopBeats); }
+    EMSCRIPTEN_KEEPALIVE double mu_next_grid_time (double t, double origin, double interval) { return vs::noteedit::loop::nextGridTime (t, origin, interval); }
+    // The hits due in [from, to): their times and which hit each is, up to cap; returns how many there are
+    EMSCRIPTEN_KEEPALIVE int mu_loop_hits (const double* beats, const double* notBefore, int count, double from, double to, double start, double bpm,
+                                           double loopBeats, double* times, int* which, int cap)
+    {
+        const auto due = vs::noteedit::loop::hitsBetween (beats, notBefore, count, from, to, start, bpm, loopBeats);
+        for (int i = 0; i < (int) due.size() && i < cap; ++i) { times[i] = due[(size_t) i].time; which[i] = due[(size_t) i].hit; }
+        return (int) due.size();
+    }
+    // The clicks in [from, to): their times, beats and downbeats (1), up to cap; returns how many there are
+    EMSCRIPTEN_KEEPALIVE int mu_loop_clicks (double from, double to, double start, double bpm, int beatsPerBar, double* times, int* beats, int* down, int cap)
+    {
+        const auto clicks = vs::noteedit::loop::clicksBetween (from, to, start, bpm, beatsPerBar);
+        for (int i = 0; i < (int) clicks.size() && i < cap; ++i) { times[i] = clicks[(size_t) i].time; beats[i] = clicks[(size_t) i].beat; down[i] = clicks[(size_t) i].down ? 1 : 0; }
+        return (int) clicks.size();
+    }
 }

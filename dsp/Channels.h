@@ -345,14 +345,26 @@ namespace vs
             return std::isnan (peak) || std::isnan (v) ? std::numeric_limits<float>::quiet_NaN() : std::max (peak, std::abs (v));
         }
 
+        // Where a sound first gets loud: the first sample, in any channel, at
+        // `fraction` of the loudest sample of them all or more (0 for silence;
+        // n when none is, which only a NaN peak gives).
+        inline int onsetIndex (const float* const* ch, int numCh, int n, double fraction)
+        {
+            float peak = 0;
+            for (int c = 0; c < numCh; ++c) for (int i = 0; i < n; ++i) peak = runningPeak (peak, ch[c][i]);
+            int first = n;
+            for (int c = 0; c < numCh; ++c)
+                for (int i = 0; i < first; ++i)
+                    if (! (std::abs (ch[c][i]) < fraction * peak)) { first = i; break; }
+            return first;
+        }
+
         // A sound from where it first gets loud (0.3 of its peak), keeping
         // the two samples before: a synthesized hit lands right on its time.
         inline std::vector<float> fromOnset (const std::vector<float>& x)
         {
-            float peak = 0;
-            for (float v : x) peak = runningPeak (peak, v);
-            size_t i = 0;
-            while (i < x.size() && std::abs (x[i]) < 0.3 * peak) ++i;
+            const float* ch[1] { x.data() };
+            const size_t i = (size_t) onsetIndex (ch, 1, (int) x.size(), 0.3);
             return std::vector<float> (x.begin() + (std::ptrdiff_t) (i >= 2 ? i - 2 : 0), x.end());
         }
 
