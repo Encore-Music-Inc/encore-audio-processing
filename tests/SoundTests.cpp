@@ -301,6 +301,15 @@ namespace
         }
         expect ("every sound renders at its kit level", levels);
         expect ("an unknown id is nothing", d::renderSound ("nope", 48000).empty());
+        // the kits are in the style of drum machines, never named after one (a product name is its maker's)
+        bool plain = true;
+        for (auto& k : d::kits())
+            for (const std::string text : { std::string (k.id), std::string (k.name), std::string (k.about) })
+                for (const char* mark : { "808", "909", "707", "606", "Roland", "TR-", "LinnDrum", "MPC" })
+                    plain = plain && text.find (mark) == std::string::npos;
+        for (auto& s : d::sounds())
+            for (const char* mark : { "808", "909", "707", "606" }) plain = plain && std::string (s.id).find (mark) == std::string::npos;
+        expect ("no kit or sound is named after a drum machine", plain);
         expect ("names: the kit's and the drum's",
                 d::soundName ("boomKick") == "Boom: Kick" && d::soundName ("kick") == "Kick" && d::soundName ("studioFloorTom") == "Studio: Low floor tom"
                     && d::soundName ("rim") == "Side stick" && d::soundName ("shaker") == "Shaker");
@@ -344,6 +353,16 @@ namespace
             { "clubSnare", 24480, 4834.14575 },
             { "clubTom", 28800, 7439.82553 },
             { "crash", 115200, 3242.00504 },
+            { "deepClap", 21839, 2130.76959 },
+            { "deepClosedHat", 6048, 547.085424 },
+            { "deepCrash", 105600, 20139.464 },
+            { "deepFloorTom", 60000, 21726.8108 },
+            { "deepHighTom", 60000, 21843.5393 },
+            { "deepKick", 129600, 40814.8159 },
+            { "deepLowTom", 60000, 21804.9854 },
+            { "deepOpenHat", 23519, 3682.8908 },
+            { "deepRide", 76800, 7867.10219 },
+            { "deepSnare", 19200, 3151.9619 },
             { "highTom", 24960, 7982.13946 },
             { "kick", 28800, 13258.1161 },
             { "lowTom", 37440, 12240.8449 },
@@ -351,16 +370,6 @@ namespace
             { "rim", 6720, 521.761243 },
             { "shaker", 5760, 229.465288 },
             { "snare", 18720, 3045.39358 },
-            { "808Clap", 21839, 2130.76959 },
-            { "808ClosedHat", 6048, 547.085424 },
-            { "808Crash", 105600, 20139.464 },
-            { "808FloorTom", 60000, 21726.8108 },
-            { "808HighTom", 60000, 21843.5393 },
-            { "808Kick", 129600, 40814.8159 },
-            { "808LowTom", 60000, 21804.9854 },
-            { "808OpenHat", 23519, 3682.8908 },
-            { "808Ride", 76800, 7867.10219 },
-            { "808Snare", 19200, 3151.9619 },
             { "lofiClap", 21838, 1907.50237 },
             { "lofiClosedHat", 7776, 621.229088 },
             { "lofiCrash", 105600, 15448.9515 },
