@@ -304,6 +304,10 @@ namespace
         const int zones = vs::instruments::loadRecorded (s, manifest, [&] (int i) { return i == 0 ? quiet : i == 1 ? loud : high; });
         expect ("a manifest's zones load", zones == 3);
         expect ("a manifest it can't read is refused", vs::instruments::loadRecorded (s, R"({"v":2,"zones":[]})", nullptr) == -1);
+        // what to fetch: a soft note the quiet layer's recording, a hard one the loud layer's, a high one the third
+        expect ("the recordings notes play, to fetch first", vs::instruments::recordingsFor (manifest, { { 60, 50 } }) == std::vector<int> { 0 }
+                && vs::instruments::recordingsFor (manifest, { { 60, 50 }, { 60, 100 }, { 72, 90 }, { 60, 45 } }) == std::vector<int> { 0, 1, 2 }
+                && vs::instruments::recordingsFor ("{}", { { 60, 50 } }).empty());
         vs::instruments::loadRecorded (s, manifest, [&] (int i) { return i == 0 ? quiet : i == 1 ? loud : high; });
 
         const auto [ql, qr] = play (s, 60, 50.0f / 127, 0.5, 0.0);

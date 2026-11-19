@@ -230,6 +230,18 @@ extern "C"
         x->r = std::move (r);
         return (int) x->l.size();
     }
+    // The recordings (manifest sample indexes, in order, at most cap into out) that count notes (MIDI notes,
+    // velocities 1..127) play on a recorded instrument; returns how many (-1 for a manifest it can't read)
+    EMSCRIPTEN_KEEPALIVE int in_recordings_for (const char* manifest, int count, const int* midis, const float* vels, int* out, int cap)
+    {
+        std::vector<std::pair<int, float>> notes;
+        for (int i = 0; i < count; ++i) notes.push_back ({ midis[i], vels[i] });
+        vs::Sampler probe;
+        if (vs::instruments::loadRecorded (probe, manifest, nullptr) < 0) return -1;
+        const auto need = vs::instruments::recordingsFor (manifest, notes);
+        for (size_t i = 0; i < need.size() && (int) i < cap; ++i) out[i] = need[i];
+        return (int) need.size();
+    }
     EMSCRIPTEN_KEEPALIVE const float* in_ensemble_left (void* p) { return as<EnsembleIn> (p)->l.data(); }
     EMSCRIPTEN_KEEPALIVE const float* in_ensemble_right (void* p) { return as<EnsembleIn> (p)->r.data(); }
 }

@@ -77,6 +77,7 @@ namespace vs
                 // the recording, shared by the zones that play it (instead of left; mono). None yet: the
                 // zone is known but can't sound (ready() says so)
                 std::shared_ptr<const std::vector<float>> recording;
+                int sample = -1;   // which of the instrument's recordings it plays (its manifest's sample index)
             };
             Zone zone;
 
@@ -102,6 +103,9 @@ namespace vs
         void clearSounds() { allNotesOff (true); sounds.clear(); }
         int numSounds() const { return (int) sounds.size(); }
         const Sound& sound (int i) const { return *sounds[(size_t) i]; }
+
+        // The sounds (indexes) a note plays on the instrument's zones, as noteOn chooses them
+        std::vector<int> soundsFor (int note, float velocity) const { return zonesFor (note, std::clamp (velocity, 0.0f, 1.0f)); }
 
         // Whether the instrument's zones can play a note: it has zones, and every one the note plays has its recording
         bool ready (int note, float velocity) const

@@ -19,6 +19,7 @@
 //     vs::Synth s; s.prepare (fs); s.setSettings (*vs::instruments::synthSound ("strings"));
 //     vs::Sampler p; p.prepare (fs); vs::instruments::loadRecorded (p, manifestText, recordings, trimDb);
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <functional>
@@ -231,9 +232,25 @@ namespace vs::instruments
             q.exclusive = (int) num (&z, "excl");
             q.gain = (float) num (&z, "gain", 1.0);
             q.recording = have[(size_t) si];
+            q.sample = si;
             s.addSound (std::move (snd));
             ++count;
         }
         return count;
+    }
+
+    // The recordings (by the manifest's sample index, in order) that notes (MIDI note, velocity 1..127)
+    // play on a recorded instrument: what to fetch before they can play. Empty for a manifest it can't read.
+    inline std::vector<int> recordingsFor (std::string_view manifest, const std::vector<std::pair<int, float>>& notes)
+    {
+        Sampler s;
+        if (loadRecorded (s, manifest, nullptr) < 0) return {};
+        std::vector<int> out;
+        for (const auto& [midi, vel] : notes)
+            for (int i : s.soundsFor (midi, std::clamp (vel, 1.0f, 127.0f) / 127.0f))
+                out.push_back (s.sound (i).zone.sample);
+        std::sort (out.begin(), out.end());
+        out.erase (std::unique (out.begin(), out.end()), out.end());
+        return out;
     }
 }
