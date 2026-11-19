@@ -125,9 +125,10 @@ CI fails if either differs from what the script writes.
 | | `TimingCheck.h` | the speaker-to-mic latency, playing in time with a click, and how much later a second recording of a performance hears it |
 | | `Metronome.h` | the beat grid, the sequencer, the click sounds, the click engine and its voices for a host's own timeline |
 | Sound | `Synth.h` | the synth, with the options a score's instruments use |
-| | `Sampler.h` | the sampler, with a drum pad's options (region, end fade, tuning, cutting itself off) and a loop rendered through it |
+| | `Sampler.h` | the sampler, with a drum pad's options (region, end fade, tuning, cutting itself off), a loop rendered through it, and an instrument's recordings as zones (velocity layers, loops, an envelope and low-pass each) |
+| | `NoteExpression.h` | how a score plays one note (gain, brightness, a slur, a glide, a swell) |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
-| | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on) |
+| | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library |
 | | `ChordTypes.h` | the chord types: formulas, symbols, numerals, families, the picker's groups |

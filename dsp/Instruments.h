@@ -11,12 +11,23 @@
 // Times here are given as the time constant of an exponential curve (the way
 // a score instrument fades), turned into the envelope's time to -80 dB.
 //
+// A recorded instrument is the sampler's zones (Sampler.h), read from its
+// manifest: each zone's keys, velocities, root, tuning, loop, envelope,
+// low-pass, pan, gain and exclusive group, the recording it plays, and the
+// instrument's own gain (the format a sound set's builder writes, version 1).
+//
 //     vs::Synth s; s.prepare (fs); s.setSettings (*vs::instruments::synthSound ("strings"));
+//     vs::Sampler p; p.prepare (fs); vs::instruments::loadRecorded (p, manifestText, recordings, trimDb);
 
 #include <array>
 #include <cmath>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string_view>
+#include <vector>
+#include "Json.h"
+#include "Sampler.h"
 #include "Synth.h"
 
 namespace vs::instruments
@@ -151,5 +162,78 @@ namespace vs::instruments
     inline bool swellsWithin (std::string_view family)
     {
         return family == "strings" || family == "winds" || family == "voice";
+    }
+
+    // ---- recorded instruments
+
+    // A recorded instrument's level next to the synth sounds, and its velocity curve
+    inline constexpr double recordedLevel = 0.62;
+    inline constexpr float recordedVelocityCurve = 1.7f;
+    // How many notes a recorded instrument plays at once (a pedalled piano rings with two zones a note)
+    inline constexpr int recordedVoices = 96;
+
+    // The recordings a manifest's zones play, by sample index; a missing one leaves its zones known but silent
+    using Recordings = std::function<std::shared_ptr<const std::vector<float>> (int sample)>;
+
+    // Loads a manifest's zones into the sampler (replacing its sounds), at trimDb on top of the
+    // instrument's own gain. Returns the number of zones, or -1 for a manifest it can't read.
+    inline int loadRecorded (Sampler& s, std::string_view manifest, const Recordings& recordings, double trimDb = 0.0)
+    {
+        const auto m = json::parse (manifest);
+        if (! m) return -1;
+        const auto* v = m->get ("v");
+        const auto* zones = m->get ("zones");
+        const auto* samples = m->get ("samples");
+        if (v == nullptr || v->n != 1 || zones == nullptr || samples == nullptr || zones->items.empty()) return -1;
+        const auto num = [] (const json::Json* o, std::string_view k, double d = 0.0) { const auto* x = o != nullptr ? o->get (k) : nullptr; return x != nullptr && x->type == json::Json::Type::number ? x->n : d; };
+        const double gain = recordedLevel * std::pow (10.0, trimDb / 20.0) * num (&*m, "gain", 1.0);
+
+        s.clearSounds();
+        s.setVoiceCount (recordedVoices);
+        s.setVelocityCurve (recordedVelocityCurve);
+        std::vector<std::shared_ptr<const std::vector<float>>> have (samples->items.size());
+        std::vector<bool> asked (samples->items.size(), false);
+        int count = 0;
+        for (const auto& z : zones->items)
+        {
+            const int si = (int) num (&z, "s", -1);
+            if (si < 0 || si >= (int) samples->items.size()) return -1;
+            const auto& smp = samples->items[(size_t) si];
+            if (! asked[(size_t) si]) { have[(size_t) si] = recordings ? recordings (si) : nullptr; asked[(size_t) si] = true; }
+            const auto* env = z.get ("env");
+            Sampler::Sound snd;
+            snd.sampleRate = num (&smp, "rate", 44100.0);
+            snd.rootNote = (int) num (&z, "root", 60);
+            snd.lowNote = (int) num (&z, "lo", 0);
+            snd.highNote = (int) num (&z, "hi", 127);
+            snd.gainDb = (float) (20.0 * std::log10 (gain));
+            snd.pan = (float) num (&z, "pan");
+            auto& q = snd.zone;
+            q.on = true;
+            q.lowVelocity = (int) num (&z, "vlo", 1);
+            q.highVelocity = (int) num (&z, "vhi", 127);
+            q.tuneCents = num (&z, "tune");
+            q.centsPerKey = num (&z, "scale", 100.0);
+            const int mode = (int) num (&z, "mode");
+            if (mode == 1 || mode == 3)
+            {
+                q.loopStart = num (&smp, "ls", -1.0) + num (&z, "ls");
+                q.loopEnd = num (&smp, "le", -1.0) + num (&z, "le");
+            }
+            q.delay = num (env, "delay");
+            q.attack = num (env, "attack");
+            q.hold = num (env, "hold");
+            q.decay = num (env, "decay");
+            q.sustain = num (env, "sustain", 1.0);
+            q.release = num (env, "release", 0.03);
+            q.lowPassHz = num (&z, "fc");
+            q.lowPassQDb = num (&z, "q");
+            q.exclusive = (int) num (&z, "excl");
+            q.gain = (float) num (&z, "gain", 1.0);
+            q.recording = have[(size_t) si];
+            s.addSound (std::move (snd));
+            ++count;
+        }
+        return count;
     }
 }

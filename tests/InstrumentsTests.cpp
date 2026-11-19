@@ -261,6 +261,112 @@ namespace
         expect ("strings, winds and voices swell within a note; the piano doesn't",
                 vs::instruments::swellsWithin ("strings") && vs::instruments::swellsWithin ("voice") && ! vs::instruments::swellsWithin ("piano"));
     }
+
+    // ---- recorded instruments: the sampler's zones
+
+    std::shared_ptr<const std::vector<float>> tone (int n, double hz, double rate)
+    {
+        auto v = std::make_shared<std::vector<float>> ((size_t) n);
+        for (int i = 0; i < n; ++i) (*v)[(size_t) i] = (float) std::sin (6.283185307179586 * hz * i / rate);
+        return v;
+    }
+
+    // Plays one note on a sampler for `held` seconds then `tail` more; returns left and right
+    std::pair<std::vector<float>, std::vector<float>> play (vs::Sampler& s, int note, float vel, double held, double tail, const vs::NoteExpression& e = {})
+    {
+        s.allNotesOff (true);
+        const int on = (int) (held * fs), n = on + (int) (tail * fs);
+        std::vector<float> l ((size_t) n, 0.0f), r ((size_t) n, 0.0f);
+        const auto id = s.noteOn (note, vel, e);
+        s.render (l.data(), r.data(), on);
+        s.noteOffId (id);
+        s.render (l.data() + on, r.data() + on, n - on);
+        return { l, r };
+    }
+
+    const char* manifest = R"({"v":1,"gain":1,"zones":[
+        {"lo":0,"hi":64,"vlo":1,"vhi":63,"s":0,"root":60,"tune":0,"scale":100,"gain":0.5,"pan":0,"fc":0,"q":0,"mode":1,"excl":0,"ls":0,"le":0,
+         "env":{"delay":0,"attack":0.01,"hold":0,"decay":0,"sustain":1,"release":0.2}},
+        {"lo":0,"hi":64,"vlo":64,"vhi":127,"s":1,"root":60,"tune":0,"scale":100,"gain":1,"pan":0,"fc":0,"q":0,"mode":1,"excl":0,"ls":0,"le":0,
+         "env":{"delay":0,"attack":0.01,"hold":0,"decay":0,"sustain":1,"release":0.2}},
+        {"lo":70,"hi":80,"vlo":1,"vhi":127,"s":2,"root":72,"tune":0,"scale":100,"gain":1,"pan":-1,"fc":0,"q":0,"mode":0,"excl":7,"ls":0,"le":0,
+         "env":{"delay":0,"attack":0,"hold":0.05,"decay":0.5,"sustain":0,"release":0.1}}],
+      "samples":[{"c":0,"o":0,"n":1,"rate":48000,"ls":1000,"le":5800},{"c":0,"o":0,"n":1,"rate":48000,"ls":1000,"le":5800},{"c":0,"o":0,"n":1,"rate":48000}],
+      "chunks":[{"file":"x","bytes":1}]})";
+
+    void recorded()
+    {
+        // two velocity layers of a 480 Hz tone (looped, 10 cycles a loop) and a hard-left 576 Hz zone
+        const auto quiet = tone (6000, 480.0, fs), loud = tone (6000, 480.0, fs), high = tone (24000, 576.0, fs);
+        vs::Sampler s;
+        s.prepare (fs);
+        const int zones = vs::instruments::loadRecorded (s, manifest, [&] (int i) { return i == 0 ? quiet : i == 1 ? loud : high; });
+        expect ("a manifest's zones load", zones == 3);
+        expect ("a manifest it can't read is refused", vs::instruments::loadRecorded (s, R"({"v":2,"zones":[]})", nullptr) == -1);
+        vs::instruments::loadRecorded (s, manifest, [&] (int i) { return i == 0 ? quiet : i == 1 ? loud : high; });
+
+        const auto [ql, qr] = play (s, 60, 50.0f / 127, 0.5, 0.0);
+        const auto [ll, lr] = play (s, 60, 100.0f / 127, 0.5, 0.0);
+        const double q = rms (ql, 0.1, 0.5), l = rms (ll, 0.1, 0.5);
+        const double want = 0.5 * std::pow (50.0 / 100.0, 1.7);   // the quiet layer's gain, and the velocity curve
+        expect ("a velocity picks its layer", std::abs (q / l - want) < 0.01, "%.4f (%.4f)", q / l, want);
+        // the recording is 0.125 s; its loop (1000 to 5800) keeps the note at its level
+        expect ("a looped zone keeps sounding past its recording's length", std::abs (rms (ll, 0.3, 0.5) / rms (ll, 0.05, 0.1) - 1.0) < 0.02, "%.3f", rms (ll, 0.3, 0.5) / rms (ll, 0.05, 0.1));
+        expect ("a zone at the centre plays the same on both sides", ql == qr);
+
+        const auto [hl, hr] = play (s, 72, 0.8f, 1.0, 0.0);
+        expect ("a zone panned hard left is silent on the right", rms (hl, 0.0, 0.2) > 0.1 && rms (hr, 0.0, 1.0) == 0.0);
+        // held 0.05 s, then falling with a time constant of 0.5 / 11.5 s
+        const double heldRms = rms (hl, 0.0, 0.04), later = rms (hl, 0.1, 0.11), expected = heldRms * std::exp (-(0.105 - 0.05) / (0.5 / 11.512925464970229));
+        expect ("its hold, then its decay", std::abs (later / expected - 1.0) < 0.05, "%.4f (%.4f)", later, expected);
+        expect ("a key out of every zone plays the nearest", s.ready (90, 0.5f) && s.ready (66, 0.5f) && s.ready (0, 0.5f));
+
+        // an exclusive group: a second note cuts the first (both in group 7)
+        {
+            s.allNotesOff (true);
+            std::vector<float> l1 ((size_t) fs), r1 ((size_t) fs), l2 ((size_t) fs), r2 ((size_t) fs);
+            s.noteOn (72, 0.8f, vs::NoteExpression {});
+            s.render (l1.data(), r1.data(), 4800);
+            s.render (l1.data() + 4800, r1.data() + 4800, 43200);
+            s.allNotesOff (true);
+            s.noteOn (72, 0.8f, vs::NoteExpression {});
+            s.render (l2.data(), r2.data(), 4800);
+            s.noteOn (74, 0.8f, vs::NoteExpression {});
+            std::vector<float> only ((size_t) fs), rOnly ((size_t) fs);
+            s.render (l2.data() + 4800, r2.data() + 4800, 43200);
+            // after the cut, only the second note is left: its own 576 * 2^(2/12) Hz, nothing at 576 Hz
+            vs::Sampler one;
+            one.prepare (fs);
+            vs::instruments::loadRecorded (one, manifest, [&] (int i) { return i == 0 ? quiet : i == 1 ? loud : high; });
+            one.noteOn (74, 0.8f, vs::NoteExpression {});
+            one.render (only.data() + 4800, rOnly.data() + 4800, 43200);
+            double d = 0;
+            for (int k = (int) (0.25 * fs); k < (int) (0.3 * fs); ++k) d = std::max (d, (double) std::abs (l2[(size_t) k] - only[(size_t) k]));
+            expect ("a note in an exclusive group cuts the group's earlier note", d < 1e-5 && rms (l1, 0.25, 0.3) > 1e-3, "%.2e", d);
+        }
+
+        // not every recording here yet: the note isn't ready, and plays nothing
+        vs::Sampler partial;
+        partial.prepare (fs);
+        vs::instruments::loadRecorded (partial, manifest, [&] (int i) { return i == 1 ? loud : nullptr; });
+        expect ("a note whose recording hasn't come isn't ready", ! partial.ready (60, 50.0f / 127) && partial.ready (60, 100.0f / 127)
+                && partial.noteOn (60, 50.0f / 127, vs::NoteExpression {}) == 0);
+
+        // a slurred start, the low-pass and the release
+        vs::NoteExpression slur;
+        slur.slurred = true;
+        slur.slurLevel = 0.3f;
+        const auto [sl, sr] = play (s, 60, 100.0f / 127, 0.5, 0.0, slur);
+        const double slurStart = rms (sl, 0.0, 0.002) / rms (sl, 0.1, 0.2);
+        expect ("a slurred note starts part-way up", slurStart > 0.25 && slurStart < 0.4, "%.3f", slurStart);
+        vs::NoteExpression dark;
+        dark.brightness = 0.005f;   // the open filter (20 kHz) shaded down to 100 Hz at full velocity
+        const auto [dl, dr] = play (s, 60, 1.0f, 0.5, 0.0, dark);
+        const auto [fl, fr] = play (s, 60, 1.0f, 0.5, 0.0);
+        expect ("a darker note goes through the low-pass", rms (dl, 0.1, 0.5) < 0.1 * rms (fl, 0.1, 0.5), "%.3f", rms (dl, 0.1, 0.5) / rms (fl, 0.1, 0.5));
+        const auto [rl, rr] = play (s, 60, 100.0f / 127, 0.3, 0.5);
+        expect ("a released note fades over its release, then stops", rms (rl, 0.32, 0.34) > rms (rl, 0.45, 0.47) && rms (rl, 0.7, 0.8) == 0.0);
+    }
 }
 
 int main()
@@ -270,6 +376,7 @@ int main()
     options();
     expression();
     families();
+    recorded();
     std::printf ("%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
     return failures == 0 ? 0 : 1;
 }

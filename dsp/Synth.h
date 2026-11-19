@@ -31,6 +31,7 @@
 #include "Envelope.h"
 #include "Mix.h"
 #include "Music.h"
+#include "NoteExpression.h"
 #include "Oscillator.h"
 #include "Svf.h"
 #include "Util.h"
@@ -88,18 +89,8 @@ namespace vs
         // A bell after the filter (RBJ peaking), e.g. a voice's vowel
         struct TonePeak { bool on = false; float hz = 1000.0f, q = 1.0f, gainDb = 0.0f; };
 
-        // How one note is played, beyond its pitch and velocity
-        struct Expression
-        {
-            float gain = 1.0f;          // on the note's level
-            float brightness = 1.0f;    // on the filter's note-following part
-            bool slurred = false;       // starts at slurLevel of the top, attack at least slurAttack, no bursts
-            float slurLevel = 0.35f, slurAttack = 0.03f;
-            float bendSemitones = 0.0f; // a glide by this many semitones (0: none)...
-            float bendFrom = 0.0f, bendTo = 0.0f; // ...from bendFrom to bendTo seconds after the start, straight in pitch
-            float swellTo = 1.0f;       // the level moves in a straight line from the end of the attack...
-            float swellUntil = 0.0f;    // ...to swellTo times the top by this many seconds after the start (0: none)
-        };
+        // How one note is played, beyond its pitch and velocity (NoteExpression.h)
+        using Expression = NoteExpression;
 
         enum class VoiceMode { poly, mono, legato };
 
