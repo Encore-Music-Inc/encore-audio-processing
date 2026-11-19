@@ -79,7 +79,7 @@ CI fails if either differs from what the script writes.
 | | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), its live form for playback, and decimation |
 | | `Ramp.h` | a value ramping to a new target, and how automation moves between its points |
 | | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels, a rack return's ramps and a gain track |
-| | `Oscillator.h`, `Envelope.h` | band-limited oscillators, and the ADSR envelope |
+| | `Oscillator.h`, `Envelope.h` | band-limited oscillators, a wave made of harmonics, and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut and the dynamic EQ bell that turn a sound down by its level |
 | | `Lpc.h` | linear prediction, and filling a gap from the audio around it |
 | | `Random.h` | seeded random numbers, the same on every system |
@@ -128,6 +128,7 @@ CI fails if either differs from what the script writes.
 | | `Sampler.h` | the sampler, with a drum pad's options (region, end fade, tuning, cutting itself off), a loop rendered through it, and an instrument's recordings as zones (velocity layers, loops, an envelope and low-pass each) |
 | | `NoteExpression.h` | how a score plays one note (gain, brightness, a slur, a glide, a swell) |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
+| | `VoiceGuide.h` | the guide a singer sings with: notes, sirens and a drone |
 | | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
 | | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys (and by their signature), a line's notes spelled in a key, Hz and MIDI, General MIDI drum names |
@@ -154,7 +155,7 @@ CI fails if either differs from what the script writes.
 | `wasm/api_pitch.cpp` | `pi_` | voice pitch and its measurements, played notes, drum tuning |
 | `wasm/api_tuner.cpp` | `tp_` | the tuner, the block averaging before a reading, and following its readings |
 | `wasm/api_rhythm.cpp` | `rh_` | tempo, onsets, timing, the beat grid's meters (groupings, accents, note values, subdivisions, tempo names) |
-| `wasm/api_sound.cpp` | `sd_` | the drums and the metronome (its sounds, its click engine and mending its settings) |
+| `wasm/api_sound.cpp` | `sd_` | the drums, the metronome (its sounds, its click engine and mending its settings) and the singing guide |
 | `wasm/api_music.cpp` | `mu_` | note names, spelled notes and the sounds they make, keys and the key lists, Hz and MIDI, note editing on a grid |
 | `wasm/api_theory.cpp` | `th_` | the chord and scale theory: one function that answers a JSON request (`dsp/TheoryCalls.h` lists them) |
 | `wasm/api_restore.cpp` | `rs_` | the restoration of record and tape transfers: the chain, the analysis and its detectors, the noise profile, the clip check, a side's level envelope |

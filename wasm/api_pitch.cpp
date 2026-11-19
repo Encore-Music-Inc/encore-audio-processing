@@ -227,6 +227,14 @@ extern "C"
         return (int) r->offsets.size();
     }
 
+    // The mean of the voiced readings (midi NaN: none) at times t from t0 to t1, NaN when there are none
+    EMSCRIPTEN_KEEPALIVE double pi_mean_pitch (const double* t, const double* midi, int n, double t0, double t1)
+    {
+        std::vector<vs::voice::PitchFrame> f ((size_t) std::max (0, n));
+        for (int i = 0; i < n; ++i) f[(size_t) i] = { t[i], midi[i] };
+        return vs::voice::meanPitch (f, t0, t1);
+    }
+
     // The main note of a drum hit in Hz (vs::drums::drumPeak), 0 when there isn't one.
     EMSCRIPTEN_KEEPALIVE double pi_drum_peak (const float* x, int n, double sampleRate, double minHz, double maxHz, int lowest, int size)
     {

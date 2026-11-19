@@ -61,6 +61,18 @@ namespace vs
 
         using Run = std::vector<PitchFrame>;
 
+        // The mean of the voiced readings from t0 to t1 (NaN when there are
+        // none): a pitch line is coloured by where the voice is centred over a
+        // short window, so a vibrato around a note reads as on it
+        inline double meanPitch (const std::vector<PitchFrame>& frames, double t0, double t1)
+        {
+            double sum = 0;
+            int n = 0;
+            for (const auto& f : frames)
+                if (f.voiced() && f.t >= t0 && f.t <= t1) { sum += f.midi; ++n; }
+            return n ? sum / n : std::numeric_limits<double>::quiet_NaN();
+        }
+
         // Runs of voice: a new one starts after a gap longer than maxGap seconds or
         // a jump bigger than maxStep semitones.
         inline std::vector<Run> voicedRuns (const std::vector<PitchFrame>& frames, double maxGap = 0.12, double maxStep = 1.5)

@@ -2,6 +2,8 @@
 
 #include <cmath>
 #include <cstdint>
+#include <utility>
+#include <vector>
 #include "Random.h"
 
 namespace vs
@@ -78,5 +80,42 @@ namespace vs
         double phase = 0.0, width = 0.5, tri = -1.0;
         bool triFresh = true;
         Xorshift32 rng { 1 };
+    };
+
+    // A periodic wave made of harmonics: amps[k] is the (k+1)th harmonic's
+    // amplitude, every one in sine phase, scaled so the wave's peak is full
+    // scale (as the browser's PeriodicWave is). Harmonics at or above Nyquist
+    // for the pitch played are left out.
+    class HarmonicWave
+    {
+    public:
+        HarmonicWave() = default;
+        explicit HarmonicWave (std::vector<double> amplitudes) : amps (std::move (amplitudes))
+        {
+            double p = 0;
+            for (int i = 0; i < 4096; ++i) p = std::max (p, std::abs (sum (i / 4096.0, 0.0)));
+            scale = p > 0 ? 1.0 / p : 1.0;
+        }
+
+        // The wave at phase 0..1 when played at hz (0: every harmonic)
+        double at (double phase, double hz = 0.0, double sampleRate = 0.0) const
+        {
+            return sum (phase, hz > 0 && sampleRate > 0 ? 0.5 * sampleRate / hz : 0.0) * scale;
+        }
+
+    private:
+        std::vector<double> amps;
+        double scale = 1.0;
+
+        double sum (double phase, double below) const
+        {
+            double v = 0;
+            for (size_t k = 0; k < amps.size(); ++k)
+            {
+                if (below > 0 && (double) (k + 1) >= below) break;
+                v += amps[k] * std::sin (2 * 3.141592653589793 * (double) (k + 1) * phase);
+            }
+            return v;
+        }
     };
 }

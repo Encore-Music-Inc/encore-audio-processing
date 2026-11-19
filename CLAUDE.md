@@ -95,7 +95,7 @@ The headers, by area (each header's top comment says more):
 | | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), its live form for playback, and integer decimation |
 | | `Ramp.h` | a value ramping to a new target, linearly or by equal ratios, and automation curves |
 | | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels, a rack return's ramps and a gain track |
-| | `Oscillator.h`, `Envelope.h` | band-limited oscillators (the one polyBLEP), and the ADSR envelope |
+| | `Oscillator.h`, `Envelope.h` | band-limited oscillators (the one polyBLEP), a wave made of harmonics, and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut, and the dynamic EQ bell |
 | | `Lpc.h` | linear prediction (gap and click repair, onsets, FLAC) |
 | | `Random.h` | seeded random number generators, the same on every system |
@@ -145,6 +145,7 @@ The headers, by area (each header's top comment says more):
 | Sound | `Synth.h`, `Sampler.h` | the synth (with the options a score's instruments use) and the sampler (with a drum pad's options, a loop rendered through it, and an instrument's recordings as zones) |
 | | `NoteExpression.h` | how a score plays one note (gain, brightness, a slur, a glide, a swell), for the synth and the sampler |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
+| | `VoiceGuide.h` | the guide a singer sings with: notes, sirens and a drone |
 | | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
 | | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys (and by their signature), a line's notes spelled in a key, Hz and MIDI, General MIDI drum names |
@@ -163,7 +164,7 @@ the loudness meter (`lm_*`), `api_measure.cpp` measurement (`ms_*`),
 `api_processing.cpp` processing, DSD to PCM and the true-peak limiter on its
 own (`pr_*`), `api_pitch.cpp` pitch (`pi_*`), `api_tuner.cpp` the tuner
 (`tp_*`), `api_rhythm.cpp` rhythm and the beat grid's meters (`rh_*`),
-`api_sound.cpp` sounds and the metronome's settings (`sd_*`), `api_music.cpp`
+`api_sound.cpp` sounds, the metronome's settings and the singing guide (`sd_*`), `api_music.cpp`
 music vocabulary and note editing (`mu_*`), `api_effects.cpp` the effects
 (`fx_*`), `api_instruments.cpp` the synth, the sampler and a score played by its instruments (`in_*`),
 `api_theory.cpp` the chord and scale theory (`th_*`), `api_restore.cpp` the restoration of record

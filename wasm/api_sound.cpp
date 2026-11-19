@@ -15,6 +15,7 @@
 #include <emscripten/emscripten.h>
 #include "dsp/DrumSynth.h"
 #include "dsp/Metronome.h"
+#include "dsp/VoiceGuide.h"
 
 namespace
 {
@@ -240,4 +241,22 @@ extern "C"
                            (double) e.countIn, (double) e.gap, (double) e.muted, e.bpm, (double) e.units, e.swing, (double) e.polyN, (double) e.subs.size() };
         std::memcpy (out, v, sizeof (v));
     }
+
+    // ---- The guide a singer sings with (vs::VoiceGuide): notes at a frame
+    // (sound 0 piano, 1 soft; glideUp > 0 makes a siren from glideFrom to
+    // glideTo and back), the drone (a negative midi turns it off), the volume
+    // slider, a fade on every note, and sd_guide_process writing n samples
+    // from frame0, returning how many are sounding
+    EMSCRIPTEN_KEEPALIVE vs::VoiceGuide* sd_guide_create (double sampleRate) { auto* g = new vs::VoiceGuide(); g->prepare (sampleRate); return g; }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_destroy (vs::VoiceGuide* g) { delete g; }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_add (vs::VoiceGuide* g, double midi, double at, double seconds, int sound, double level,
+                                            double glideFrom, double glideTo, double glideUp, double glideDown)
+    {
+        const vs::VoiceGuide::Glide gl { glideFrom, glideTo, glideUp, glideDown };
+        g->add (midi, (std::int64_t) at, seconds, sound == 0 ? vs::VoiceGuide::Sound::piano : vs::VoiceGuide::Sound::soft, level, glideUp > 0 ? &gl : nullptr);
+    }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_drone (vs::VoiceGuide* g, double midi, double at) { g->setDrone (midi, (std::int64_t) at); }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_volume (vs::VoiceGuide* g, double slider) { g->setVolume (slider); }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_stop_all (vs::VoiceGuide* g, double at) { g->stopAll ((std::int64_t) at); }
+    EMSCRIPTEN_KEEPALIVE int sd_guide_process (vs::VoiceGuide* g, float* out, int n, double frame0) { return g->process (out, n, (std::int64_t) frame0); }
 }

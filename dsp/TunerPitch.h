@@ -5,6 +5,7 @@
 #include <cmath>
 #include <vector>
 #include "Music.h"
+#include "Oscillator.h"
 #include "Ramp.h"
 #include "Util.h"
 #include "Yin.h"
@@ -135,7 +136,6 @@ namespace vs
             attack.setCurrentAndTarget (0.0f);
             attack.setTarget (1.0f);
             if (kind == pluck) renderPluck();
-            else steadyScale = steadyPeak();
             playing = true;
         }
 
@@ -166,7 +166,7 @@ namespace vs
                 }
                 else
                 {
-                    v = (float) (steadyAt (phase) * steadyScale);
+                    v = (float) steadyWave().at (phase);
                     phase += freq / sr;
                     phase -= std::floor (phase);
                 }
@@ -177,7 +177,7 @@ namespace vs
         }
 
     private:
-        double sr = 48000, freq = 440, phase = 0, steadyScale = 1;
+        double sr = 48000, freq = 440, phase = 0;
         Kind kind = pluck;
         std::vector<float> buf;
         int pos = 0, stopLeft = 0;
@@ -212,20 +212,17 @@ namespace vs
             }
         }
 
-        // the steady tone's wave at phase 0..1: the overtones, each 0.8 of the last's share
-        static double steadyAt (double ph)
+        // the steady tone's wave: the overtones, each 0.8 of the last's share
+        static const HarmonicWave& steadyWave()
         {
-            double v = 0, share = 1;
-            for (size_t k = 0; k < harmonics.size(); ++k, share *= 0.8) v += harmonics[k] * share * std::sin (2 * 3.141592653589793 * (double) (k + 1) * ph);
-            return v;
-        }
-
-        // scaled to full scale over one period
-        static double steadyPeak()
-        {
-            double p = 0;
-            for (int i = 0; i < 4096; ++i) p = std::max (p, std::abs (steadyAt (i / 4096.0)));
-            return p > 0 ? 1.0 / p : 1.0;
+            static const HarmonicWave w = []
+            {
+                std::vector<double> a;
+                double share = 1;
+                for (float h : harmonics) { a.push_back (h * share); share *= 0.8; }
+                return HarmonicWave (a);
+            }();
+            return w;
         }
     };
 

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <random>
 #include <vector>
 #include "dsp/PitchDetector.h"
@@ -209,6 +210,15 @@ int main()
         expect ("timing: offsets, mean, spread and on time", rep && rep->offsets == std::vector<double> { 10, 20, -100 } && rep->mean == -23 && rep->onTime == 67,
                 "mean %.0f ms, %.0f%% on time", rep ? rep->mean : 0, rep ? rep->onTime : 0);
         expect ("timing: nothing played, no report", ! vs::timingReport ({ none }, { 0.0 }));
+    }
+
+    {
+        namespace v = vs::voice;
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        const std::vector<v::PitchFrame> f { { 0.0, 60.0 }, { 0.05, 60.4 }, { 0.1, nan }, { 0.15, 59.6 }, { 0.3, 64.0 } };
+        expect ("mean pitch: the voiced readings in the window, nothing outside it, none when none are voiced",
+                std::abs (v::meanPitch (f, -0.1, 0.2) - 60.0) < 1e-12 && std::abs (v::meanPitch (f, 0.2, 0.4) - 64.0) < 1e-12
+                    && std::isnan (v::meanPitch (f, 0.09, 0.11)));
     }
 
     std::printf ("%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);

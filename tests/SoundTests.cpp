@@ -10,6 +10,7 @@
 #include <vector>
 #include "dsp/DrumSynth.h"
 #include "dsp/Metronome.h"
+#include "dsp/VoiceGuide.h"
 
 namespace
 {
@@ -509,8 +510,67 @@ namespace
     }
 }
 
+    // ---- the singing guide
+
+    void guide()
+    {
+        const double sr = 48000;
+        auto play = [&] (vs::VoiceGuide& g, int seconds)
+        {
+            std::vector<float> out ((size_t) (sr * seconds));
+            for (int b = 0; b * 128 < (int) out.size(); ++b) g.process (out.data() + b * 128, std::min (128, (int) out.size() - b * 128), (std::int64_t) b * 128);
+            return out;
+        };
+        vs::VoiceGuide g;
+        g.prepare (sr);
+        g.setVolume (100);
+        g.add (57, 4800, 1.0, vs::VoiceGuide::Sound::piano);
+        g.add (64, 96000, 1.0, vs::VoiceGuide::Sound::soft, 0.5);
+        const auto x = play (g, 4);
+        float before = 0;
+        for (size_t i = 0; i < 4800; ++i) before = std::max (before, std::abs (x[i]));
+        const float strike = peak ({ x.begin() + 4800, x.begin() + 9600 }), later = peak ({ x.begin() + 38400, x.begin() + 52800 });
+        expect ("guide: a piano note starts on its frame at A3, strikes near the volume (0.6) and mellows to under half of it",
+                before == 0 && std::abs (crossingHz (x, 9600, 52800, sr) - 220.0) < 0.05 && strike > 0.45f && strike < 0.66f && later < 0.3f * 1.1f && later > 0.1f);
+        const float soft = peak ({ x.begin() + 96000 + 4800, x.begin() + 96000 + 43200 });
+        expect ("guide: a soft note holds at three quarters of its share (0.6 x 0.5 x 0.75), at E4, and fades after its end",
+                std::abs (soft - 0.225f) < 0.02f && std::abs (crossingHz (x, 100800, 139200, sr) - 329.63) < 0.05
+                    && peak ({ x.begin() + 96000 + 62400, x.end() }) < 0.001f, std::to_string (soft));
+
+        vs::VoiceGuide s;
+        s.prepare (sr);
+        const vs::VoiceGuide::Glide gl { 48, 60, 1.0, 1.0 };
+        s.add (48, 0, 2.0, vs::VoiceGuide::Sound::piano, 1.0, &gl);
+        const auto y = play (s, 3);
+        const double low = crossingHz (y, 0, 2400, sr), top = crossingHz (y, 46800, 49200, sr), back = crossingHz (y, 93600, 96000, sr);
+        expect ("guide: a siren glides from C3 up an octave and back, each way in equal ratios",
+                std::abs (low - 130.8) < 3 && std::abs (top - 261.6) < 4 && std::abs (back - 130.8) < 3
+                    && std::abs (crossingHz (y, 23400, 25800, sr) - 185.0) < 4);
+
+        vs::VoiceGuide d;
+        d.prepare (sr);
+        d.setDrone (45, 0);
+        d.add (69, 24000, 5.0, vs::VoiceGuide::Sound::soft);
+        std::vector<float> z ((size_t) sr * 2);
+        int sounding = 0;
+        for (int b = 0; b * 128 < (int) z.size(); ++b)
+        {
+            const std::int64_t f0 = (std::int64_t) b * 128;
+            if (f0 == 48000) { d.stopAll (48000); d.setVolume (30); }
+            sounding = d.process (z.data() + b * 128, 128, f0);
+        }
+        float droneAlone = peak ({ z.begin() + 14400, z.begin() + 24000 });
+        expect ("guide: the drone (half the volume) plays on through a stop, the notes fade, a new volume glides the drone",
+                std::abs (droneAlone - 0.108f) < 0.01f && sounding == 1 && peak ({ z.begin() + 86400, z.end() }) < 0.04f && peak ({ z.begin() + 86400, z.end() }) > 0.02f);
+        d.setDrone (-1, 96000);
+        std::vector<float> w ((size_t) sr);
+        for (int b = 0; b * 128 < (int) w.size(); ++b) sounding = d.process (w.data() + b * 128, 128, 96000 + (std::int64_t) b * 128);
+        expect ("guide: turning the drone off fades it out and it ends", sounding == 0 && peak ({ w.begin() + 24000, w.end() }) == 0.0f);
+    }
+
 int main()
 {
+    guide();
     meters();
     trainerAndGap();
     cleaning();
