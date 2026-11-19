@@ -60,6 +60,34 @@ int main()
     expect ("rods: none measured", vs::drums::rodSpread ({ 0, 0 }).mean == 0 && std::isnan (vs::drums::rodSpread ({ 0 }).cents[0]));
     expect ("toms in steps down from the top", vs::drums::tomSteps (55, 4, 3) == std::vector<double> { 55, 52, 49, 46 });
 
+    // catching hits in a live input: a tom hit at 1 s, another 0.3 s later (too soon), one more at 2 s
+    {
+        std::vector<float> live ((size_t) (fs * 3), 0.0f);
+        auto put = [&] (double at, double f0, double level)
+        {
+            const auto h = hit (f0, fs, { { 1, 1 }, { 1.59, 0.5 } });
+            for (size_t i = 0; i < h.size() && (size_t) (at * fs) + i < live.size(); ++i) live[(size_t) (at * fs) + i] += (float) (level * h[i]);
+        };
+        put (1.0, 147, 1.0);
+        put (1.3, 300, 1.0);
+        put (2.0, 196, 1.0);
+        put (2.6, 220, 0.002); // too quiet to count
+        vs::drums::DrumHits hits;
+        hits.prepare (fs);
+        std::vector<double> found;
+        for (size_t at = 0; at < live.size(); at += 1024)
+            if (hits.push (live.data() + at, (int) std::min<size_t> (1024, live.size() - at)))
+                found.push_back (vs::drums::drumPeak (hits.ringed().data(), vs::drums::DrumHits::capture, fs, 50, 1500));
+        expect ("hits: two caught (one too soon after the first, one too quiet), each ring's note measured",
+                found.size() == 2 && std::abs (found[0] - 147) < 2 && std::abs (found[1] - 196) < 2, "%.0f hits, %.1f / %.1f Hz", (double) found.size(),
+                found.size() > 0 ? found[0] : 0, found.size() > 1 ? found[1] : 0);
+        hits.reset();
+        bool none = true;
+        const std::vector<float> silence (48000, 0.0f);
+        for (int k = 0; k < 4; ++k) none = none && ! hits.push (silence.data(), 12000);
+        expect ("hits: silence is no hit", none);
+    }
+
     std::printf ("%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
     return failures == 0 ? 0 : 1;
 }

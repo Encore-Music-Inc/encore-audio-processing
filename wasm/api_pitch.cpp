@@ -242,6 +242,16 @@ extern "C"
         return r.mean;
     }
 
+    // ---- Catching drum hits in a live input (vs::drums::DrumHits): push n
+    // samples; 1 when a hit's ring has just been caught, then pi_hits_ring has
+    // its pi_hits_ring_length samples, ready for pi_drum_peak
+    EMSCRIPTEN_KEEPALIVE vs::drums::DrumHits* pi_hits_create (double sampleRate) { auto* h = new vs::drums::DrumHits(); h->prepare (sampleRate); return h; }
+    EMSCRIPTEN_KEEPALIVE void pi_hits_destroy (vs::drums::DrumHits* h) { delete h; }
+    EMSCRIPTEN_KEEPALIVE void pi_hits_reset (vs::drums::DrumHits* h) { h->reset(); }
+    EMSCRIPTEN_KEEPALIVE int pi_hits_push (vs::drums::DrumHits* h, const float* x, int n) { return h->push (x, n) ? 1 : 0; }
+    EMSCRIPTEN_KEEPALIVE const float* pi_hits_ring (vs::drums::DrumHits* h) { return h->ringed().data(); }
+    EMSCRIPTEN_KEEPALIVE int pi_hits_ring_length() { return vs::drums::DrumHits::capture; }
+
     // Notes for count toms tuned in steps, into out[0..count).
     EMSCRIPTEN_KEEPALIVE void pi_tom_steps (double top, int count, double step, double* out)
     {

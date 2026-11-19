@@ -130,6 +130,51 @@ namespace
             expect ("tuner follow: smooths close readings, jumps to a new note, clears after silence, counts steady reads",
                     a == 110.0f && std::abs (b2 - (110.0f * 0.6f + 112.0f * 0.4f)) < 1e-4f && c == 220.0f && held && ! f.hasNote() && steady == 5);
         }
+        // the tuner's reference tone, and where a note sits in a temperament
+        {
+            const double fs = 48000;
+            auto crossingHz = [&] (const std::vector<float>& x, size_t from, size_t to)
+            {
+                int ups = 0; double first = -1, last = -1;
+                for (size_t i = from + 1; i < to; ++i)
+                    if (x[i - 1] <= 0 && x[i] > 0) { const double t = (double) (i - 1) + x[i - 1] / (x[i - 1] - x[i]); if (first < 0) first = t; last = t; ++ups; }
+                return ups > 1 ? (ups - 1) * fs / (last - first) : 0.0;
+            };
+            vs::TunerTone tone;
+            tone.prepare (fs);
+            tone.start (110.0, vs::TunerTone::pluck, 60);
+            std::vector<float> p ((size_t) (fs * 6));
+            const bool ringing = tone.process (p.data(), (int) (fs * 4));
+            const bool over = ! tone.process (p.data() + (size_t) (fs * 4), (int) (fs * 2));
+            float peak = 0;
+            for (float v : p) peak = std::max (peak, std::abs (v));
+            expect ("tuner tone: a pluck at exactly 110 Hz, the slider's level (0.6 squared, halved), over after five seconds",
+                    std::abs (crossingHz (p, 2400, 48000) - 110.0) < 0.01 && std::abs (peak - 0.18f) < 0.005f && ringing && over && p[0] == 0.0f
+                        && p[(size_t) (fs * 5)] == 0.0f);
+            tone.start (82.41, vs::TunerTone::steady, 100);
+            std::vector<float> s1 ((size_t) fs);
+            tone.process (s1.data(), (int) fs);
+            float sp = 0;
+            for (size_t i = 4800; i < s1.size(); ++i) sp = std::max (sp, std::abs (s1[i]));
+            tone.setVolume (50);
+            std::vector<float> s2 ((size_t) fs);
+            tone.process (s2.data(), (int) fs);
+            float sp2 = 0;
+            for (size_t i = 24000; i < s2.size(); ++i) sp2 = std::max (sp2, std::abs (s2[i]));
+            tone.stop();
+            std::vector<float> s3 ((size_t) (fs * 0.3));
+            const bool stillAfterStop = tone.process (s3.data(), (int) (fs * 0.1));
+            const bool endedAfterStop = ! tone.process (s3.data() + (size_t) (fs * 0.1), (int) (fs * 0.2));
+            expect ("tuner tone: steady at exactly 82.41 Hz until stopped, a new volume glides to its level, stopping fades out and ends",
+                    std::abs (crossingHz (s1, 4800, s1.size()) - 82.41) < 0.01 && std::abs (sp - 0.5f) < 0.002f && std::abs (sp2 - 0.125f) < 0.002f
+                        && stillAfterStop && endedAfterStop && s3[(size_t) (fs * 0.25)] == 0.0f);
+            std::array<float, 12> meantone {};
+            meantone[4] = -13.7f; // E, in a quarter-comma meantone on C
+            expect ("a note's pitch in a temperament: equal, and turned to another key",
+                    std::abs (vs::TunerReading::targetHzOf (69, 440, {}, 0) - 440.0) < 1e-9
+                        && std::abs (vs::TunerReading::targetHzOf (64, 440, meantone, 0) - 440.0 * std::pow (2.0, (64 - 69 - 0.137) / 12)) < 1e-6
+                        && std::abs (vs::TunerReading::targetHzOf (66, 440, meantone, 2) - 440.0 * std::pow (2.0, (66 - 69 - 0.137) / 12)) < 1e-6);
+        }
         // presets
         {
             const auto& master = vs::presets::forChain ("master");

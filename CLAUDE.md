@@ -134,10 +134,10 @@ The headers, by area (each header's top comment says more):
 | Live recordings | `LiveSet.h` | the songs in a live set, and what's between them (applause, talk, tuning, quiet) |
 | Pitch | `Yin.h` | the one pitch detector, with its follow, tuner and voice settings |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction's detector and its real-time engine |
-| | `TunerPitch.h` | the tuner's pitch and what it means on the instrument |
+| | `TunerPitch.h` | the tuner's pitch, what it means on the instrument, and its reference tone |
 | | `Tunings.h` | the tuner's list (written by `tools/tunings.py`) |
 | | `VoiceTracker.h` | following a singing voice and measuring it; played notes; the notes of warm-ups, sing-back and the keys that suit a range |
-| | `DrumPitch.h` | drum tuning |
+| | `DrumPitch.h` | drum tuning, and catching each hit in a live input |
 | Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
 | | `TimingCheck.h` | latency, playing in time with a click, and how much later a second recording of a performance hears it |

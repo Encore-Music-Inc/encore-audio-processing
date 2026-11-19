@@ -117,9 +117,9 @@ CI fails if either differs from what the script writes.
 | Live recordings | `LiveSet.h` | the songs in a live set, and what's between them: applause, talk, tuning, quiet |
 | Pitch | `Yin.h` | the pitch detector, with its settings for following a voice, the tuner and singing |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction: its detector and its real-time engine |
-| | `TunerPitch.h`, `Tunings.h` | the tuner, and its instruments and tunings |
+| | `TunerPitch.h`, `Tunings.h` | the tuner and its reference tone, and its instruments and tunings |
 | | `VoiceTracker.h` | following a singing voice and measuring it, played notes, and the notes of warm-ups, sing-back and the keys that suit a range |
-| | `DrumPitch.h` | drum tuning |
+| | `DrumPitch.h` | drum tuning, and catching each hit in a live input |
 | Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
 | | `TimingCheck.h` | the speaker-to-mic latency, playing in time with a click, and how much later a second recording of a performance hears it |
