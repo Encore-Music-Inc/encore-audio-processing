@@ -142,8 +142,9 @@ The headers, by area (each header's top comment says more):
 | | `Onsets.h` | note onsets in a live stream |
 | | `TimingCheck.h` | latency, playing in time with a click, and how much later a second recording of a performance hears it |
 | | `Metronome.h` | the beat grid, sequencer, click sounds, click engine and its voices for a host's timeline |
-| Sound | `Synth.h`, `Sampler.h` | the synth and the sampler (with a drum pad's options, and a loop rendered through it) |
+| Sound | `Synth.h`, `Sampler.h` | the synth (with the options a score's instruments use) and the sampler (with a drum pad's options, and a loop rendered through it) |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
+| | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on) |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library (written by `tools/scales.py`) |
 | | `ChordTypes.h` | the chord types (written by `tools/chords.py`) |

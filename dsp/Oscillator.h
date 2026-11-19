@@ -23,7 +23,9 @@ namespace vs
         enum class Wave { sine, triangle, sawUp, sawDown, square, noise };
 
         void setWave (Wave w) { wave = w; }
-        void setPhase (double p) { phase = p - std::floor (p); }
+        // Moves to a point in the cycle (0..1); a triangle starts there on its
+        // own line, so a note starting part-way through the cycle has no offset
+        void setPhase (double p) { phase = p - std::floor (p); triFresh = true; }
         // A pulse's width for the square wave, 0.05 .. 0.95 (0.5 is square)
         void setPulseWidth (double pw) { width = pw < 0.05 ? 0.05 : pw > 0.95 ? 0.95 : pw; }
         void seed (std::uint32_t s) { rng = Xorshift32 (s); }
@@ -55,6 +57,8 @@ namespace vs
                     double sq = phase < 0.5 ? 1.0 : -1.0;
                     sq += polyBlep (phase, dt);
                     sq -= polyBlep (std::fmod (phase + 0.5, 1.0), dt);
+                    // the integral follows the triangle half a step ahead: start it there
+                    if (triFresh) { tri = triangleAt (std::fmod (phase + 0.5 * dt, 1.0)) - dt * sq * 4.0; triFresh = false; }
                     tri = dt * sq * 4.0 + (1.0 - dt * 0.01) * tri;
                     v = tri;
                     break;
@@ -68,7 +72,11 @@ namespace vs
 
     private:
         Wave wave = Wave::sine;
-        double phase = 0.0, width = 0.5, tri = 0.0;
+        // The triangle the integrated square follows, at a point in its cycle: -1 at 0, 1 at a half
+        static double triangleAt (double p) { return p < 0.5 ? 4.0 * p - 1.0 : 3.0 - 4.0 * p; }
+
+        double phase = 0.0, width = 0.5, tri = -1.0;
+        bool triFresh = true;
         Xorshift32 rng { 1 };
     };
 }
