@@ -117,6 +117,22 @@ extern "C"
         put (vs::music::spellNote (pc, hasKey ? &k : nullptr, side), out);
     }
 
+    // ---- keys by their signature (fifths: +1 .. +7 sharps, -1 .. -7 flats)
+    // The alteration the signature gives a letter (0 C .. 6 B)
+    EMSCRIPTEN_KEEPALIVE int mu_signature_alter (int letter, int fifths) { return vs::music::signatureAlter (letter, fifths); }
+    // The signature's tonic (major, or minor 1), into out[0..1]
+    EMSCRIPTEN_KEEPALIVE void mu_key_from_fifths (int fifths, int minor, int* out)
+    {
+        put (vs::music::keyFromFifths (fifths, minor ? vs::music::Mode::minor : vs::music::Mode::major).tonic, out);
+    }
+    // The signature a transposing instrument reads, written semitones above concert
+    EMSCRIPTEN_KEEPALIVE int mu_transpose_fifths (int fifths, int semitones) { return vs::music::transposeFifths (fifths, semitones); }
+    // A pitch class spelled in a signature's key on its way up (1), down (-1) or neither (0), into out[0..1]
+    EMSCRIPTEN_KEEPALIVE void mu_spell_moving (int pc, int fifths, int minor, int direction, int* out)
+    {
+        put (vs::music::spellMoving (pc, fifths, minor ? vs::music::Mode::minor : vs::music::Mode::major, direction), out);
+    }
+
     // "F# major", "Eb minor"
     EMSCRIPTEN_KEEPALIVE int mu_key_name (int tonicLetter, int tonicAcc, int minor, char* out, int cap)
     {

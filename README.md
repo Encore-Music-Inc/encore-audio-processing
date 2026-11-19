@@ -130,7 +130,7 @@ CI fails if either differs from what the script writes.
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
 | | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak |
-| Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
+| Music vocabulary | `Music.h` | note names, spelled notes, keys (and by their signature), a line's notes spelled in a key, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library |
 | | `ChordTypes.h` | the chord types: formulas, symbols, numerals, families, the picker's groups |
 | | `Harmony.h` | chords: degrees, symbols, naming a set of notes, numerals, the map of a key, key changes, the moves between chords and the facts behind them, transposing, guessing a song's key from its chords, a capo for a shift |

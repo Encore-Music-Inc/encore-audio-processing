@@ -147,7 +147,7 @@ The headers, by area (each header's top comment says more):
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
 | | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak |
-| Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
+| Music vocabulary | `Music.h` | note names, spelled notes, keys (and by their signature), a line's notes spelled in a key, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library (written by `tools/scales.py`) |
 | | `ChordTypes.h` | the chord types (written by `tools/chords.py`) |
 | | `Harmony.h` | chords: naming notes, numerals, the map of a key, key changes, the moves between chords and their facts, transposing, guessing a song's key, a capo for a shift |

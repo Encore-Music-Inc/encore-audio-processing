@@ -79,6 +79,22 @@ namespace
         expect ("octaves: B#3 sounds as C4, Cb4 as B3", midiText (60, *parseNote ("B#")) == "B#3" && midiText (59, *parseNote ("Cb")) == "Cb4");
         expect ("side: 1 asks for C#, -1 for Db, white keys stay", noteText (spellNote (1, nullptr, 1)) == "C#"
                                                                     && noteText (spellNote (1, nullptr, -1)) == "Db" && noteText (spellNote (2, nullptr, -1)) == "D");
+
+        // keys by their signature, and a line's notes spelled in them
+        expect ("a signature's letters: Bb major flats B and E", signatureAlter (6, -2) == -1 && signatureAlter (2, -2) == -1 && signatureAlter (5, -2) == 0
+                                                                && signatureAlter (3, 1) == 1 && signatureAlter (0, 1) == 0);
+        expect ("a signature's key: 3 flats Eb major or C minor, 6 sharps F# major or D# minor",
+                keyName (keyFromFifths (-3)) == "Eb major" && keyName (keyFromFifths (-3, Mode::minor)) == "C minor"
+                    && keyName (keyFromFifths (6)) == "F# major" && keyName (keyFromFifths (6, Mode::minor)) == "D# minor");
+        expect ("a B-flat trumpet in C reads D; an E-flat alto sax in Eb reads C", transposeFifths (0, 2) == 2 && transposeFifths (-3, 9) == 0);
+        auto mv = [] (int pc, int f, int dir, Mode m = Mode::major) { return noteText (spellMoving (pc, f, m, dir)); };
+        expect ("a note of the key takes its spelling, whatever the direction", mv (6, 1, 0) == "F#" && mv (6, 1, -1) == "F#" && mv (11, -7, 0) == "Cb");
+        expect ("a chromatic note: raised going up, lowered going down", mv (4, -3, -1) == "Fb" && mv (4, -3, 1) == "E" && mv (1, 0, 1) == "C#" && mv (1, 0, -1) == "Db");
+        expect ("with no direction, the degree it usually takes", mv (1, 0, 0) == "Db" && mv (6, 0, 0) == "F#" && mv (10, 0, 0) == "Bb");
+        expect ("in minor the raised 6th and 7th and the Picardy third are sharps", mv (8, 0, 0, Mode::minor) == "G#" && mv (6, 0, 0, Mode::minor) == "F#"
+                                                                                 && mv (1, 0, 0, Mode::minor) == "C#");
+        expect ("a double sharp where the key calls for it: Fx in G# minor", mv (7, 5, 0, Mode::minor) == "Fx" || mv (7, 5, 0, Mode::minor) == "F##",
+                mv (7, 5, 0, Mode::minor));
     }
 
     void keys()

@@ -1324,6 +1324,25 @@ namespace
                 out.push_back ({ p + ".inF#", spelled (inKey (pc, note (3, 1))) });
                 out.push_back ({ p + ".inDb", spelled (inKey (pc, note (1, -1))) });
             }
+            // keys by their signature, and notes spelled in them on their way up, down or neither
+            for (int f = -7; f <= 7; ++f)
+                for (int minor = 0; minor < 2; ++minor)
+                {
+                    const auto mode = minor ? Mode::minor : Mode::major;
+                    const auto id = "fifths" + std::to_string (f) + (minor ? "m" : "");
+                    out.push_back ({ id + ".key", keyName (keyFromFifths (f, mode)) });
+                    std::string sig;
+                    for (int l = 0; l < 7; ++l) sig += std::to_string (signatureAlter (l, f)) + (l < 6 ? " " : "");
+                    out.push_back ({ id + ".signature", sig });
+                    out.push_back ({ id + ".written2", (double) transposeFifths (f, 2) });
+                    out.push_back ({ id + ".written9", (double) transposeFifths (f, 9) });
+                    for (int dir = -1; dir <= 1; ++dir)
+                    {
+                        std::string line;
+                        for (int pc = 0; pc < 12; ++pc) line += (pc ? " " : "") + spelled (spellMoving (pc, f, mode, dir));
+                        out.push_back ({ id + ".moving" + std::to_string (dir), line });
+                    }
+                }
             for (const auto& t : c.find ("parse")->items)
             {
                 const auto nn = parseNote (t.str);

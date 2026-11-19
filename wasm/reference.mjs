@@ -898,6 +898,21 @@ function runMore(c, sig, out) {
         X.mu_in_key(pc, 3, 1, intBuf); out.push([p + '.inF#', spelledAt(intBuf)]);
         X.mu_in_key(pc, 1, -1, intBuf); out.push([p + '.inDb', spelledAt(intBuf)]);
       }
+      for (let f = -7; f <= 7; f++)
+        for (let minor = 0; minor < 2; minor++) {
+          const id = `fifths${f}${minor ? 'm' : ''}`;
+          X.mu_key_from_fifths(f, minor, intBuf);
+          const t = i32(intBuf, 2).slice();
+          out.push([id + '.key', mtext((b, cap) => X.mu_key_name(t[0], t[1], minor, b, cap))]);
+          out.push([id + '.signature', Array.from({ length: 7 }, (_, l) => X.mu_signature_alter(l, f)).join(' ')]);
+          out.push([id + '.written2', X.mu_transpose_fifths(f, 2)]);
+          out.push([id + '.written9', X.mu_transpose_fifths(f, 9)]);
+          for (let dir = -1; dir <= 1; dir++) {
+            const line = [];
+            for (let pc = 0; pc < 12; pc++) { X.mu_spell_moving(pc, f, minor, dir, intBuf); line.push(spelledAt(intBuf)); }
+            out.push([`${id}.moving${dir}`, line.join(' ')]);
+          }
+        }
       for (const t of nums('parse')) {
         const tp = text(t);
         out.push(['note:' + t, X.mu_parse_note(tp, intBuf) ? spelledAt(intBuf) : '-']);
