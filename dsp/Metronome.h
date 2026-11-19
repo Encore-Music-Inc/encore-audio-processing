@@ -26,6 +26,7 @@
 #include "Util.h"
 #include "Channels.h"
 #include "DrumSynth.h"
+#include "Ramp.h"
 
 namespace vs::metronome
 {
@@ -709,6 +710,23 @@ namespace vs::metronome
 
         void stop() { running = false; }
 
+        // The master volume (a slider, 0 to 100) and mute, on the whole mix: the slider's curve
+        // with headroom for an accent, a subdivision and the polyrhythm landing together. The
+        // first setting takes hold at once; a change after it ramps, so it doesn't click. Until
+        // it's set, the mix is at full level.
+        static constexpr double masterHeadroom = 0.8, masterRampSeconds = 0.02;
+        void setMaster (double slider, bool muted = false)
+        {
+            const auto g = (float) (muted ? 0.0 : sliderGain (slider) * masterHeadroom);
+            if (! masterSet)
+            {
+                master.reset (sr, masterRampSeconds);
+                master.setCurrentAndTarget (g);
+                masterSet = true;
+            }
+            else master.setTarget (g);
+        }
+
         // The counts that started in the last render() call
         const std::vector<CountEvent>& lastEvents() const { return events; }
 
@@ -740,12 +758,21 @@ namespace vs::metronome
                 }
             }
             voices.mix (out, n, frame0);
+            if (masterSet)
+            {
+                if (master.isRamping())
+                    for (int i = 0; i < n; ++i) out[i] *= master.next();
+                else if (master.getTarget() != 1.0f)
+                    for (int i = 0; i < n; ++i) out[i] *= master.getTarget();
+            }
             return events;
         }
 
     private:
         ClickVoices voices;
         std::vector<CountEvent> events;
+        Ramp<false> master;
+        bool masterSet = false;
 
         void voice (const Buffer* buf, double at, double gain)
         {

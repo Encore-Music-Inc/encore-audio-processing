@@ -219,6 +219,8 @@ extern "C"
         h->engine.start (frame, { countIn != 0, seed });
     }
 
+    // The master volume (a slider, 0 to 100) and mute, ramped after the first setting
+    EMSCRIPTEN_KEEPALIVE void sd_engine_set_master (ClickEngineHandle* h, double slider, int muted) { h->engine.setMaster (slider, muted != 0); }
     EMSCRIPTEN_KEEPALIVE void sd_engine_stop (ClickEngineHandle* h) { h->engine.stop(); }
 
     // Mixes frames [frame0, frame0 + n) into out (from malloc); returns how

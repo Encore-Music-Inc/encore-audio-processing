@@ -246,6 +246,20 @@ namespace
         g.stop();
         std::vector<float> tail (128 * 20);
         for (int k = 0; k < 20; ++k) g.render (tail.data() + k * 128, 128, 25600 + k * 128);
+        m::ClickEngine h (48000);
+        h.setSounds (m::makeSounds ("classic", 48000));
+        h.set ({});
+        h.setMaster (50);
+        h.start (480);
+        const auto half = run (h, 400, 128);
+        expect ("the master volume: slider 50 is 0.25 of the mix, times 0.8 headroom, at once",
+                std::abs (peak ({ half.begin() + 480, half.begin() + 4000 }) - 0.2f) < 1e-6f);
+        h.setMaster (50, true);
+        h.start (0);
+        std::vector<float> fade (1920);
+        h.render (fade.data(), 1920, 0);
+        expect ("muting ramps down over 20 ms, then silence",
+                fade[0] != 0 && std::abs (fade[0]) <= 0.2f && peak ({ fade.begin() + 960, fade.end() }) == 0);
         expect ("render hands out each count once; stop lets the last click ring out",
                 counts == 2 && ev[0].size() == 1 && ev[187].size() == 1 && tail[0] != 0 && peak ({ tail.begin() + 1280, tail.end() }) == 0);
     }
