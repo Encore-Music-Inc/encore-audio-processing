@@ -167,7 +167,7 @@ def rule(op, name):
     if op == "laws":
         return "exact" if parts[0] in ("tempo", "tuner") else "law"
     if op == "levels":
-        return {"rms": "level", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
+        return {"rms": "level", "pairDb": "db", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
     if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument",
               "gain-track", "live-route", "rumble", "pad-loop", "soft-clip", "ensemble"):
         if op == "vocoder" and last == "peak":

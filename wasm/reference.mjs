@@ -625,7 +625,15 @@ function runMore(c, sig, out) {
     case 'levels': {
       const src = channelsOf(sig);
       const buf = alloc(src);
-      out.push(['rms', X.pr_rms(buf.ptrs[0], n)], ['silent', X.pr_nearly_silent(buf.ptrs[0], n)]);
+      out.push(['rms', X.pr_rms(buf.ptrs[0], n)]);
+      {
+        const inter = new Float32Array(n * src.length);
+        for (let i = 0; i < n; i++) for (let c = 0; c < src.length; c++) inter[i * src.length + c] = src[c][i];
+        const ib = alloc([inter]);
+        out.push(['pairDb', X.pr_rms_db(ib.ptrs[0], n, src.length, Math.min(2, src.length))]);
+        ib.free();
+      }
+      out.push(['silent', X.pr_nearly_silent(buf.ptrs[0], n)]);
       const quiet = alloc([new Float32Array(n).fill(0.0001)]);
       out.push(['quietSilent', X.pr_nearly_silent(quiet.ptrs[0], n)]);
       quiet.free();
@@ -636,6 +644,9 @@ function runMore(c, sig, out) {
       let peak = 0;
       for (const x of src) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(x[i]));
       out.push(['gainDb', X.pr_gain_to_peak_db(peak, -0.3, -60, 24)]);
+      // a gain given in dB
+      X.pr_apply_gain_db(buf.table, src.length, n, -6.5);
+      fingerprintAudio(out, 'gained', buf.ptrs.map((p) => f32(p, n).slice()), fs);
       buf.free();
       return true;
     }

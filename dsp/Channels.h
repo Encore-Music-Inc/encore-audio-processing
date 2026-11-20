@@ -265,13 +265,15 @@ namespace vs
         }
 
         // The RMS level of one channel's n samples (0 for none), every
-        // stride-th value for a channel interleaved with others.
-        inline float rmsOf (const float* x, int n, int stride = 1)
+        // stride-th value for a channel interleaved with others; with count,
+        // the first count channels of each stride-wide frame together (a pair).
+        inline float rmsOf (const float* x, int n, int stride = 1, int count = 1)
         {
-            if (n <= 0) return 0.0f;
+            if (n <= 0 || count <= 0) return 0.0f;
             double sum = 0.0;
-            for (int i = 0; i < n; ++i) { const double v = x[(std::ptrdiff_t) i * stride]; sum += v * v; }
-            return (float) std::sqrt (sum / n);
+            for (int i = 0; i < n; ++i)
+                for (int k = 0; k < count; ++k) { const double v = x[(std::ptrdiff_t) i * stride + k]; sum += v * v; }
+            return (float) std::sqrt (sum / ((double) n * count));
         }
 
         // Whether a block is as good as silent: its first, middle and peak

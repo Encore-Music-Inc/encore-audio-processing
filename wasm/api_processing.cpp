@@ -179,6 +179,8 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE float pr_peak (const float* const* chans, int numCh, int n) { return vs::channels::peakOf (chans, numCh, n); }
     // n samples of each channel times a fixed gain, in place
     EMSCRIPTEN_KEEPALIVE void pr_apply_gain (float* const* chans, int numCh, int n, float gain) { vs::mix::applyGain (gain, chans, numCh, n); }
+    // the same with the gain in dB (a level change worked out as a difference of loudnesses)
+    EMSCRIPTEN_KEEPALIVE void pr_apply_gain_db (float* const* chans, int numCh, int n, float gainDb) { vs::mix::applyGain (vs::dbToGain (gainDb), chans, numCh, n); }
     // n samples of src times a gain added into dst (a gain of -1: dst minus src, what one version took out of another)
     EMSCRIPTEN_KEEPALIVE void pr_add_with_gain (const float* src, float* dst, int n, float gain) { vs::mix::addWithGain (src, dst, n, gain); }
     // mode: 0 off, 1 peak (-1 dBFS), 2 LUFS (-14, capped at -1 dBFS peak). out: four doubles,
@@ -356,9 +358,11 @@ extern "C"
         return vs::curve::valueAt (x, x1, y1, curve, x2, y2);
     }
 
-    // ---- Levels: one channel's RMS, whether a block is nearly silent, every
+    // ---- Levels: one channel's RMS (or a pair's, in dB), whether a block is nearly silent, every
     // channel averaged into out, and the gain in dB that brings a peak to targetDb.
     EMSCRIPTEN_KEEPALIVE float pr_rms (const float* x, int n) { return vs::channels::rmsOf (x, n); }
+    // the RMS level in dB of n interleaved frames of numCh channels, the first count of them together (a recording's main pair)
+    EMSCRIPTEN_KEEPALIVE float pr_rms_db (const float* x, int n, int numCh, int count) { return vs::ampToDb (vs::channels::rmsOf (x, n, numCh, count)); }
     EMSCRIPTEN_KEEPALIVE int pr_nearly_silent (const float* x, int n) { return vs::channels::isNearlySilent (x, n) ? 1 : 0; }
     EMSCRIPTEN_KEEPALIVE void pr_mono_average (const float* const* chans, int numCh, int n, float* out) { vs::channels::monoAverage (chans, numCh, n, out); }
     EMSCRIPTEN_KEEPALIVE float pr_gain_to_peak_db (float peak, float targetDb, float minDb, float maxDb) { return vs::channels::gainToPeakDb (peak, targetDb, minDb, maxDb); }

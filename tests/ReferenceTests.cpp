@@ -1028,6 +1028,12 @@ namespace
             const auto chans = copyOf (*in);
             const auto src = constPointers (chans);
             out.push_back ({ "rms", (double) rmsOf (in->l.data(), (int) n) });
+            {
+                std::vector<float> inter ((size_t) n * (size_t) in->channels);
+                for (size_t i = 0; i < (size_t) n; ++i)
+                    for (int c = 0; c < in->channels; ++c) inter[i * (size_t) in->channels + (size_t) c] = chans[(size_t) c][i];
+                out.push_back ({ "pairDb", (double) vs::ampToDb (rmsOf (inter.data(), (int) n, in->channels, std::min (2, in->channels))) });
+            }
             out.push_back ({ "silent", isNearlySilent (in->l.data(), (int) n) ? 1.0 : 0.0 });
             std::vector<float> quiet ((size_t) n, 0.0001f);
             out.push_back ({ "quietSilent", isNearlySilent (quiet.data(), (int) n) ? 1.0 : 0.0 });
@@ -1035,6 +1041,12 @@ namespace
             monoAverage (src.data(), in->channels, (int) n, mono[0].data());
             fingerprintAudio (out, "mono", mono, fs);
             out.push_back ({ "gainDb", (double) gainToPeakDb (peakOf (src.data(), in->channels, (int) n), -0.3f) });
+            // a gain given in dB (pr_apply_gain_db)
+            auto gained = copyOf (*in);
+            std::vector<float*> gp;
+            for (auto& c : gained) gp.push_back (c.data());
+            vs::mix::applyGain (vs::dbToGain (-6.5f), gp.data(), (int) gp.size(), (int) n);
+            fingerprintAudio (out, "gained", gained, fs);
         }
         else if (op == "fracdelay")
         {
