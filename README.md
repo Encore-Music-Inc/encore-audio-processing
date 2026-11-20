@@ -129,6 +129,7 @@ CI fails if either differs from what the script writes.
 | | `NoteExpression.h` | how a score plays one note (gain, brightness, a slur, a glide, a swell) |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
 | | `VoiceGuide.h` | the guide a singer sings with: notes, sirens and a drone |
+| | `NotePlayer.h` | notes played for the theory tools: a chord strummed or struck together, a melody, a progression |
 | | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
 | | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys (and by their signature), a line's notes spelled in a key, Hz and MIDI, General MIDI drum names |
@@ -155,7 +156,7 @@ CI fails if either differs from what the script writes.
 | `wasm/api_pitch.cpp` | `pi_` | voice pitch and its measurements, played notes, drum tuning |
 | `wasm/api_tuner.cpp` | `tp_` | the tuner, the block averaging before a reading, and following its readings |
 | `wasm/api_rhythm.cpp` | `rh_` | tempo, onsets, timing, the beat grid's meters (groupings, accents, note values, subdivisions, tempo names) |
-| `wasm/api_sound.cpp` | `sd_` | the drums, the metronome (its sounds, its click engine and mending its settings) and the singing guide |
+| `wasm/api_sound.cpp` | `sd_` | the drums, the metronome (its sounds, its click engine and mending its settings), the singing guide and the theory tools' notes |
 | `wasm/api_music.cpp` | `mu_` | note names, spelled notes and the sounds they make, keys and the key lists, Hz and MIDI, note editing on a grid |
 | `wasm/api_theory.cpp` | `th_` | the chord and scale theory: one function that answers a JSON request (`dsp/TheoryCalls.h` lists them) |
 | `wasm/api_restore.cpp` | `rs_` | the restoration of record and tape transfers: the chain, the analysis and its detectors, the noise profile, the clip check, a side's level envelope |

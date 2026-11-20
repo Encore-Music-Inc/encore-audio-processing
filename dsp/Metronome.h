@@ -633,10 +633,14 @@ namespace vs::metronome
         void clear() { voices.clear(); }
         bool empty() const { return voices.empty(); }
 
-        // A sound (kept alive by owner) starting at frame `at`, times gain; a gain of 0 adds nothing
-        void add (std::shared_ptr<const void> owner, const Buffer* buf, std::int64_t at, double gain)
+        // A sound (kept alive by owner) starting at frame `at`, times gain; a gain of 0 adds nothing.
+        // With a release, from frame releaseAt it dies away (falling 63% every releaseTc frames)
+        // and ends at endAt.
+        void add (std::shared_ptr<const void> owner, const Buffer* buf, std::int64_t at, double gain,
+                  std::int64_t releaseAt = -1, double releaseTc = 1.0, std::int64_t endAt = -1)
         {
-            if (gain > 0 && buf != nullptr) voices.push_back ({ std::move (owner), buf, at, gain });
+            if (gain > 0 && buf != nullptr)
+                voices.push_back ({ std::move (owner), buf, at, gain, releaseAt, releaseAt >= 0 ? std::exp (-1.0 / std::max (1.0, releaseTc)) : 1.0, endAt, gain });
         }
 
         void add (std::shared_ptr<const Buffer> sound, std::int64_t at, double gain)
@@ -653,12 +657,19 @@ namespace vs::metronome
             for (size_t vi = 0; vi < voices.size(); ++vi)
             {
                 auto& v = voices[vi];
-                const auto len = (std::int64_t) v.buf->size();
+                const auto len = std::min ((std::int64_t) v.buf->size(), v.endAt >= 0 ? v.endAt - v.at : std::numeric_limits<std::int64_t>::max());
                 if (v.at < end)
                 {
                     const std::int64_t from = std::max (v.at, frame0), stop = std::min (end, v.at + len);
-                    for (std::int64_t f = from; f < stop; ++f)
-                        out[f - frame0] = (float) (out[f - frame0] + (double) (*v.buf)[(size_t) (f - v.at)] * v.gain);
+                    if (v.releaseAt < 0)
+                        for (std::int64_t f = from; f < stop; ++f)
+                            out[f - frame0] = (float) (out[f - frame0] + (double) (*v.buf)[(size_t) (f - v.at)] * v.gain);
+                    else
+                        for (std::int64_t f = from; f < stop; ++f)
+                        {
+                            if (f >= v.releaseAt) v.now *= v.fall;
+                            out[f - frame0] = (float) (out[f - frame0] + (double) (*v.buf)[(size_t) (f - v.at)] * v.now);
+                        }
                 }
                 if (v.at + len > end)
                 {
@@ -676,6 +687,10 @@ namespace vs::metronome
             const Buffer* buf;
             std::int64_t at;
             double gain;
+            std::int64_t releaseAt;
+            double fall;
+            std::int64_t endAt;
+            double now;
         };
         std::vector<Voice> voices;
     };

@@ -11,6 +11,7 @@
 #include "dsp/DrumSynth.h"
 #include "dsp/Metronome.h"
 #include "dsp/VoiceGuide.h"
+#include "dsp/NotePlayer.h"
 
 namespace
 {
@@ -568,9 +569,63 @@ namespace
         expect ("guide: turning the drone off fades it out and it ends", sounding == 0 && peak ({ w.begin() + 24000, w.end() }) == 0.0f);
     }
 
+    // ---- the theory tools' notes
+
+    void notes()
+    {
+        const double sr = 48000;
+        auto run = [&] (vs::NotePlayer& p, double seconds, std::int64_t from = 0)
+        {
+            std::vector<float> out ((size_t) (sr * seconds));
+            bool on = false;
+            for (int b = 0; b * 128 < (int) out.size(); ++b) on = p.process (out.data() + b * 128, std::min (128, (int) out.size() - b * 128), from + (std::int64_t) b * 128);
+            return std::make_pair (out, on);
+        };
+        const auto pluck = vs::renderPluck (220.0, sr, 3.0, { 1, 0.62, 0.42, 0.3, 0.2, 0.14, 0.09, 0.06 }, 1.1, 0.9, 0.003, 0.3);
+        expect ("pluck: three seconds at A3, at full scale (less the rise), rising from silence and ending in it",
+                pluck.size() == 144000 && peak (pluck) > 0.95f && peak (pluck) <= 1.0f && pluck[0] == 0.0f && std::abs (pluck.back()) < 1e-3f
+                    && std::abs (crossingHz (pluck, 4800, 96000, sr) - 220.0) < 0.01);
+
+        vs::NotePlayer p;
+        p.prepare (sr);
+        p.setVolume (100);
+        p.play ({ 57 }, 4800, vs::NotePlayer::Sound::strings, 0, 0.02, 1.0);
+        const auto [quiet, on] = run (p, 2.0);
+        float before = 0;
+        for (size_t i = 0; i < 4800; ++i) before = std::max (before, std::abs (quiet[i]));
+        const float expected = 0.02f * 0.5f * 0.9f * vs::dbToGain (vs::NotePlayer::makeupDb());
+        expect ("notes: a quiet note starts on its frame, at its share of the volume and the compressor's makeup gain, and is cut off after its length",
+                before == 0 && std::abs (peak ({ quiet.begin() + 4800, quiet.begin() + 9600 }) - expected) < expected * 0.05f
+                    && peak ({ quiet.begin() + 4800 + 72000, quiet.end() }) == 0.0f && ! on,
+                std::to_string (peak ({ quiet.begin() + 4800, quiet.begin() + 9600 })) + " vs " + std::to_string (expected));
+
+        vs::NotePlayer s;
+        s.prepare (sr);
+        s.play ({ 40, 47, 52, 56, 59, 64 }, 0, vs::NotePlayer::Sound::strings, 0.03, 1.0, 2.0);
+        const auto [strum, sOn] = run (s, 1.0);
+        const float loud = peak (strum);
+        vs::NotePlayer one;
+        one.prepare (sr);
+        one.play ({ 40 }, 0, vs::NotePlayer::Sound::strings, 0, 1.0, 2.0);
+        const auto [low, lOn] = run (one, 0.06);
+        // until the second string comes in 30 ms (1440 frames) later, it's the low E alone
+        bool alone = true;
+        for (size_t i = 1; i < 1440; ++i) alone = alone && (strum[i] == 0.0f) == (low[i] == 0.0f);
+        expect ("notes: a six-string strum, each string 30 ms after the last, held under full scale by the compressor",
+                strum[0] == 0.0f && alone && loud < 1.0f && loud > 0.2f && sOn && lOn && std::abs (strum[1500]) > 0, std::to_string (loud));
+
+        s.silence (48000);
+        const auto [after, aOn] = run (s, 0.5, 48000);
+        expect ("notes: silence fades everything out and drops it", ! aOn && peak ({ after.begin() + 12000, after.end() }) == 0.0f);
+        s.play ({ 60 }, 72000, vs::NotePlayer::Sound::piano, 0, 1.0, 1.0);
+        const auto [next, nOn] = run (s, 0.5, 72000);
+        expect ("notes: what's played next is at the volume again, and a piano note is its own sound", nOn && peak (next) > 0.1f);
+    }
+
 int main()
 {
     guide();
+    notes();
     meters();
     trainerAndGap();
     cleaning();

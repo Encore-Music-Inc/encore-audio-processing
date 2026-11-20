@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <algorithm>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -118,4 +119,36 @@ namespace vs
             return v;
         }
     };
+
+    // A plucked note at hz, seconds long: each harmonic a sine (amplitude
+    // amps[k]) dying away faster than the one below (falling 63% every
+    // 1 / (decayBase + k x decayStep) seconds), those near Nyquist left out,
+    // normalised to full scale, rising over riseSec and falling to silence over
+    // the last fallSec. A plucked string's reference tone, a guitar's or a
+    // piano's note.
+    inline std::vector<float> renderPluck (double hz, double sampleRate, double seconds, const std::vector<double>& amps,
+                                           double decayBase, double decayStep, double riseSec, double fallSec)
+    {
+        const int n = (int) std::floor (sampleRate * seconds);
+        std::vector<float> buf ((size_t) std::max (0, n), 0.0f);
+        for (size_t k = 0; k < amps.size(); ++k)
+        {
+            const double w = 2 * 3.141592653589793 * hz * (double) (k + 1) / sampleRate;
+            if (w >= 3.141592653589793 * 0.9) break;
+            const double decay = std::exp (-(decayBase + (double) k * decayStep) / sampleRate);
+            double amp = amps[k];
+            for (int t = 0; t < n; ++t) { buf[(size_t) t] += (float) (amp * std::sin (w * t)); amp *= decay; }
+        }
+        float peak = 0;
+        for (float v : buf) peak = std::max (peak, std::abs (v));
+        const int rise = (int) std::floor (sampleRate * riseSec), fall = (int) std::floor (sampleRate * fallSec);
+        for (int t = 0; t < n; ++t)
+        {
+            float g = 1.0f / (peak > 0 ? peak : 1.0f);
+            if (t < rise) g *= (float) t / (float) rise;
+            if (t > n - fall) g *= (float) (n - t) / (float) fall;
+            buf[(size_t) t] *= g;
+        }
+        return buf;
+    }
 }

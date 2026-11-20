@@ -185,31 +185,10 @@ namespace vs
         float gain = 0, target = 0, glide = 1;
         Ramp<false> attack;
 
-        // the pluck: each overtone a sine dying away faster than the last (those
-        // near Nyquist left out), normalised to full scale, with a 4 ms rise and a
-        // 250 ms fall at the end
+        // the pluck: each overtone dying away faster than the last, a 4 ms rise and a 250 ms fall at the end
         void renderPluck()
         {
-            const int n = (int) std::floor (sr * pluckSeconds);
-            buf.assign ((size_t) n, 0.0f);
-            for (size_t k = 0; k < harmonics.size(); ++k)
-            {
-                const double w = 2 * 3.141592653589793 * freq * (double) (k + 1) / sr;
-                if (w >= 3.141592653589793 * 0.9) continue;
-                const double decay = std::exp (-(1.1 + (double) k * 0.9) / sr);
-                double amp = harmonics[k];
-                for (int t = 0; t < n; ++t) { buf[(size_t) t] += (float) (amp * std::sin (w * t)); amp *= decay; }
-            }
-            float peak = 0;
-            for (float v : buf) peak = std::max (peak, std::abs (v));
-            const int rise = (int) std::floor (sr * 0.004), fall = (int) std::floor (sr * 0.25);
-            for (int t = 0; t < n; ++t)
-            {
-                float g = 1.0f / (peak > 0 ? peak : 1.0f);
-                if (t < rise) g *= (float) t / (float) rise;
-                if (t > n - fall) g *= (float) (n - t) / (float) fall;
-                buf[(size_t) t] *= g;
-            }
+            buf = vs::renderPluck (freq, sr, pluckSeconds, std::vector<double> (harmonics.begin(), harmonics.end()), 1.1, 0.9, 0.004, 0.25);
         }
 
         // the steady tone's wave: the overtones, each 0.8 of the last's share
