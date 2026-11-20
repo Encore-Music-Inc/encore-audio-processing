@@ -109,6 +109,24 @@ namespace vs
                 return out;
             }
 
+            // Each column's level in dB: its RMS (from the bands when there
+            // are any, as their sum of squares), -100 for a silent column
+            std::vector<float> levelDb() const
+            {
+                const auto b = bands();
+                const auto r = rms();
+                const bool useBands = ! b.empty();
+                const size_t cols = useBands ? b.size() / 3 : r.size();
+                std::vector<float> out (cols, -100.0f);
+                for (size_t c = 0; c < cols; ++c)
+                {
+                    const double p = useBands ? (double) b[3 * c] * b[3 * c] + (double) b[3 * c + 1] * b[3 * c + 1] + (double) b[3 * c + 2] * b[3 * c + 2]
+                                              : (double) r[c] * r[c];
+                    if (p > 0) out[c] = (float) db10 (p, 0.0);
+                }
+                return out;
+            }
+
             // lows, mids, highs per column (3 values each); 0 for an empty column
             std::vector<float> bands() const
             {

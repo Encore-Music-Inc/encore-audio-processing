@@ -516,6 +516,7 @@ function runMore(c, sig, out) {
       stat('peak', 0, columns); stat('peakL', 1, columns); stat('peakR', 2, columns);
       if (c.rms) stat('rms', 3, columns);
       if (c.bands) stat('bands', 4, 3 * columns);
+      if (c.rms || c.bands) stat('levelDb', 5, columns);
       X.ms_wf_destroy(w);
       return true;
     }
@@ -1168,6 +1169,45 @@ function run(c, sig) {
       out.push(['count', found.length]);
       found.forEach((f, i) => out.push(['onset' + i, f]));
       X.rh_onsets_destroy(d);
+      break;
+    }
+    case 'song-profile': {
+      const p = X.ms_prof_create(fs, n, block);
+      const st = stereo ? 1 : 0;
+      if ((c.stretchLength ?? 0) > 0) X.ms_prof_choose(p, c.stretchFrom ?? 0, c.stretchLength, c.whole ?? -100);
+      else blocks(n, block, (s, k) => { fill(X.ms_prof_left(p), X.ms_prof_right(p), s, k); X.ms_prof_song(p, k, st); });
+      const from = X.ms_prof_stretch_from(p), length = X.ms_prof_stretch_length(p);
+      blocks(length, block, (s, k) => { fill(X.ms_prof_left(p), X.ms_prof_right(p), from + s, k); X.ms_prof_stretch(p, k, st); });
+      X.ms_prof_finish(p);
+      out.push(['from', from], ['length', length], ['lufs', X.ms_prof_value(p, 0)], ['wholeLufs', X.ms_prof_value(p, 1)], ['plr', X.ms_prof_value(p, 2)]);
+      for (let b = 0; b < 10; b++) out.push([`tone${b}`, X.ms_prof_value(p, 3 + b)]);
+      for (let b = 0; b < 3; b++) out.push([`width${b}`, X.ms_prof_value(p, 13 + b)]);
+      X.ms_prof_destroy(p);
+      break;
+    }
+    case 'master-monitor': {
+      const m = X.mm_create(fs, block);
+      X.mm_settings(m, c.style ?? 0, 0.5, 0, -14, -1, 0.5, 0, 0, 0, 0, 0, 0, 0);
+      X.mm_hear_original(m, c.original ?? 0);
+      if (c.level) X.mm_playback_level(m, 1, c.master ?? 0, c.orig ?? 0);
+      X.mm_device(m, c.device ?? 0);
+      const l = new Float32Array(n), r = new Float32Array(n);
+      blocks(n, block, (s, k) => {
+        f32(X.mm_left(m), k).set(sig.l.subarray(s, s + k));
+        f32(X.mm_right(m), k).set((stereo ? sig.r : sig.l).subarray(s, s + k));
+        X.mm_process(m, k);
+        l.set(f32(X.mm_left(m), k), s);
+        r.set(f32(X.mm_right(m), k), s);
+      });
+      const lm = X.lm_create(fs, n);
+      f32(X.lm_left(lm), n).set(l);
+      f32(X.lm_right(lm), n).set(r);
+      X.lm_process(lm, n, 1);
+      let peak = 0;
+      for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(l[i]), Math.abs(r[i]));
+      out.push(['lufs', X.lm_integrated(lm)], ['peak', peak], ['matchDb', X.mm_get(m, 14)]);
+      X.lm_destroy(lm);
+      X.mm_destroy(m);
       break;
     }
     case 'mastering': {

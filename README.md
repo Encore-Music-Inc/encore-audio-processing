@@ -93,6 +93,7 @@ CI fails if either differs from what the script writes.
 | | `Analysis.h` | everything a release check measures on a finished song |
 | | `Spectrum.h` | the live analyser, the long-term spectrum, the lossy-encoder cliff, tonal balance and drawing axes |
 | | `ResonanceFinder.h` | narrow resonances in a long-term spectrum |
+| | `SongProfile.h` | what a song is, to compare with another: its loudest stretch, tone per octave, width and how squashed it is |
 | | `Waveform.h` | waveform overviews for drawing, and a DAW's waveform picture at any zoom |
 | | `Meters.h` | how a meter moves on screen (ballistics, peak hold, its scale) and the volume fader's law |
 | Processing and mastering | `EqBand.h`, `VocalEq.h` | a parametric EQ band, and the vocal EQ |
@@ -103,7 +104,8 @@ CI fails if either differs from what the script writes.
 | | `TimeStretch.h` | time stretching and pitch shifting (on Signalsmith Stretch) |
 | | `Doubler.h`, `GuitarFixes.h`, `BodyMatch.h` | the acoustic guitar tools: double, the Squeak, Pick and Boom fixes, and the pickup-to-mic body match |
 | | `MasterChain.h` | the one-knob mastering chain |
-| | `Mastering.h` | mastering a whole song with the chain |
+| | `Mastering.h` | mastering a whole song with the chain, and the loudest stretch it learns on |
+| | `MasterMonitor.h` | a song mastered as you listen: the chain, the original at the same loudness, a streaming service's level, a playback device and a live spectrum |
 | | `Dither.h` | float to integer samples, with dither |
 | | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing, the clean-up after a plugin, and a live recording's inputs (routing, what's on each, samples at full scale) |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
@@ -146,10 +148,10 @@ CI fails if either differs from what the script writes.
 
 | File | Prefix | What |
 |---|---|---|
-| `wasm/api_master.cpp` | `mc_` | the mastering chain |
+| `wasm/api_master.cpp` | `mc_`, `mm_` | the mastering chain, and a song mastered as you listen |
 | `wasm/api_mastering.cpp` | `mt_` | whole-song mastering |
 | `wasm/api_loudness.cpp` | `lm_` | the loudness meter |
-| `wasm/api_measure.cpp` | `ms_` | true peak, the loudness report, the analysis, spectrum, waveforms, meters on screen, the band that tames a resonance |
+| `wasm/api_measure.cpp` | `ms_` | true peak, the loudness report, the analysis, spectrum, waveforms, meters on screen, the band that tames a resonance, a song's profile |
 | `wasm/api_processing.cpp` | `pr_` | resampling, delays, dither, channel work, gains, device simulation, the vocal EQ, "hear the original", DSD to PCM, the true-peak limiter on its own, an MP3's sample rate |
 | `wasm/api_effects.cpp` | `fx_` | the chorus, phaser, filter, pitch shifter, time stretch, compressor, delay and reverb, and the send law |
 | `wasm/api_instruments.cpp` | `in_` | the synth, the sampler and a score played by its instruments |

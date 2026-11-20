@@ -109,6 +109,7 @@ The headers, by area (each header's top comment says more):
 | | `Analysis.h` | everything a release check measures on a finished song |
 | | `Spectrum.h` | the live analyser, the long-term spectrum, the encoder cliff, tonal balance, drawing axes |
 | | `ResonanceFinder.h` | narrow resonances in a long-term spectrum |
+| | `SongProfile.h` | what a song is, to compare with another: its loudest stretch, tone per octave, width and how squashed it is |
 | | `Waveform.h` | waveform overviews for drawing, and a DAW's waveform picture (min and max per block) |
 | | `Meters.h` | how a meter moves on screen: ballistics, peak hold, its scale; the volume fader's law |
 | Processing and mastering | `EqBand.h` | one band of a parametric EQ |
@@ -120,7 +121,8 @@ The headers, by area (each header's top comment says more):
 | | `TimeStretch.h` | time stretching and pitch shifting |
 | | `Doubler.h`, `GuitarFixes.h`, `BodyMatch.h` | Strum's double, its Squeak, Pick and Boom fixes, and its Body match |
 | | `MasterChain.h` | the one-knob mastering chain |
-| | `Mastering.h` | the one way to master a whole song with the chain |
+| | `Mastering.h` | the one way to master a whole song with the chain, and the loudest stretch it learns on |
+| | `MasterMonitor.h` | a song mastered as you listen: the chain, the original at the same loudness, a streaming service's level, a playback device and a live spectrum |
 | | `Dither.h` | the one float to integer conversion, with dither |
 | | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing, the clean-up after a plugin, and a live recording's inputs (routing, what's on each, samples at full scale) |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
@@ -160,7 +162,7 @@ The headers, by area (each header's top comment says more):
 | | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids, a loop recorder's timing |
 
 The browser engine, by file and prefix: `api_master.cpp` the mastering chain
-(`mc_*`), `api_mastering.cpp` whole-song mastering (`mt_*`), `api_loudness.cpp`
+(`mc_*`) and a song mastered as you listen (`mm_*`), `api_mastering.cpp` whole-song mastering (`mt_*`), `api_loudness.cpp`
 the loudness meter (`lm_*`), `api_measure.cpp` measurement (`ms_*`),
 `api_processing.cpp` processing, DSD to PCM and the true-peak limiter on its
 own (`pr_*`), `api_pitch.cpp` pitch (`pi_*`), `api_tuner.cpp` the tuner

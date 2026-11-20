@@ -52,6 +52,7 @@
 #include "dsp/Loudness.h"
 #include "dsp/LoudnessReport.h"
 #include "dsp/MasterChain.h"
+#include "dsp/MasterMonitor.h"
 #include "dsp/Mastering.h"
 #include "dsp/Metronome.h"
 #include "dsp/Music.h"
@@ -65,6 +66,7 @@
 #include "dsp/Rider.h"
 #include "dsp/Saturator.h"
 #include "dsp/ScaleLibrary.h"
+#include "dsp/SongProfile.h"
 #include "dsp/Space.h"
 #include "dsp/Spectrum.h"
 #include "dsp/Tempo.h"
@@ -892,6 +894,7 @@ namespace
             stat ("peakR", w.peakR());
             if (o.rms) stat ("rms", w.rms());
             if (o.bands) stat ("bands", w.bands());
+            if (o.rms || o.bands) stat ("levelDb", w.levelDb());
         }
         else if (op == "minmax")
         {
@@ -1939,6 +1942,44 @@ namespace
             blocks (n, block, [&] (std::int64_t s, int k) { d.push (in->l.data() + s, k, s, found); });
             out.push_back ({ "count", (double) found.size() });
             for (size_t i = 0; i < found.size(); ++i) out.push_back ({ "onset" + std::to_string (i), found[i] });
+        }
+        else if (op == "song-profile")
+        {
+            vs::SongProfile p;
+            p.begin (fs, n);
+            if (c.get ("stretchLength", 0) > 0) p.setStretch ((long long) c.get ("stretchFrom", 0), (long long) c.get ("stretchLength", 0), (float) c.get ("whole", -100));
+            else blocks (n, block, [&] (std::int64_t s, int k) { p.feedSong (in->l.data() + s, right (s), k); });
+            const auto w = p.stretch();
+            blocks (w.length, block, [&] (std::int64_t s, int k) { p.feedStretch (in->l.data() + w.from + s, right (w.from + s), k); });
+            const auto r = p.finish();
+            out.push_back ({ "from", (double) w.from });
+            out.push_back ({ "length", (double) w.length });
+            out.push_back ({ "lufs", (double) r.lufs });
+            out.push_back ({ "wholeLufs", (double) r.wholeLufs });
+            out.push_back ({ "plr", (double) r.plr });
+            for (int b = 0; b < vs::SongProfile::numTone; ++b) out.push_back ({ "tone" + std::to_string (b), (double) r.tone[(size_t) b] });
+            for (int b = 0; b < vs::SongProfile::numWidth; ++b) out.push_back ({ "width" + std::to_string (b), (double) r.width[(size_t) b] });
+        }
+        else if (op == "master-monitor")
+        {
+            vs::MasterMonitor m;
+            m.prepare (fs, block);
+            vs::MasterChain::Settings st;
+            st.style = (int) c.get ("style", 0);
+            m.chain.setSettings (st);
+            m.setHearOriginal (c.get ("original", 0) != 0);
+            if (c.get ("level", 0) != 0) m.setPlaybackLevel (true, (float) c.get ("master", 0), (float) c.get ("orig", 0));
+            m.setDevice ((int) c.get ("device", 0));
+            std::vector<float> l (in->l), r (stereo ? in->r : in->l);
+            blocks (n, block, [&] (std::int64_t s, int k) { m.process (l.data() + s, r.data() + s, k); });
+            vs::LoudnessMeter lm;
+            lm.prepare (fs);
+            lm.process (l.data(), r.data(), (int) n);
+            float peak = 0;
+            for (std::int64_t i = 0; i < n; ++i) peak = std::max ({ peak, std::abs (l[(size_t) i]), std::abs (r[(size_t) i]) });
+            out.push_back ({ "lufs", (double) lm.integrated() });
+            out.push_back ({ "peak", (double) peak });
+            out.push_back ({ "matchDb", (double) m.ab.matchGainDb() });
         }
         else if (op == "mastering")
         {

@@ -158,6 +158,10 @@ def rule(op, name):
         if last == "corr":
             return "ratio"
         return "proc-sum"
+    if op == "song-profile":
+        return {"from": "exact", "length": "exact", "lufs": "lufs", "wholeLufs": "lufs", "plr": "db"}.get(last, "spectrum-db")
+    if op == "master-monitor":
+        return {"lufs": "master-lufs", "peak": "master-peak", "matchDb": "master-db"}[last]
     if last in EXACT_WORDS or stem in ("pad", "midi", "trim"):
         return "exact"
     if op == "laws":
@@ -201,7 +205,7 @@ def rule(op, name):
     if op == "minmax":
         return "exact"
     if op in ("waveform", "block-peaks"):
-        return "exact" if parts[0] == "shape" else "level"
+        return "exact" if parts[0] == "shape" else "db" if parts[0] == "levelDb" else "level"
     if op == "clip-runs":
         return "seconds"
     if op == "music":
@@ -384,6 +388,10 @@ for i, name in enumerate(STYLES):
     case(f"mastering/{name}", "mastering", MIX, style=i, block=4096)
 case("mastering/balanced-at-9", "mastering", MIX, style=0, target=-9, block=4096)
 case("mastering/gentle-at-16", "mastering", MIX, style=4, target=-16, block=4096)
+# ---- mastering as you listen (mm_*): the chain alone, hearing the original, and a service's level on a device
+case("mastering/monitor/chain", "master-monitor", MIX, block=128)
+case("mastering/monitor/original", "master-monitor", MIX, block=128, original=1)
+case("mastering/monitor/service-on-device", "master-monitor", MIX, block=128, level=1, master=-3, orig=1.5, device=2)
 
 # ---- every sound: each metronome set and role, each drum sound, each kit's pads
 
@@ -422,6 +430,8 @@ case("analysis/welch/song", "welch", SONG, size=4096, maxSegments=16, bins=[1, 1
 case("analysis/welch/at", "welch", SONG, size=2048, starts=[0, 44100, 88200, 300000], bins=[1, 10, 100])
 case("analysis/tonal-balance/song", "tonal-balance", SONG)
 case("analysis/tonal-balance/song-lr", "tonal-balance", SONG, lr=1)
+case("analysis/song-profile/song", "song-profile", SONG)
+case("analysis/song-profile/chosen-stretch", "song-profile", SONG, stretchFrom=44100, stretchLength=176400, whole=-12)
 case("analysis/waveform/song", "waveform", SONG, block=4096, columns=16, rms=1, bands=1)
 case("analysis/waveform/mono-stride", "waveform", SPARSE, block=4096, columns=12, stride=4)
 case("analysis/block-peaks/song", "block-peaks", SONG, block=4096, blockSize=441, points=200, width=64)

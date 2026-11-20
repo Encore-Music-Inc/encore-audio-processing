@@ -9,6 +9,7 @@
 // to maxBlock samples, then ms_*_process them, and repeat, so a song's length
 // isn't limited by the module's memory.
 #include <emscripten/emscripten.h>
+#include <cmath>
 #include <cstdint>
 #include <vector>
 #include "dsp/ResonanceFinder.h"
@@ -19,6 +20,7 @@
 #include "dsp/TruePeak.h"
 #include "dsp/Waveform.h"
 #include "dsp/Channels.h"
+#include "dsp/SongProfile.h"
 
 namespace
 {
@@ -37,6 +39,7 @@ namespace
         std::vector<double> lists[5];
     };
     struct Spectrum : Input { vs::SpectrumAnalyser analyser; };
+    struct Profile : Input { vs::SongProfile p; vs::SongProfile::Result result; };
     struct Overview : Input
     {
         vs::waveform::Overview overview;
@@ -319,7 +322,8 @@ extern "C"
         m->overview.process (m->l.data(), stereo != 0 ? m->r.data() : nullptr, n);
     }
     // which: 0 peak, 1 left peak, 2 right peak, 3 RMS (one value per column),
-    // 4 bands (lows, mids, highs per column). Valid until the next call.
+    // 4 bands (lows, mids, highs per column), 5 RMS in dB (from the bands when
+    // there are any, else the RMS; -100 for silence). Valid until the next call.
     EMSCRIPTEN_KEEPALIVE const float* ms_wf_get (void* p, int which)
     {
         auto* m = static_cast<Overview*> (p);
@@ -330,6 +334,7 @@ extern "C"
             case 1: m->out = o.peakL(); break;
             case 2: m->out = o.peakR(); break;
             case 3: m->out = o.rms(); break;
+            case 5: m->out = o.levelDb(); break;
             default: m->out = o.bands(); break;
         }
         return m->out.data();
@@ -508,5 +513,51 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE void ms_peaks_overloads (const float* interleaved, int frames, int numCh, float* peaks, int* overloads)
     {
         vs::channels::peaksAndOverloads (interleaved, frames, numCh, peaks, overloads);
+    }
+
+    // ---- A song's profile for comparing with another (vs::SongProfile).
+    // A reference: ms_prof_song (h, n) over the whole song, then
+    // ms_prof_stretch_from/length, then ms_prof_stretch (h, n) over those
+    // samples. A stretch the caller chose: ms_prof_choose (h, from, length,
+    // wholeLufs), then ms_prof_stretch. Samples go in ms_prof_left/right (r
+    // unused when stereo is 0). ms_prof_finish, then ms_prof_value: 0 the
+    // stretch's LUFS, 1 the whole song's, 2 the peak over the loudness, 3..12
+    // the tone bands, 13..15 the width ranges.
+    EMSCRIPTEN_KEEPALIVE void* ms_prof_create (double sampleRate, double frames, int maxBlock)
+    {
+        auto* m = new Profile();
+        m->make (maxBlock);
+        m->p.begin (sampleRate, (long long) frames);
+        return m;
+    }
+    EMSCRIPTEN_KEEPALIVE void ms_prof_destroy (void* p) { delete static_cast<Profile*> (p); }
+    EMSCRIPTEN_KEEPALIVE float* ms_prof_left (void* p)  { return static_cast<Profile*> (p)->l.data(); }
+    EMSCRIPTEN_KEEPALIVE float* ms_prof_right (void* p) { return static_cast<Profile*> (p)->r.data(); }
+    EMSCRIPTEN_KEEPALIVE void ms_prof_song (void* p, int n, int stereo)
+    {
+        auto* m = static_cast<Profile*> (p);
+        m->p.feedSong (m->l.data(), stereo != 0 ? m->r.data() : nullptr, n);
+    }
+    EMSCRIPTEN_KEEPALIVE double ms_prof_stretch_from (void* p)   { return (double) static_cast<Profile*> (p)->p.stretch().from; }
+    EMSCRIPTEN_KEEPALIVE double ms_prof_stretch_length (void* p) { return (double) static_cast<Profile*> (p)->p.stretch().length; }
+    EMSCRIPTEN_KEEPALIVE void ms_prof_choose (void* p, double from, double length, float wholeLufs)
+    {
+        static_cast<Profile*> (p)->p.setStretch ((long long) from, (long long) length, wholeLufs);
+    }
+    EMSCRIPTEN_KEEPALIVE void ms_prof_stretch (void* p, int n, int stereo)
+    {
+        auto* m = static_cast<Profile*> (p);
+        m->p.feedStretch (m->l.data(), stereo != 0 ? m->r.data() : nullptr, n);
+    }
+    EMSCRIPTEN_KEEPALIVE void ms_prof_finish (void* p) { auto* m = static_cast<Profile*> (p); m->result = m->p.finish(); }
+    EMSCRIPTEN_KEEPALIVE float ms_prof_value (void* p, int i)
+    {
+        const auto& r = static_cast<Profile*> (p)->result;
+        if (i == 0) return r.lufs;
+        if (i == 1) return r.wholeLufs;
+        if (i == 2) return r.plr;
+        if (i >= 3 && i < 3 + vs::SongProfile::numTone) return r.tone[(size_t) (i - 3)];
+        const int w = i - 3 - vs::SongProfile::numTone;
+        return (w >= 0 && w < vs::SongProfile::numWidth) ? r.width[(size_t) w] : 0.0f;
     }
 }

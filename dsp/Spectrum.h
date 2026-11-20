@@ -368,26 +368,41 @@ namespace vs
         return (hz < 100 ? 1.05 * std::log2 (100 / hz) : 0) - (hz > 2000 ? 2.5 * std::log2 (hz / 2000) : 0);
     }
 
-    inline TonalBalance tonalBalance (const float* mid, std::int64_t n, double fs)
+    // Each band's level (dB): the mean square x would have after two cascaded
+    // RBJ band-passes (Q q) at the band's centre, read from x's long-term
+    // spectrum (Welch, frames of about 0.35 s). Tonal balance reads its
+    // octaves this way, and vs::SongProfile its tone and width.
+    inline std::vector<double> bandLevelsDb (const float* x, std::int64_t n, double fs, const double* hz, int bands, double q)
     {
-        TonalBalance t;
         const int size = 1 << (int) std::lround (std::log2 (fs * 0.35));
-        const float* ch[1] { mid };
+        const float* ch[1] { x };
         const auto sp = welch (ch, 1, n, fs, size, std::numeric_limits<int>::max());
         const double norm = (double) size * (3.0 * size / 8.0);
-        double diff[TonalBalance::numBands];
-        for (int b = 0; b < TonalBalance::numBands; ++b)
+        std::vector<double> out ((size_t) bands);
+        for (int b = 0; b < bands; ++b)
         {
-            const double f = TonalBalance::bandHz[b];
-            const std::vector<BiquadCoefs> bp { BiquadCoefs::rbj (BiquadCoefs::Type::bandPass, fs, f, 1.41), BiquadCoefs::rbj (BiquadCoefs::Type::bandPass, fs, f, 1.41) };
+            const double f = hz[b];
+            const std::vector<BiquadCoefs> bp { BiquadCoefs::rbj (BiquadCoefs::Type::bandPass, fs, f, q), BiquadCoefs::rbj (BiquadCoefs::Type::bandPass, fs, f, q) };
             double e = 0.0;
             for (int k = 0; k <= size / 2; ++k)
             {
                 const double h = sectionsResponse (bp, k * sp.binHz, fs);
                 e += (k == 0 || k == size / 2 ? 1.0 : 2.0) * h * h * sp.power[(size_t) k];
             }
-            t.levelDb[b] = db10 (e / norm);
-            diff[b] = t.levelDb[b] - finishedMixDb (f);
+            out[(size_t) b] = db10 (e / norm);
+        }
+        return out;
+    }
+
+    inline TonalBalance tonalBalance (const float* mid, std::int64_t n, double fs)
+    {
+        TonalBalance t;
+        const auto level = bandLevelsDb (mid, n, fs, TonalBalance::bandHz, TonalBalance::numBands, 1.41);
+        double diff[TonalBalance::numBands];
+        for (int b = 0; b < TonalBalance::numBands; ++b)
+        {
+            t.levelDb[b] = level[(size_t) b];
+            diff[b] = t.levelDb[b] - finishedMixDb (TonalBalance::bandHz[b]);
         }
         double normDb = 0.0;
         for (int b = 2; b <= 7; ++b) normDb += diff[b];

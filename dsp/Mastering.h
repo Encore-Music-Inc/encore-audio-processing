@@ -8,6 +8,86 @@
 
 namespace vs
 {
+    // A song's loudest stretch: its power per second (the sum over both
+    // channels of each one's mean square), then the run of seconds with the
+    // most. vs::Mastering learns on the loudest 30 s found this way, and
+    // vs::SongProfile measures a song there.
+    //
+    //     LoudestStretch s;
+    //     s.begin (fs, length);
+    //     feed the song to feed();
+    //     auto w = s.window (30.0);
+    class LoudestStretch
+    {
+    public:
+        struct Window { long long from = 0, length = 0; };
+
+        void begin (double sampleRate, long long songLength)
+        {
+            len = songLength;
+            sec = (int) sampleRate;
+            fs = sampleRate;
+            power.clear();
+            secAcc[0] = secAcc[1] = 0.0;
+            secCount = 0;
+            done = false;
+        }
+
+        // The song, in order (r may be null for mono).
+        void feed (const float* l, const float* r, int n)
+        {
+            const float* ch[2] { l, r != nullptr ? r : l };
+            for (int i = 0; i < n; ++i)
+            {
+                for (int c = 0; c < 2; ++c) { const float x = ch[c][i]; secAcc[c] += x * x; }
+                if (++secCount == sec) closeSecond();
+            }
+        }
+
+        // Where the loudest stretch of `seconds` (or the whole song, if shorter) starts.
+        Window window (double seconds)
+        {
+            if (! done) { if (secCount > 0) closeSecond(); done = true; }
+            const long long win = std::min (len, (long long) (int) (fs * seconds));
+            const int secs = (int) power.size();
+            const int wSecs = (int) std::max (1LL, win / std::max (1, sec));
+            int best = 0;
+            double bestSum = -1, run = 0;
+            for (int i = 0; i < secs; ++i)
+            {
+                run += power[(size_t) i];
+                if (i >= wSecs) run -= power[(size_t) (i - wSecs)];
+                if (i >= wSecs - 1 && run > bestSum) { bestSum = run; best = i - wSecs + 1; }
+            }
+            Window w;
+            w.from = std::clamp ((long long) best * sec, 0LL, std::max (0LL, len - win));
+            w.length = win;
+            return w;
+        }
+
+    private:
+        void closeSecond()
+        {
+            double p = 0.0;
+            for (int c = 0; c < 2; ++c)
+            {
+                const float rms = (float) std::sqrt (secAcc[c] / secCount);
+                p += (double) rms * rms;
+                secAcc[c] = 0.0;
+            }
+            power.push_back (p);
+            secCount = 0;
+        }
+
+        double fs = 48000.0;
+        long long len = 0;
+        int sec = 48000;
+        std::vector<double> power;
+        double secAcc[2] {};
+        int secCount = 0;
+        bool done = false;
+    };
+
     // ENCORE.'s one way to master a whole song with vs::MasterChain.
     //
     // 1. Energies: the song's power per second (the sum over both channels of
@@ -55,51 +135,21 @@ namespace vs
             fs = sampleRate;
             settings = s;
             len = songLength;
-            sec = (int) fs;
-            power.clear();
-            secAcc[0] = secAcc[1] = 0.0;
-            secCount = 0;
+            stretch.begin (fs, len);
             windowL.clear(); windowR.clear();
             learnedValues = {};
             renders = 0;
             lastLufs = -100.0f;
             finalRender = false;
-            energyDone = false;
         }
 
         // ---- pass 1: the whole song, in order
-        void feedEnergy (const float* l, const float* r, int n)
-        {
-            const float* ch[2] { l, r != nullptr ? r : l };
-            for (int i = 0; i < n; ++i)
-            {
-                for (int c = 0; c < 2; ++c) { const float x = ch[c][i]; secAcc[c] += x * x; }
-                if (++secCount == sec) closeSecond();
-            }
-        }
+        void feedEnergy (const float* l, const float* r, int n) { stretch.feed (l, r, n); }
 
-        struct Window { long long from = 0, length = 0; };
+        using Window = LoudestStretch::Window;
 
         // After pass 1: where the loudest 30 s (or the whole song, if shorter) starts.
-        Window learningWindow()
-        {
-            if (! energyDone) { if (secCount > 0) closeSecond(); energyDone = true; }
-            const long long window = std::min (len, (long long) (int) (fs * windowSeconds));
-            const int secs = (int) power.size();
-            const int wSecs = (int) std::max (1LL, window / std::max (1, sec));
-            int best = 0;
-            double bestSum = -1, run = 0;
-            for (int i = 0; i < secs; ++i)
-            {
-                run += power[(size_t) i];
-                if (i >= wSecs) run -= power[(size_t) (i - wSecs)];
-                if (i >= wSecs - 1 && run > bestSum) { bestSum = run; best = i - wSecs + 1; }
-            }
-            Window w;
-            w.from = std::clamp ((long long) best * sec, 0LL, std::max (0LL, len - window));
-            w.length = window;
-            return w;
-        }
+        Window learningWindow() { return stretch.window (windowSeconds); }
 
         // ---- pass 2: the learning stretch's samples, in order
         void feedWindow (const float* l, const float* r, int n)
@@ -252,19 +302,6 @@ namespace vs
         }
 
     private:
-        void closeSecond()
-        {
-            double p = 0.0;
-            for (int c = 0; c < 2; ++c)
-            {
-                const float rms = (float) std::sqrt (secAcc[c] / secCount);
-                p += (double) rms * rms;
-                secAcc[c] = 0.0;
-            }
-            power.push_back (p);
-            secCount = 0;
-        }
-
         int processBlock (float* outL, float* outR)
         {
             chain->process (inL.data(), inR.data(), block);
@@ -284,11 +321,7 @@ namespace vs
         double fs = 48000.0;
         MasterChain::Settings settings;
         long long len = 0;
-        int sec = 48000;
-        std::vector<double> power;
-        double secAcc[2] {};
-        int secCount = 0;
-        bool energyDone = false;
+        LoudestStretch stretch;
         std::vector<float> windowL, windowR, inL, inR;
         MasterChain::Learned learnedValues;
         std::unique_ptr<MasterChain> chain;
