@@ -264,7 +264,9 @@ extern "C"
 
     // ---- Notes for the theory tools (vs::NotePlayer): count MIDI notes at a frame
     // (sound 0 plucked strings, 1 piano), spread seconds apart (up: last first),
-    // a level and a length; the volume slider; everything faded from a frame; and
+    // a level and a length; the drone on a note from a frame (a negative note turns
+    // it off); a click at a frame (accent 1 for the first count); the volume slider;
+    // everything faded from a frame; and
     // sd_notes_process writing n samples from frame0, returning 1 while any sound
     EMSCRIPTEN_KEEPALIVE vs::NotePlayer* sd_notes_create (double sampleRate) { auto* p = new vs::NotePlayer(); p->prepare (sampleRate); return p; }
     EMSCRIPTEN_KEEPALIVE void sd_notes_destroy (vs::NotePlayer* p) { delete p; }
@@ -273,6 +275,8 @@ extern "C"
         p->play (std::vector<int> (notes, notes + std::max (0, count)), (std::int64_t) at, sound == 1 ? vs::NotePlayer::Sound::piano : vs::NotePlayer::Sound::strings,
                  spread, level, seconds, up != 0);
     }
+    EMSCRIPTEN_KEEPALIVE void sd_notes_drone (vs::NotePlayer* p, double midi, double at) { p->drone (midi, (std::int64_t) at); }
+    EMSCRIPTEN_KEEPALIVE void sd_notes_click (vs::NotePlayer* p, double at, int accent) { p->click ((std::int64_t) at, accent != 0); }
     EMSCRIPTEN_KEEPALIVE void sd_notes_volume (vs::NotePlayer* p, double slider) { p->setVolume (slider); }
     EMSCRIPTEN_KEEPALIVE void sd_notes_silence (vs::NotePlayer* p, double at) { p->silence ((std::int64_t) at); }
     EMSCRIPTEN_KEEPALIVE int sd_notes_process (vs::NotePlayer* p, float* out, int n, double frame0) { return p->process (out, n, (std::int64_t) frame0) ? 1 : 0; }

@@ -4,10 +4,12 @@
 // Notes played to the sample for a theory tool: a chord strummed or struck
 // together, a melody, a progression in its rhythm. Each note is a pluck
 // (plucked strings, or a piano's struck string) at its pitch, scheduled at a
-// frame with a gain and cut off after its length; the mix goes through a
-// master volume and a gentle compressor, so a strum and a single note sit at
-// about the same level. Plain C++ with no JUCE, so the browser (master.wasm)
-// plays the same sound.
+// frame with a gain and cut off after its length. A drone on a note (the
+// voice guide's, VoiceGuide.h) and a count-in click (the metronome's classic
+// click, Metronome.h) can sound with them. The mix goes through a master
+// volume and a gentle compressor, so a strum and a single note sit at about
+// the same level. Plain C++ with no JUCE, so the browser (master.wasm) plays
+// the same sound.
 #pragma once
 
 #include <algorithm>
@@ -21,6 +23,7 @@
 #include "Music.h"
 #include "Oscillator.h"
 #include "Util.h"
+#include "VoiceGuide.h"
 
 namespace vs
 {
@@ -46,6 +49,23 @@ namespace vs
             cut = 0;
             gain = target = (float) levelOf (70);
             back = -1;
+            guide.prepare (sampleRate);
+            guide.setVolume (100);
+            clicks = std::make_shared<const metronome::Sounds> (metronome::makeSounds ("classic", sampleRate));
+        }
+
+        // How loud the drone is beside the notes: this share of the voice guide's full-volume drone
+        static constexpr float droneShare = 0.3f;
+
+        // The drone on `midi` from frame `at` (a negative midi turns it off)
+        void drone (double midi, std::int64_t at) { guide.setDrone (midi, at); }
+
+        // A click at frame `at` (the classic click; accent for the first count)
+        void click (std::int64_t at, bool accent)
+        {
+            if (! clicks) return;
+            const auto& buf = accent ? clicks->accent : clicks->beat;
+            voices.add (clicks, &buf, at, 0.5);
         }
 
         void setVolume (double slider)
@@ -83,7 +103,9 @@ namespace vs
         // Writes frames [frame0, frame0 + n) into out; returns whether anything is sounding
         bool process (float* out, int n, std::int64_t frame0)
         {
-            std::fill (out, out + n, 0.0f);
+            if ((int) scratch.size() < n) scratch.resize ((size_t) n);
+            const bool droning = guide.process (scratch.data(), n, frame0) > 0;
+            for (int i = 0; i < n; ++i) out[i] = scratch[(size_t) i] * droneShare;
             voices.mix (out, n, frame0);
             const float fade = std::exp (-1.0f / (float) (0.03 * sr));
             const float makeup = dbToGain (makeupDb());
@@ -94,6 +116,7 @@ namespace vs
                 else if (back >= 0 && f >= back)
                 {
                     voices.clear();
+                    guide.prepare (sr);
                     std::fill (out + i, out + n, 0.0f);
                     back = -1;
                     gain = target;
@@ -105,13 +128,16 @@ namespace vs
                 dynamics::glideCut (cut, dynamics::cutDb (over, 1.0f - 1.0f / ratio, kneeDb), (float) (1.0 / sr), attackSec, releaseSec);
                 out[i] = x * dbToGain (-cut) * makeup;
             }
-            return ! voices.empty();
+            return droning || ! voices.empty();
         }
 
     private:
         double sr = 48000;
         metronome::ClickVoices voices;
         std::map<std::pair<int, int>, std::shared_ptr<const std::vector<float>>> sounds;
+        std::shared_ptr<const metronome::Sounds> clicks;
+        VoiceGuide guide;
+        std::vector<float> scratch;
         float cut = 0, gain = 0, target = 0;
         std::int64_t fadeAt = 0, back = -1;
 

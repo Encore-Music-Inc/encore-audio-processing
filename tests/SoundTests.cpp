@@ -620,6 +620,35 @@ namespace
         s.play ({ 60 }, 72000, vs::NotePlayer::Sound::piano, 0, 1.0, 1.0);
         const auto [next, nOn] = run (s, 0.5, 72000);
         expect ("notes: what's played next is at the volume again, and a piano note is its own sound", nOn && peak (next) > 0.1f);
+
+        // the drone: the voice guide's, held under the notes until it's turned off
+        vs::NotePlayer d;
+        d.prepare (48000);
+        d.setVolume (100);
+        d.drone (45, 0);
+        const auto [held, hOn] = run (d, 1.0, 0);
+        const float droneLevel = peak ({ held.begin() + 24000, held.end() });
+        expect ("notes: a drone holds, a little under a note's level", hOn && droneLevel > 0.05f && droneLevel < 0.35f, std::to_string (droneLevel));
+        d.drone (-1, 48000);
+        const auto [gone, gOn] = run (d, 0.6, 48000);
+        expect ("notes: the drone fades out when turned off", ! gOn && peak ({ gone.begin() + 19200, gone.end() }) == 0.0f);
+        d.drone (45, 76800);
+        d.silence (76800);
+        const auto [hush, hushOn] = run (d, 0.5, 76800);
+        expect ("notes: silence takes the drone with it", ! hushOn && peak ({ hush.begin() + 12000, hush.end() }) == 0.0f);
+
+        // the click: the metronome's classic click, on its frame
+        vs::NotePlayer c;
+        c.prepare (48000);
+        c.setVolume (100);
+        c.click (4800, true);
+        c.click (28800, false);
+        const auto [clk, cOn] = run (c, 0.75, 0);
+        size_t first = 0;
+        while (first < clk.size() && clk[first] == 0.0f) ++first;
+        const float accent = peak ({ clk.begin() + 4800, clk.begin() + 9600 }), beat = peak ({ clk.begin() + 28800, clk.begin() + 33600 });
+        expect ("notes: a click starts on its frame, the accent louder than the beat", first >= 4800 && first < 4810 && accent > beat && beat > 0.05f && ! cOn,
+                std::to_string (accent) + " " + std::to_string (beat));
     }
 
 int main()
