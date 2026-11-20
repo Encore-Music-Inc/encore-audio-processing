@@ -1015,7 +1015,7 @@ function runMore(c, sig, out) {
         const g = f32(two, 2);
         out.push([`pan.${name}.${i}.l`, g[0]], [`pan.${name}.${i}.r`, g[1]]);
       }));
-      (c.positions ?? []).forEach((p, i) => out.push([`fader.pos${i}.db`, X.ms_fader_position_to_db(p)], [`fader.pos${i}.gain`, X.ms_fader_position_to_gain(p)]));
+      (c.positions ?? []).forEach((p, i) => out.push([`fader.pos${i}.db`, X.ms_fader_position_to_db(p)], [`fader.pos${i}.gain`, X.ms_fader_position_to_gain(p)], [`amp.pos${i}.db`, X.ms_amp_db(p)]));
       (c.dbs ?? []).forEach((db, i) => out.push([`fader.db${i}.pos`, X.ms_db_to_fader_position(db)],
                                                 [`fader.db${i}.fromGain`, X.ms_gain_to_fader_position(Math.fround(Math.pow(10, db * 0.05)))]));
       for (let curve = 0; curve < 5; curve++)

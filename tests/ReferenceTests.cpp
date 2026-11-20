@@ -1479,6 +1479,7 @@ namespace
             {
                 out.push_back ({ "fader.pos" + at (i) + ".db", (double) vs::meters::faderPositionToDb ((float) positions[i]) });
                 out.push_back ({ "fader.pos" + at (i) + ".gain", (double) vs::meters::faderPositionToGain ((float) positions[i]) });
+                out.push_back ({ "amp.pos" + at (i) + ".db", (double) vs::ampToDb ((float) positions[i]) });
             }
             for (size_t i = 0; i < dbs.size(); ++i)
             {

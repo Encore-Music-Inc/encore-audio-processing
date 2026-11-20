@@ -451,6 +451,8 @@ extern "C"
         vs::meters::step (shown, reading, b);
         return shown;
     }
+    // a level (1 = full scale) in dB, for a meter's number (silence reads -180)
+    EMSCRIPTEN_KEEPALIVE float ms_amp_db (float amp) { return vs::ampToDb (amp); }
     EMSCRIPTEN_KEEPALIVE float ms_meter_position (float db, float bottomDb, float topDb, float curve) { return vs::meters::scalePosition (db, bottomDb, topDb, curve); }
     EMSCRIPTEN_KEEPALIVE void* ms_peak_meter_create (float fallDbPerFrame, float holdMs, float clipDb)
     {
