@@ -133,7 +133,7 @@ CI fails if either differs from what the script writes.
 | | `VoiceGuide.h` | the guide a singer sings with: notes, sirens and a drone |
 | | `NotePlayer.h` | notes played for the theory tools: a chord strummed or struck together, a melody, a progression, with the voice guide's drone and the metronome's click beside them |
 | | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
-| | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak |
+| | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak; or played live, notes scheduled and held as they come, with the metronome's click |
 | Music vocabulary | `Music.h` | note names, spelled notes, keys (and by their signature), a line's notes spelled in a key, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library |
 | | `ChordTypes.h` | the chord types: formulas, symbols, numerals, families, the picker's groups |

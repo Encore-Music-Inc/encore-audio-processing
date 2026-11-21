@@ -244,4 +244,30 @@ extern "C"
     }
     EMSCRIPTEN_KEEPALIVE const float* in_ensemble_left (void* p) { return as<EnsembleIn> (p)->l.data(); }
     EMSCRIPTEN_KEEPALIVE const float* in_ensemble_right (void* p) { return as<EnsembleIn> (p)->r.data(); }
+
+    // ---- the score played live, for an AudioWorklet: the clock is the worklet's, in frames (a time in
+    // seconds is frame / fs). Notes are scheduled ahead (or held: dur 0 until in_ensemble_release), what
+    // hasn't started is forgotten from a time, and in_ensemble_live_render writes n frames at frame
+    // into in_ensemble_left / _right, returning 1 while anything sounds or is still to come.
+    EMSCRIPTEN_KEEPALIVE void in_ensemble_live_start (void* p) { as<EnsembleIn> (p)->e.startLive(); }
+    // one note: as in_ensemble_render's, with its gain (1: as played); returns its id
+    EMSCRIPTEN_KEEPALIVE int in_ensemble_schedule (void* p, double time, double dur, int midi, float vel, float velEnd, int part, int inst, int flags,
+                                                   int tech, int bendTo, float bendAt, float gain)
+    {
+        vs::Ensemble::Note n;
+        n.time = time; n.dur = dur; n.midi = midi; n.velocity = vel; n.velocityEnd = velEnd; n.part = part; n.instrument = inst;
+        n.slurred = (flags & 1) != 0; n.muted = (flags & 2) != 0; n.technique = (vs::Ensemble::Technique) std::clamp (tech, 0, 4);
+        n.bendTo = bendTo; n.bendAt = bendAt; n.gain = gain;
+        return as<EnsembleIn> (p)->e.schedule (n);
+    }
+    EMSCRIPTEN_KEEPALIVE void in_ensemble_release (void* p, int id, double at) { as<EnsembleIn> (p)->e.release (id, at); }
+    EMSCRIPTEN_KEEPALIVE void in_ensemble_cancel (void* p, double from) { as<EnsembleIn> (p)->e.cancel (from); }
+    EMSCRIPTEN_KEEPALIVE void in_ensemble_all_off (void* p) { as<EnsembleIn> (p)->e.allOff(); }
+    EMSCRIPTEN_KEEPALIVE void in_ensemble_click (void* p, double at, int accent, float level) { as<EnsembleIn> (p)->e.click (at, accent != 0, level); }
+    EMSCRIPTEN_KEEPALIVE int in_ensemble_live_render (void* p, int n, double frame)
+    {
+        auto* x = as<EnsembleIn> (p);
+        if ((int) x->l.size() < n) { x->l.resize ((size_t) n); x->r.resize ((size_t) n); }
+        return x->e.renderLive (x->l.data(), x->r.data(), (std::int64_t) frame, n) ? 1 : 0;
+    }
 }

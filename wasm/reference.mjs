@@ -224,7 +224,8 @@ function runMore(c, sig, out) {
       X.free(np); X.free(bp); X.free(vp); X.in_sampler_destroy(h);
       return true;
     }
-    case 'ensemble': {
+    case 'ensemble':
+    case 'ensemble-live': {
       const h = X.in_ensemble_create(fs);
       for (const f of c.synths || []) withText(f, (fp) => X.in_ensemble_add_synth(h, fp));
       f32(X.in_ensemble_recording(h, 0, n), n).set(sig.l);
@@ -241,8 +242,29 @@ function runMore(c, sig, out) {
         i32(F, m)[k] = r[7]; i32(TE, m)[k] = r[8]; i32(B, m)[k] = r[9]; f32(BA, m)[k] = r[10];
       }
       only.forEach((x, k) => { i32(O, only.length)[k] = x; });
-      const len = X.in_ensemble_render(h, m, T, Dd, M, V, VE, P, I, F, TE, B, BA, c.normalize ?? 1, only.length, O);
-      fingerprintAudio(out, '', [f32(X.in_ensemble_left(h), len).slice(), f32(X.in_ensemble_right(h), len).slice()], fs);
+      if (c.op === 'ensemble-live') {
+        // live: scheduled on the clock, the clicks beside it, a stop part-way, in 128-frame blocks
+        X.in_ensemble_live_start(h);
+        for (let k = 0; k < m; k++) {
+          const r = nv.slice(11 * k, 11 * k + 11);
+          X.in_ensemble_schedule(h, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], 1);
+        }
+        const cv = c.clicks || [];
+        for (let k = 0; k + 2 < cv.length; k += 3) X.in_ensemble_click(h, cv[k], cv[k + 1], cv[k + 2]);
+        const frames = Math.round((c.seconds ?? 3) * fs), stopAt = Math.round((c.cancel ?? 1e9) * fs), L = new Float32Array(frames), R = new Float32Array(frames);
+        let stopped = false;
+        for (let at = 0; at < frames; at += 128) {
+          if (!stopped && at >= stopAt) { X.in_ensemble_cancel(h, c.cancel ?? 0); stopped = true; }
+          const k = Math.min(128, frames - at);
+          X.in_ensemble_live_render(h, k, at);
+          L.set(f32(X.in_ensemble_left(h), k), at);
+          R.set(f32(X.in_ensemble_right(h), k), at);
+        }
+        fingerprintAudio(out, '', [L, R], fs);
+      } else {
+        const len = X.in_ensemble_render(h, m, T, Dd, M, V, VE, P, I, F, TE, B, BA, c.normalize ?? 1, only.length, O);
+        fingerprintAudio(out, '', [f32(X.in_ensemble_left(h), len).slice(), f32(X.in_ensemble_right(h), len).slice()], fs);
+      }
       for (const q of [vp, pp, T, Dd, M, V, VE, P, I, F, TE, B, BA, O]) X.free(q);
       X.in_ensemble_destroy(h);
       return true;

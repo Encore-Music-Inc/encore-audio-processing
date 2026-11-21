@@ -421,6 +421,113 @@ namespace
         expect ("a recorded instrument plays its synth sound until its recordings come", rec == 0 && al == bl && rms (al, 0.1, 1.0) > 0.01);
         expect ("a manifest it can't read is no instrument", a.addRecorded ("{}", nullptr, 0.0, "strings") == -1);
     }
+
+    // ---- a score played live
+
+    // n frames of the live mix from frame 0, in blocks of `block`
+    std::pair<std::vector<float>, std::vector<float>> runLive (vs::Ensemble& e, size_t n, int block)
+    {
+        std::vector<float> l (n), r (n);
+        for (size_t at = 0; at < n; at += (size_t) block)
+        {
+            const int k = (int) std::min<size_t> ((size_t) block, n - at);
+            e.renderLive (l.data() + at, r.data() + at, (std::int64_t) at, k);
+        }
+        return { l, r };
+    }
+
+    void live()
+    {
+        auto setUp = [] (vs::Ensemble& e)
+        {
+            e.prepare (fs);
+            e.addSynth ("piano");
+            e.addSynth ("strings");
+            e.setParts ({ { 0.8f, -0.5f }, { 0.8f, 0.5f } });
+        };
+        std::vector<vs::Ensemble::Note> notes;
+        for (int k = 0; k < 6; ++k)
+        {
+            vs::Ensemble::Note n;
+            n.time = 0.3 * k; n.dur = 0.4; n.midi = 55 + 3 * k; n.velocity = 70 + 5 * k; n.part = k % 2; n.instrument = k % 2;
+            notes.push_back (n);
+        }
+        vs::Ensemble a, b;
+        setUp (a);
+        setUp (b);
+        auto [rl, rr] = a.render (notes, false);
+        b.startLive();
+        for (auto n : notes) { n.time += vs::Ensemble::leadSeconds; b.schedule (n); }
+        auto [ll, lr] = runLive (b, rl.size(), 256);
+        expect ("live, a score plays exactly as it renders", ll == rl && lr == rr);
+
+        vs::Ensemble c;
+        setUp (c);
+        c.startLive();
+        for (auto n : notes) { n.time += vs::Ensemble::leadSeconds; c.schedule (n); }
+        auto [cl, cr] = runLive (c, rl.size(), 128);
+        double diff = 0;
+        for (size_t i = 0; i < cl.size(); ++i) diff = std::max (diff, (double) std::abs (cl[i] - rl[i]));
+        expect ("in an AudioWorklet's 128-frame blocks too", diff < 1e-5, "%.2e", diff);
+
+        // a key held, then let go: it sounds until it's released, then fades
+        vs::Ensemble h;
+        setUp (h);
+        h.startLive();
+        vs::Ensemble::Note held;
+        held.time = 0.1; held.dur = 0.0; held.midi = 60; held.velocity = 100; held.part = 1; held.instrument = 1;
+        const int id = h.schedule (held);
+        auto [h1, h1r] = runLive (h, (size_t) (1.0 * fs), 128);
+        expect ("a held note sounds with no length", rms (h1, 0.8, 1.0) > 0.01, "%.3f", rms (h1, 0.8, 1.0));
+        h.release (id, 1.0);
+        std::vector<float> after ((size_t) (3.0 * fs)), afterR (after.size());
+        for (size_t at = 0; at < after.size(); at += 128)
+            h.renderLive (after.data() + at, afterR.data() + at, (std::int64_t) (fs + at), (int) std::min<size_t> (128, after.size() - at));
+        expect ("and fades once it's released", rms (after, 2.0, 3.0) < 0.05 * rms (h1, 0.8, 1.0), "%.2e", rms (after, 2.0, 3.0));
+
+        // playback stopped: what hasn't started never does, what sounds ends there
+        vs::Ensemble s;
+        setUp (s);
+        s.startLive();
+        for (auto n : notes) s.schedule (n);
+        std::vector<float> sl (24000), sr (24000);
+        s.renderLive (sl.data(), sr.data(), 0, 24000);   // 0.5 s: the first two notes have started
+        s.cancel (0.5);
+        auto quiet = [&] (std::int64_t from, size_t n)
+        {
+            std::vector<float> l (n), r (n);
+            for (size_t at = 0; at < n; at += 128) s.renderLive (l.data() + at, r.data() + at, from + (std::int64_t) at, (int) std::min<size_t> (128, n - at));
+            return l;
+        };
+        const auto tail = quiet (24000, (size_t) (4.0 * fs));
+        // the hall's tail is all that's left after the cut notes' releases
+        expect ("a stop forgets the notes still to come", rms (tail, 2.5, 3.5) < 1e-3 && rms (tail, 0.6, 1.4) < rms (tail, 0.0, 0.05), "%.2e", rms (tail, 2.5, 3.5));
+        std::vector<float> nl (128), nr (128);
+        bool still = true;
+        for (int k = 0; k < 2000 && still; ++k) still = s.renderLive (nl.data(), nr.data(), (std::int64_t) (24000 + 4 * fs) + 128 * k, 128);
+        expect ("then says nothing is sounding", ! still);
+
+        // the click: the metronome's classic click beside the mix, at its level, on its frame
+        vs::Ensemble k;
+        setUp (k);
+        k.startLive();
+        k.click (0.25, true, 0.5f);
+        k.click (0.75, false, 0.5f);
+        auto [kl, kr] = runLive (k, (size_t) fs, 128);
+        const auto sounds = vs::metronome::makeSounds ("classic", fs);
+        double off = 0;
+        for (size_t i = 0; i < sounds.accent.size(); ++i) off = std::max (off, (double) std::abs (kl[12000 + i] - 0.5f * sounds.accent[i]));
+        expect ("a click is the classic click at its level, on its frame", off < 1e-6 && rms (kl, 0.0, 0.24) == 0.0 && kl == kr, "%.2e", off);
+        expect ("the beat's click differs from the accent's", rms (kl, 0.75, 0.8) > 0.0 && std::abs (rms (kl, 0.75, 0.8) - rms (kl, 0.25, 0.3)) > 1e-4);
+        k.allOff();
+        vs::Ensemble::Note n0 = notes[0];
+        n0.time = 1.2;
+        k.schedule (n0);
+        k.allOff();
+        std::vector<float> zl (48000), zr (48000);
+        k.renderLive (zl.data(), zr.data(), (std::int64_t) fs, 48000);
+        expect ("every note off: nothing scheduled plays", rms (zl, 0.0, 1.0) == 0.0);
+    }
 }
 
 int main()
@@ -432,6 +539,7 @@ int main()
     families();
     recorded();
     ensemble();
+    live();
     std::printf ("%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
     return failures == 0 ? 0 : 1;
 }

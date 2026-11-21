@@ -169,7 +169,7 @@ def rule(op, name):
     if op == "levels":
         return {"rms": "level", "pairDb": "db", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
     if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument",
-              "gain-track", "live-route", "rumble", "pad-loop", "soft-clip", "ensemble"):
+              "gain-track", "live-route", "rumble", "pad-loop", "soft-clip", "ensemble", "ensemble-live"):
         if op == "vocoder" and last == "peak":
             return "vocoder-peak"
         if last in ("sum", "peak", "lufs"):
@@ -757,6 +757,10 @@ case("ensemble/score", "ensemble", NOTE, parts=[0.8, -0.5, 0.7, 0.0, 0.9, 0.5], 
      notes=SCORE, normalize=1)
 case("ensemble/stem", "ensemble", NOTE, parts=[0.8, -0.5, 0.7, 0.0, 0.9, 0.5], synths=["piano", "strings"], manifest=json.dumps(MANIFEST), trimDb=-2, family="strings",
      notes=SCORE, normalize=0, only=[2])
+# the same score played live (in_ensemble_live_*): scheduled on the clock, in 128-frame blocks, the classic click
+# beside it (time, accent, level), and a stop at `cancel` seconds, for `seconds` in all
+case("ensemble/live", "ensemble-live", NOTE, parts=[0.8, -0.5, 0.7, 0.0, 0.9, 0.5], synths=["piano", "strings"], manifest=json.dumps(MANIFEST), trimDb=-2, family="strings",
+     notes=SCORE, clicks=[0.25, 1, 0.5, 0.75, 0, 0.5, 1.25, 0, 0.5], cancel=1.3, seconds=3.5)
 
 
 

@@ -13,6 +13,13 @@
 //     const int piano = e.addSynth ("piano");
 //     e.setParts ({ { 0.8f, 0.0f } });
 //     auto [l, r] = e.render (notes);
+//
+// Or live, on a running clock in frames (an AudioWorklet's): startLive, then
+// notes scheduled ahead as a score plays (a note's time is seconds on that
+// clock), notes held while a key is down (no length: until release), what
+// hasn't started forgotten when playback stops, the metronome's classic click
+// beside the mix, and renderLive block by block. The same parts, hall and
+// compressor play a score live and render it.
 
 #include <algorithm>
 #include <cmath>
@@ -24,6 +31,7 @@
 #include "Channels.h"
 #include "Compressor.h"
 #include "Instruments.h"
+#include "Metronome.h"
 #include "Mix.h"
 #include "ReverbEngine.h"
 
@@ -116,8 +124,116 @@ namespace vs
             return { std::move (L), std::move (R) };
         }
 
+        // ---- live
+
+        // Ready to play live: the parts' buses, the hall and the compressor, nothing sounding or scheduled
+        void startLive()
+        {
+            start ({});
+            clicks = std::make_shared<const metronome::Sounds> (metronome::makeSounds ("classic", fs));
+            clickVoices.clear();
+        }
+
+        // A note to play: from n.time (seconds on the live clock) for n.dur seconds, or held until
+        // release when n.dur is 0 (a key down). Returns its id. A time already past plays at once.
+        int schedule (const Note& n)
+        {
+            if (n.part >= (int) buses.size())
+            {
+                const auto had = buses.size();
+                buses.resize ((size_t) n.part + 1);
+                for (size_t p = had; p < buses.size(); ++p) buses[p].part = p < parts.size() ? parts[p] : Part {};
+            }
+            const size_t i = score.size();
+            score.push_back (n);
+            sounding.push_back ({});
+            insertEvent ({ frameAt (n.time), true, i });
+            if (n.dur > 0.0) insertEvent ({ frameAt (n.time + std::max (n.dur, 0.02)), false, i });
+            return (int) i;
+        }
+
+        // A held note (scheduled with no length) ends at `atSeconds` on the live clock
+        void release (int id, double atSeconds)
+        {
+            if (id < 0 || id >= (int) score.size()) return;
+            insertEvent ({ frameAt (atSeconds), false, (size_t) id });
+        }
+
+        // Forgets what was scheduled from `fromSeconds` on: a note that hasn't started by then never
+        // does, and one sounding then (or starting before it) ends there (playback stopped)
+        void cancel (double fromSeconds)
+        {
+            const auto from = frameAt (fromSeconds);
+            std::vector<Event> rest (events.begin() + (std::ptrdiff_t) next, events.end());
+            events.resize (next);
+            std::vector<char> willStart (score.size(), 0), willEnd (score.size(), 0);
+            for (const auto& e : rest)
+                if (e.at < from)
+                {
+                    events.push_back (e);
+                    (e.on ? willStart : willEnd)[e.note] = 1;
+                }
+            for (size_t i = 0; i < score.size(); ++i)
+                if ((isOn (i) || willStart[i]) && ! willEnd[i]) events.push_back ({ from, false, i });
+            std::stable_sort (events.begin() + (std::ptrdiff_t) next, events.end(), earlier);
+            clickVoices.clear();
+        }
+
+        // Every note sounding ends now and nothing scheduled plays (each fades with its release)
+        void allOff()
+        {
+            for (auto& b : buses)
+                for (auto& [k, pl] : b.players)
+                {
+                    if (pl.sampler) pl.sampler->allNotesOff (false);
+                    for (auto& [f, pool] : pl.synths) for (auto& sy : pool) sy->allNotesOff (false);
+                }
+            events.erase (events.begin() + (std::ptrdiff_t) next, events.end());
+            std::fill (sounding.begin(), sounding.end(), Sounding {});
+            clickVoices.clear();
+        }
+
+        // The metronome's classic click at `atSeconds` on the live clock (accent on a bar's first beat), at a level
+        void click (double atSeconds, bool accent, float level)
+        {
+            if (! clicks) return;
+            clickVoices.add (clicks, accent ? &clicks->accent : &clicks->beat, frameAt (atSeconds), level);
+        }
+
+        // Writes frames [frame, frame + n) of the live mix into l and r (the click beside it, after the
+        // compressor); returns whether anything is sounding or still to come
+        bool renderLive (float* l, float* r, std::int64_t frame, int n)
+        {
+            std::fill (l, l + n, 0.0f);
+            std::fill (r, r + n, 0.0f);
+            for (int done = 0; done < n;)
+            {
+                const int k = std::min (block, n - done);
+                renderBlock (l + done, r + done, frame + done, k);
+                done += k;
+            }
+            if (! clickVoices.empty())
+            {
+                if ((int) clickBuf.size() < n) clickBuf.resize ((size_t) n);
+                std::fill (clickBuf.begin(), clickBuf.begin() + n, 0.0f);
+                clickVoices.mix (clickBuf.data(), n, frame);
+                for (int i = 0; i < n; ++i) { l[i] += clickBuf[(size_t) i]; r[i] += clickBuf[(size_t) i]; }
+            }
+            // what's done with is let go, so a long session stays small
+            if (next > 4096) { events.erase (events.begin(), events.begin() + (std::ptrdiff_t) next); next = 0; }
+            bool any = next < events.size() || ! clickVoices.empty();
+            for (const auto& b : buses)
+                for (const auto& [k, pl] : b.players)
+                {
+                    if (pl.sampler && pl.sampler->isSounding()) any = true;
+                    for (const auto& [f, pool] : pl.synths) for (const auto& sy : pool) if (sy->isSounding()) any = true;
+                }
+            return any;
+        }
+
     private:
         static constexpr int block = 256;
+
 
         struct Def { std::string family; std::string manifest; instruments::Recordings recordings; double trimDb; };
 
@@ -145,6 +261,19 @@ namespace vs
 
         // A sounding note: where it plays, to end it
         struct Sounding { Synth* synth = nullptr; int voice = -1; Sampler* sampler = nullptr; std::uint64_t id = 0; };
+
+        std::int64_t frameAt (double seconds) const { return (std::int64_t) std::llround (seconds * fs); }
+        // Sounding now (started, not yet ended)
+        bool isOn (size_t i) const { return sounding[i].synth != nullptr || sounding[i].sampler != nullptr; }
+
+        // In time order, an end before a start at the same frame
+        static bool earlier (const Event& a, const Event& b) { return a.at < b.at || (a.at == b.at && ! a.on && b.on); }
+
+        // Into the events still to come, in time order
+        void insertEvent (const Event& e)
+        {
+            events.insert (std::upper_bound (events.begin() + (std::ptrdiff_t) next, events.end(), e, earlier), e);
+        }
 
         void start (const std::vector<Note>& notes)
         {
@@ -243,6 +372,7 @@ namespace vs
             const auto& s = sounding[i];
             if (s.synth != nullptr) s.synth->noteOffVoice (s.voice, score[i].midi);
             if (s.sampler != nullptr && s.id != 0) s.sampler->noteOffId (s.id);
+            sounding[i] = {};
         }
 
         void renderBlock (float* outL, float* outR, std::int64_t at, int n)
@@ -302,5 +432,8 @@ namespace vs
         Compressor comp;
         std::vector<float> sendL, sendR, wetL, wetR;
         float sendLevel = reverbSend, decay = reverbDecay, compThreshold = -16.0f, compRatio = 3.0f;
+        std::shared_ptr<const metronome::Sounds> clicks;
+        metronome::ClickVoices clickVoices;
+        std::vector<float> clickBuf;
     };
 }

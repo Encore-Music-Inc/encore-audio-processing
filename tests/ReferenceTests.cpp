@@ -514,7 +514,7 @@ namespace
             fingerprintAudio (out, "", { L, R }, fs);
             return true;
         }
-        if (op == "ensemble")
+        if (op == "ensemble" || op == "ensemble-live")
         {
             // a score: parts [volume, pan], synth sounds, a recorded instrument (its one recording the input), notes of 11 numbers each
             vs::Ensemble e;
@@ -535,6 +535,24 @@ namespace
                 n.part = (int) nv[k + 5]; n.instrument = (int) nv[k + 6]; n.slurred = ((int) nv[k + 7] & 1) != 0; n.muted = ((int) nv[k + 7] & 2) != 0;
                 n.technique = (vs::Ensemble::Technique) (int) nv[k + 8]; n.bendTo = (int) nv[k + 9]; n.bendAt = (float) nv[k + 10];
                 notes.push_back (n);
+            }
+            if (op == "ensemble-live")
+            {
+                // live: scheduled on the clock, the clicks beside it, a stop part-way, in 128-frame blocks
+                e.startLive();
+                for (const auto& n : notes) e.schedule (n);
+                const auto cv = nums (c, "clicks");
+                for (size_t k = 0; k + 2 < cv.size(); k += 3) e.click (cv[k], cv[k + 1] != 0, (float) cv[k + 2]);
+                const auto frames = (size_t) std::llround (c.get ("seconds", 3) * fs), stopAt = (size_t) std::llround (c.get ("cancel", 1e9) * fs);
+                std::vector<float> L (frames), R (frames);
+                bool stopped = false;
+                for (size_t at = 0; at < frames; at += 128)
+                {
+                    if (! stopped && at >= stopAt) { e.cancel (c.get ("cancel", 0)); stopped = true; }
+                    e.renderLive (L.data() + at, R.data() + at, (std::int64_t) at, (int) std::min<size_t> (128, frames - at));
+                }
+                fingerprintAudio (out, "", { L, R }, fs);
+                return true;
             }
             std::vector<int> only;
             for (double x : nums (c, "only")) only.push_back ((int) x);
