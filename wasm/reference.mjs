@@ -30,6 +30,7 @@ const f32 = (p, n) => new Float32Array(X.memory.buffer, p, n);
 const f64 = (p, n) => new Float64Array(X.memory.buffer, p, n);
 const i32 = (p, n) => new Int32Array(X.memory.buffer, p, n);
 const text = (s) => { const b = Buffer.from(s + '\0'); const p = X.malloc(b.length); new Uint8Array(X.memory.buffer, p, b.length).set(b); return p; };
+const withText = (s, f) => { const p = text(s); try { return f(p); } finally { X.free(p); } };
 const cstr = (p) => { const u = new Uint8Array(X.memory.buffer); let e = p; while (u[e]) e++; return Buffer.from(u.subarray(p, e)).toString(); };
 
 // ---- inputs (the fields in dsp/ReferenceSignals.h's order)
@@ -151,7 +152,7 @@ const ANALYSIS = ['empty', 'duration', 'samplePeakDb', 'samplePeakAt', 'peakLDb'
   'shortTermMaxAt', 'lra', 'balanceDb', 'truePeakDb', 'truePeakAt', 'tpOverCount', 'tpOverZeroCount', 'clipRuns',
   'clipEvents', 'clipLongest', 'clipHasLevel', 'clipLevelDb', 'lowCorr', 'lowMonoLossDb', 'lowShareDb', 'leadSec',
   'tailSec', 'firstSampleDb', 'lastSampleDb', 'headRmsDb', 'endRmsDb', 'endDecayDb', 'hasSpectrum', 'cliffHz',
-  'cliffDrop', 'hasPadded16', 'padded16', 'dcLDb', 'dcRDb'];
+  'cliffDrop', 'hasPadded16', 'padded16', 'dcLDb', 'dcRDb', 'lowSideToMidDb'];
 
 // text written by a mu_* function into a buffer
 const textBuf = X.malloc(256), intBuf = X.malloc(64);
@@ -190,7 +191,275 @@ function runMore(c, sig, out) {
   const stereo = sig !== null && sig.channels > 1;
   const nums = (k) => c[k] ?? [];
 
+  // JSON an rs_* function writes (out, cap), with a second try when it needs more room
+  const answer = (fn) => {
+    let cap = 1 << 16, b = X.malloc(cap), k = fn(b, cap);
+    if (k < 0) { X.free(b); cap = -k; b = X.malloc(cap); k = fn(b, cap); }
+    const v = JSON.parse(cstr(b));
+    X.free(b);
+    return v;
+  };
+  // feeds n samples from `at` of both channels into an rs_* object's inputs, then calls run (count)
+  const feed = (input, h, at, count, run) => {
+    f32(input(h, 0), count).set(sig.l.subarray(at, at + count));
+    f32(input(h, 1), count).set((stereo ? sig.r : sig.l).subarray(at, at + count));
+    run(count);
+  };
+
   switch (c.op) {
+    // ---- restoration of record and tape transfers
+    // ---- a pad player
+    case 'pad-loop': {
+      const h = X.in_sampler_create(fs, block), pads = nums('pads'), hits = nums('hits');
+      X.in_sampler_velocity_curve(h, c.velocityCurve ?? 1);
+      for (let k = 0; k + 8 < pads.length; k += 9) {
+        f32(X.in_sampler_load_left(h, n), n).set(sig.l);
+        if (stereo) f32(X.in_sampler_load_right(h, n), n).set(sig.r);
+        X.in_sampler_add_pad(h, stereo ? 1 : 0, fs, pads[k], pads[k + 5], pads[k + 6], pads[k + 7], pads[k + 8], pads[k + 1], pads[k + 2], pads[k + 3], pads[k + 4], c.release ?? 0.005);
+      }
+      const m = hits.length / 3, np = X.malloc(4 * m + 4), bp = X.malloc(8 * m + 8), vp = X.malloc(4 * m + 4);
+      for (let k = 0; k < m; k++) { i32(np, m)[k] = hits[3 * k]; f64(bp, m)[k] = hits[3 * k + 1]; f32(vp, m)[k] = hits[3 * k + 2]; }
+      const len = X.in_sampler_render_loop(h, np, bp, vp, m, c.bpm ?? 120, c.loopBeats ?? 4, fs, c.tail ?? 3, c.busGain ?? 0.85);
+      fingerprintAudio(out, '', [f32(X.in_sampler_loop_left(h), len).slice(), f32(X.in_sampler_loop_right(h), len).slice()], fs);
+      X.free(np); X.free(bp); X.free(vp); X.in_sampler_destroy(h);
+      return true;
+    }
+    case 'ensemble':
+    case 'ensemble-live': {
+      const h = X.in_ensemble_create(fs);
+      for (const f of c.synths || []) withText(f, (fp) => X.in_ensemble_add_synth(h, fp));
+      f32(X.in_ensemble_recording(h, 0, n), n).set(sig.l);
+      withText(c.family, (fp) => withText(c.manifest, (mp) => X.in_ensemble_add_recorded(h, mp, c.trimDb ?? 0, fp)));
+      const pv = nums('parts'), np = pv.length / 2, vp = X.malloc(4 * np + 4), pp = X.malloc(4 * np + 4);
+      for (let k = 0; k < np; k++) { f32(vp, np)[k] = pv[2 * k]; f32(pp, np)[k] = pv[2 * k + 1]; }
+      X.in_ensemble_parts(h, np, vp, pp);
+      const nv = nums('notes'), m = nv.length / 11, only = c.only || [];
+      const T = X.malloc(8 * m + 8), Dd = X.malloc(8 * m + 8), M = X.malloc(4 * m + 4), V = X.malloc(4 * m + 4), VE = X.malloc(4 * m + 4), P = X.malloc(4 * m + 4),
+        I = X.malloc(4 * m + 4), F = X.malloc(4 * m + 4), TE = X.malloc(4 * m + 4), B = X.malloc(4 * m + 4), BA = X.malloc(4 * m + 4), O = X.malloc(4 * only.length + 4);
+      for (let k = 0; k < m; k++) {
+        const r = nv.slice(11 * k, 11 * k + 11);
+        f64(T, m)[k] = r[0]; f64(Dd, m)[k] = r[1]; i32(M, m)[k] = r[2]; f32(V, m)[k] = r[3]; f32(VE, m)[k] = r[4]; i32(P, m)[k] = r[5]; i32(I, m)[k] = r[6];
+        i32(F, m)[k] = r[7]; i32(TE, m)[k] = r[8]; i32(B, m)[k] = r[9]; f32(BA, m)[k] = r[10];
+      }
+      only.forEach((x, k) => { i32(O, only.length)[k] = x; });
+      if (c.op === 'ensemble-live') {
+        // live: scheduled on the clock, the clicks beside it, a stop part-way, in 128-frame blocks
+        X.in_ensemble_live_start(h);
+        for (let k = 0; k < m; k++) {
+          const r = nv.slice(11 * k, 11 * k + 11);
+          X.in_ensemble_schedule(h, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], 1);
+        }
+        const cv = c.clicks || [];
+        for (let k = 0; k + 2 < cv.length; k += 3) X.in_ensemble_click(h, cv[k], cv[k + 1], cv[k + 2]);
+        const frames = Math.round((c.seconds ?? 3) * fs), stopAt = Math.round((c.cancel ?? 1e9) * fs), L = new Float32Array(frames), R = new Float32Array(frames);
+        let stopped = false;
+        for (let at = 0; at < frames; at += 128) {
+          if (!stopped && at >= stopAt) { X.in_ensemble_cancel(h, c.cancel ?? 0); stopped = true; }
+          const k = Math.min(128, frames - at);
+          X.in_ensemble_live_render(h, k, at);
+          L.set(f32(X.in_ensemble_left(h), k), at);
+          R.set(f32(X.in_ensemble_right(h), k), at);
+        }
+        fingerprintAudio(out, '', [L, R], fs);
+      } else {
+        const len = X.in_ensemble_render(h, m, T, Dd, M, V, VE, P, I, F, TE, B, BA, c.normalize ?? 1, only.length, O);
+        fingerprintAudio(out, '', [f32(X.in_ensemble_left(h), len).slice(), f32(X.in_ensemble_right(h), len).slice()], fs);
+      }
+      for (const q of [vp, pp, T, Dd, M, V, VE, P, I, F, TE, B, BA, O]) X.free(q);
+      X.in_ensemble_destroy(h);
+      return true;
+    }
+    case 'soft-clip': {
+      const ch = channelsOf(sig).map((x) => Float32Array.from(x, (v) => Math.fround(v * Math.fround(c.gain ?? 1)))), buf = alloc(ch);
+      X.pr_soft_clip(buf.table, ch.length, n, c.knee ?? 0.7);
+      fingerprintAudio(out, '', buf.read(n), fs);
+      buf.free();
+      return true;
+    }
+    case 'trim-start': {
+      const ch = channelsOf(sig), buf = alloc(ch);
+      for (const db of nums('thresholds')) out.push([`at${-db}`, X.pr_trim_start(buf.table, ch.length, n, fs, db, c.lead ?? 0)]);
+      buf.free();
+      return true;
+    }
+    case 'loop-timing': {
+      const bpm = c.bpm ?? 120, L = c.loopBeats ?? 4, times = nums('times');
+      times.forEach((t, i) => {
+        out.push([`beatAt${i}`, X.mu_loop_beat_at(t, 0.25, bpm, L)]);
+        for (const steps of [2, 3, 4, 6]) out.push([`snap${steps}.${i}`, X.mu_loop_snap(t, steps, L)]);
+        out.push([`grid${i}`, X.mu_next_grid_time(t, 0.1, 60 / bpm / 4)]);
+      });
+      const beats = nums('beats'), bp = X.malloc(8 * beats.length + 8), tp = X.malloc(8 * 256), wp = X.malloc(4 * 256);
+      f64(bp, beats.length).set(beats);
+      const due = X.mu_loop_hits(bp, 0, beats.length, c.from ?? 0, c.to ?? 4, 0.25, bpm, L, tp, wp, 256);
+      out.push(['due', due]);
+      for (let i = 0; i < due; i++) out.push([`due${i}.time`, f64(tp, due)[i]], [`due${i}.hit`, i32(wp, due)[i]]);
+      const cp = X.malloc(4 * 256), dp = X.malloc(4 * 256);
+      const k = X.mu_loop_clicks(c.from ?? 0, c.to ?? 4, 0.25, bpm, 4, tp, cp, dp, 256);
+      out.push(['clicks', k]);
+      for (let i = 0; i < k; i++) out.push([`click${i}.time`, f64(tp, k)[i]], [`click${i}.down`, i32(dp, k)[i]]);
+      [bp, tp, wp, cp, dp].forEach((p) => X.free(p));
+      return true;
+    }
+    // ---- live recordings
+    case 'live-set': {
+      const h = X.lv_set_create(fs, block);
+      blocks(n, block, (s, k) => {
+        f32(X.lv_set_input(h, 0), k).set(sig.l.subarray(s, s + k));
+        if (stereo) f32(X.lv_set_input(h, 1), k).set(sig.r.subarray(s, s + k));
+        X.lv_set_push(h, k, stereo ? 1 : 0);
+      });
+      const set = answer((b, cap) => X.lv_set_finish(h, c.minSong ?? 40, c.mergeGap ?? 6, b, cap));
+      X.lv_set_destroy(h);
+      const kinds = ['quiet', 'music', 'applause', 'talk', 'noodling'];
+      out.push(['seconds', set.seconds], ['judged', set.judged ? 1 : 0], ['threshold', set.threshold ?? 0], ['peak', set.peak ?? 0], ['songs', set.songs.length]);
+      set.songs.forEach((x, i) => out.push([`song${i}.start`, x.start], [`song${i}.end`, x.end], [`song${i}.confidence`, x.confidence], [`song${i}.level`, x.level]));
+      out.push(['gaps', set.gaps.length]);
+      set.gaps.forEach((g, i) => out.push([`gap${i}.kind`, kinds.indexOf(g.kind)]));
+      for (const k of kinds) out.push([`timeline.${k}`, set.timeline.filter((t) => t === k).length]);
+      return true;
+    }
+    case 'live-ride': {
+      const h = X.lv_ride_create(fs, c.target ?? -18, c.range ?? 12, block);
+      blocks(n, block, (s, k) => {
+        f32(X.lv_ride_input(h, 0), k).set(sig.l.subarray(s, s + k));
+        if (stereo) f32(X.lv_ride_input(h, 1), k).set(sig.r.subarray(s, s + k));
+        X.lv_ride_push(h, k, stereo ? 1 : 0);
+      });
+      const t = f32(X.lv_ride_track(h), X.lv_ride_count(h));
+      let sum = 0, peak = 0;
+      for (const v of t) { sum += Math.abs(v); peak = Math.max(peak, Math.abs(v)); }
+      out.push(['count', t.length], ['track.sum', sum], ['track.peak', peak], ['levelDb', X.lv_ride_level_db(h)]);
+      X.lv_ride_destroy(h);
+      return true;
+    }
+    case 'gain-track': {
+      const ch = channelsOf(sig).map((x) => x.slice()), buf = alloc(ch), db = nums('db');
+      const dp = X.malloc(4 * Math.max(1, db.length));
+      f32(dp, db.length).set(db);
+      blocks(n, block, (s, k) => X.pr_apply_gain_track(dp, db.length, c.hop ?? 0.1, c.offset ?? 0, fs, (c.start ?? 0) + s, buf.ptrs[0] + 4 * s, ch.length > 1 ? buf.ptrs[1] + 4 * s : 0, k));
+      fingerprintAudio(out, '', buf.read(n), fs);
+      buf.free(); X.free(dp);
+      return true;
+    }
+    case 'live-route': {
+      const delay = c.delay ?? 0, count = n - delay, pair = channelsOf(sig), r = pair[1] ?? pair[0];
+      const buf = alloc([sig.l, r, sig.l, r]), oL = X.malloc(4 * count + 4), oR = X.malloc(4 * count + 4);
+      const main = nums('main'), room = nums('room');
+      X.lv_route(buf.table, c.inputs ?? 4, count, delay, main[0], main[1], c.mono ? 1 : 0, room.length ? room[0] : -1, room.length ? room[1] : -1, c.roomDb ?? -6, oL, oR);
+      fingerprintAudio(out, '', [f32(oL, count).slice(), f32(oR, count).slice()], fs);
+      buf.free(); X.free(oL); X.free(oR);
+      return true;
+    }
+    case 'input-survey': {
+      const ch = channelsOf(sig), buf = alloc(ch), sv = X.lv_survey_create(ch.length), win = X.lv_survey_window_length(n, fs);
+      const table = X.malloc(4 * ch.length);
+      for (let k = 0; k < X.lv_survey_spots(); k++) {
+        const at = X.lv_survey_window_start(k, n, fs);
+        i32(table, ch.length).set(buf.ptrs.map((p) => p + 4 * at));
+        X.lv_survey_add(sv, table, Math.min(win, n - at));
+      }
+      ch.forEach((_, k) => {
+        out.push([`input${k}.levelDb`, X.lv_survey_level_db(sv, k)], [`input${k}.corr`, X.lv_survey_next_corr(sv, k)]);
+        if (k + 1 < ch.length) out.push([`input${k}.pairLevelDb`, X.lv_survey_pair_level_db(sv, k)]);
+      });
+      X.lv_survey_destroy(sv); X.free(table); buf.free();
+      return true;
+    }
+    case 'delay-between': {
+      const lag = c.lag ?? 0, buf = alloc([sig.l]), a = buf.ptrs[0] + 4 * lag, b = buf.ptrs[0];
+      out.push(['lag', X.rh_delay_between(a, a, b, b, n - lag, fs, c.maxSec ?? 0.15)]);
+      buf.free();
+      return true;
+    }
+    case 'peaks-overloads': {
+      const ch = channelsOf(sig), nc = ch.length, inter = new Float32Array(n * nc);
+      for (let i = 0; i < n; i++) for (let k = 0; k < nc; k++) inter[i * nc + k] = ch[k][i];
+      const buf = alloc([inter]), pk = X.malloc(4 * nc), ov = X.malloc(4 * nc);
+      X.ms_peaks_overloads(buf.ptrs[0], n, nc, pk, ov);
+      const peaks = f32(pk, nc).slice(), overloads = i32(ov, nc).slice();
+      for (let k = 0; k < nc; k++) out.push([`input${k}.peak`, peaks[k]], [`input${k}.overloads`, overloads[k]]);
+      buf.free(); X.free(pk); X.free(ov);
+      return true;
+    }
+    case 'rumble': {
+      const ch = channelsOf(sig).map((x) => x.slice()), h = X.pr_rumble_create(fs, c.hz ?? 30, block);
+      blocks(n, block, (s, k) => {
+        ch.forEach((x, ci) => f32(X.pr_rumble_input(h, ci), k).set(x.subarray(s, s + k)));
+        X.pr_rumble_process(h, k, ch.length > 1 ? 1 : 0);
+        ch.forEach((x, ci) => x.set(f32(X.pr_rumble_input(h, ci), k), s));
+      });
+      X.pr_rumble_destroy(h);
+      fingerprintAudio(out, '', ch, fs);
+      return true;
+    }
+    case 'restore-chain': {
+      // the noise profile learned from 20 frames, half a frame apart, from learnFrom seconds on
+      const N = X.rs_denoise_frame(fs), from = Math.round((c.learnFrom ?? 0) * fs);
+      const lp = X.rs_profile_create(fs, N, 0, 0);
+      for (let k = 0; k < 20 && from + k * (N >> 1) + N <= n; k++) feed(X.rs_profile_input, lp, from + k * (N >> 1), N, () => X.rs_profile_add(lp));
+      const bins = X.rs_profile_finish(lp);
+      const settings = JSON.parse(c.settings);
+      if (bins > 0) settings.denoise = { ...settings.denoise, profile: Array.from(f32(X.rs_profile_data(lp), bins)) };
+      X.rs_profile_destroy(lp);
+      const q = text(JSON.stringify(settings));
+      const h = X.rs_chain_create(fs, q, 0, 0, 0, 0, 0, block);
+      X.free(q);
+      let length = 0, sumL = 0, sumR = 0, peakL = 0, peakR = 0;
+      const take = (got) => {
+        const a = f32(X.rs_chain_output(h, 0), got), b = f32(X.rs_chain_output(h, 1), got);
+        for (let i = 0; i < got; i++) { sumL += Math.abs(a[i]); sumR += Math.abs(b[i]); peakL = Math.max(peakL, Math.abs(a[i])); peakR = Math.max(peakR, Math.abs(b[i])); }
+        length += got;
+      };
+      blocks(n, block, (at, k) => feed(X.rs_chain_input, h, at, k, (m) => take(X.rs_chain_push(h, m))));
+      take(X.rs_chain_flush(h));
+      const clicks = answer((b, cap) => X.rs_chain_clicks(h, b, cap));
+      X.rs_chain_destroy(h);
+      out.push(['length', length], ['events', clicks.length], ['sumL', sumL], ['sumR', sumR], ['peakL', peakL], ['peakR', peakR]);
+      return true;
+    }
+    case 'restore-analysis': {
+      const a = X.rs_analyzer_create(fs, n, 3000, block);
+      blocks(n, block, (at, k) => feed(X.rs_analyzer_input, a, at, k, (m) => X.rs_analyzer_push(a, m)));
+      X.rs_analyzer_finish(a);
+      const report = (what, options = {}) => { const w = text(JSON.stringify({ what, ...options })); const v = answer((b, cap) => X.rs_analyzer_report(a, w, b, cap)); X.free(w); return v; };
+      const summary = report('summary'), hum = report('hum'), tuning = report('tuning'), wow = report('wow'), spots = report('quietSpots'), wins = report('checkWindows');
+      out.push(['summary.peakDb', summary.peakDb], ['summary.musicDb', summary.musicDb ?? -200]);
+      out.push(['hum.found', hum.found ? 1 : 0], ['hum.hz', hum.hz], ['hum.harmonics', hum.harmonics.length]);
+      out.push(['tuning.found', tuning.found ? 1 : 0], ['tuning.cents', tuning.cents], ['wow.found', wow.found ? 1 : 0]);
+      const tracks = report('tracks', { minGap: 1.2, minSong: 3 });   // songs at least 3 s long, as the native run asks
+      X.rs_analyzer_destroy(a);
+      out.push(['tracks.tracks', tracks.tracks.length], ['tracks.gapStart', tracks.gaps[0]?.start ?? -1], ['tracks.gapEnd', tracks.gaps[0]?.end ?? -1]);
+      out.push(['spots.spots', spots.length]);
+      const hz = hum.harmonics.map((x) => x.hz), hp = X.malloc(8 * Math.max(1, hz.length));
+      f64(hp, hz.length).set(hz);
+      const N = summary.N, lp = X.rs_profile_create(fs, N, hp, hz.length);
+      X.free(hp);
+      let taken = 0;
+      for (const at of spots) { if (at + N > n) continue; feed(X.rs_profile_input, lp, at, N, () => X.rs_profile_add(lp)); if (++taken >= 300) break; }
+      const bins = X.rs_profile_finish(lp);
+      out.push(['noise.frames', X.rs_profile_frames(lp)], ['noise.profileDb', bins > 0 ? X.rs_profile_db_of(X.rs_profile_data(lp), bins, N) : -200]);
+      X.rs_profile_destroy(lp);
+      const most = Math.max(1, ...wins.map((w) => w.length));
+      const cc = X.rs_channels_create(fs, most), counter = X.rs_clicks_create(fs, 50, 40, most);
+      for (const w of wins) {
+        feed(X.rs_channels_input, cc, w.at, Math.min(w.length, Math.trunc(fs / 2)), (m) => X.rs_channels_add(cc, m));
+        feed(X.rs_clicks_input, counter, w.at, w.length, (m) => X.rs_clicks_add(counter, m, w.at));
+      }
+      const ch = answer((b, cap) => X.rs_channels_result(cc, b, cap)), clicks = answer((b, cap) => X.rs_clicks_result(counter, b, cap));
+      X.rs_channels_destroy(cc);
+      X.rs_clicks_destroy(counter);
+      out.push(['channels.corr', ch.corr], ['channels.balanceDb', ch.balanceDb], ['channels.delay', ch.delay], ['channels.mono', ch.mono ? 1 : 0]);
+      out.push(['clicks.perMinute', clicks.perMinute[0]]);
+      const env = X.rs_envelope_create(fs, 0.05, n);
+      feed(X.rs_envelope_input, env, 0, n, (m) => X.rs_envelope_push(env, m));
+      const count = X.rs_envelope_count(env);
+      const gaps = answer((b, cap) => X.rs_gap_candidates(X.rs_envelope_levels(env), count, X.rs_envelope_hop(env), b, cap));
+      X.rs_envelope_destroy(env);
+      out.push(['envelope.levels', count], ['envelope.candidates', gaps.cands.length], ['envelope.candidateAt', gaps.cands[0]?.at ?? -1]);
+      return true;
+    }
+
     // ---- measurement
     case 'file-analysis': {
       const a = X.ms_an_create(fs, sig.channels, n, c.bitDepth ?? 0, c.isFloat ?? 0, block);
@@ -247,8 +516,9 @@ function runMore(c, sig, out) {
       return true;
     }
     case 'tonal-balance': {
-      const buf = alloc([sig.l]), res = X.malloc(8 * 24);
-      X.ms_tonal_balance(buf.ptrs[0], n, fs, res);
+      const lr = c.lr && sig.channels > 1, buf = alloc(lr ? [sig.l, sig.r] : [sig.l]), res = X.malloc(8 * 24);
+      if (lr) X.ms_tonal_balance_lr(buf.ptrs[0], buf.ptrs[1], n, fs, res);
+      else X.ms_tonal_balance(buf.ptrs[0], n, fs, res);
       const v = f64(res, 24);
       for (let b = 0; b < 10; b++) out.push([`level${b}`, v[b]], [`rel${b}`, v[10 + b]]);
       out.push(['lows', v[20]], ['mud', v[21]], ['harsh', v[22]], ['top', v[23]]);
@@ -268,6 +538,7 @@ function runMore(c, sig, out) {
       stat('peak', 0, columns); stat('peakL', 1, columns); stat('peakR', 2, columns);
       if (c.rms) stat('rms', 3, columns);
       if (c.bands) stat('bands', 4, 3 * columns);
+      if (c.rms || c.bands) stat('levelDb', 5, columns);
       X.ms_wf_destroy(w);
       return true;
     }
@@ -376,7 +647,15 @@ function runMore(c, sig, out) {
     case 'levels': {
       const src = channelsOf(sig);
       const buf = alloc(src);
-      out.push(['rms', X.pr_rms(buf.ptrs[0], n)], ['silent', X.pr_nearly_silent(buf.ptrs[0], n)]);
+      out.push(['rms', X.pr_rms(buf.ptrs[0], n)]);
+      {
+        const inter = new Float32Array(n * src.length);
+        for (let i = 0; i < n; i++) for (let c = 0; c < src.length; c++) inter[i * src.length + c] = src[c][i];
+        const ib = alloc([inter]);
+        out.push(['pairDb', X.pr_rms_db(ib.ptrs[0], n, src.length, Math.min(2, src.length))]);
+        ib.free();
+      }
+      out.push(['silent', X.pr_nearly_silent(buf.ptrs[0], n)]);
       const quiet = alloc([new Float32Array(n).fill(0.0001)]);
       out.push(['quietSilent', X.pr_nearly_silent(quiet.ptrs[0], n)]);
       quiet.free();
@@ -387,6 +666,9 @@ function runMore(c, sig, out) {
       let peak = 0;
       for (const x of src) for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(x[i]));
       out.push(['gainDb', X.pr_gain_to_peak_db(peak, -0.3, -60, 24)]);
+      // a gain given in dB
+      X.pr_apply_gain_db(buf.table, src.length, n, -6.5);
+      fingerprintAudio(out, 'gained', buf.ptrs.map((p) => f32(p, n).slice()), fs);
       buf.free();
       return true;
     }
@@ -650,6 +932,21 @@ function runMore(c, sig, out) {
         X.mu_in_key(pc, 3, 1, intBuf); out.push([p + '.inF#', spelledAt(intBuf)]);
         X.mu_in_key(pc, 1, -1, intBuf); out.push([p + '.inDb', spelledAt(intBuf)]);
       }
+      for (let f = -7; f <= 7; f++)
+        for (let minor = 0; minor < 2; minor++) {
+          const id = `fifths${f}${minor ? 'm' : ''}`;
+          X.mu_key_from_fifths(f, minor, intBuf);
+          const t = i32(intBuf, 2).slice();
+          out.push([id + '.key', mtext((b, cap) => X.mu_key_name(t[0], t[1], minor, b, cap))]);
+          out.push([id + '.signature', Array.from({ length: 7 }, (_, l) => X.mu_signature_alter(l, f)).join(' ')]);
+          out.push([id + '.written2', X.mu_transpose_fifths(f, 2)]);
+          out.push([id + '.written9', X.mu_transpose_fifths(f, 9)]);
+          for (let dir = -1; dir <= 1; dir++) {
+            const line = [];
+            for (let pc = 0; pc < 12; pc++) { X.mu_spell_moving(pc, f, minor, dir, intBuf); line.push(spelledAt(intBuf)); }
+            out.push([`${id}.moving${dir}`, line.join(' ')]);
+          }
+        }
       for (const t of nums('parse')) {
         const tp = text(t);
         out.push(['note:' + t, X.mu_parse_note(tp, intBuf) ? spelledAt(intBuf) : '-']);
@@ -740,7 +1037,7 @@ function runMore(c, sig, out) {
         const g = f32(two, 2);
         out.push([`pan.${name}.${i}.l`, g[0]], [`pan.${name}.${i}.r`, g[1]]);
       }));
-      (c.positions ?? []).forEach((p, i) => out.push([`fader.pos${i}.db`, X.ms_fader_position_to_db(p)], [`fader.pos${i}.gain`, X.ms_fader_position_to_gain(p)]));
+      (c.positions ?? []).forEach((p, i) => out.push([`fader.pos${i}.db`, X.ms_fader_position_to_db(p)], [`fader.pos${i}.gain`, X.ms_fader_position_to_gain(p)], [`amp.pos${i}.db`, X.ms_amp_db(p)]));
       (c.dbs ?? []).forEach((db, i) => out.push([`fader.db${i}.pos`, X.ms_db_to_fader_position(db)],
                                                 [`fader.db${i}.fromGain`, X.ms_gain_to_fader_position(Math.fround(Math.pow(10, db * 0.05)))]));
       for (let curve = 0; curve < 5; curve++)
@@ -905,6 +1202,45 @@ function run(c, sig) {
       out.push(['count', found.length]);
       found.forEach((f, i) => out.push(['onset' + i, f]));
       X.rh_onsets_destroy(d);
+      break;
+    }
+    case 'song-profile': {
+      const p = X.ms_prof_create(fs, n, block);
+      const st = stereo ? 1 : 0;
+      if ((c.stretchLength ?? 0) > 0) X.ms_prof_choose(p, c.stretchFrom ?? 0, c.stretchLength, c.whole ?? -100);
+      else blocks(n, block, (s, k) => { fill(X.ms_prof_left(p), X.ms_prof_right(p), s, k); X.ms_prof_song(p, k, st); });
+      const from = X.ms_prof_stretch_from(p), length = X.ms_prof_stretch_length(p);
+      blocks(length, block, (s, k) => { fill(X.ms_prof_left(p), X.ms_prof_right(p), from + s, k); X.ms_prof_stretch(p, k, st); });
+      X.ms_prof_finish(p);
+      out.push(['from', from], ['length', length], ['lufs', X.ms_prof_value(p, 0)], ['wholeLufs', X.ms_prof_value(p, 1)], ['plr', X.ms_prof_value(p, 2)]);
+      for (let b = 0; b < 10; b++) out.push([`tone${b}`, X.ms_prof_value(p, 3 + b)]);
+      for (let b = 0; b < 3; b++) out.push([`width${b}`, X.ms_prof_value(p, 13 + b)]);
+      X.ms_prof_destroy(p);
+      break;
+    }
+    case 'master-monitor': {
+      const m = X.mm_create(fs, block);
+      X.mm_settings(m, c.style ?? 0, 0.5, 0, -14, -1, 0.5, 0, 0, 0, 0, 0, 0, 0);
+      X.mm_hear_original(m, c.original ?? 0);
+      if (c.level) X.mm_playback_level(m, 1, c.master ?? 0, c.orig ?? 0);
+      X.mm_device(m, c.device ?? 0);
+      const l = new Float32Array(n), r = new Float32Array(n);
+      blocks(n, block, (s, k) => {
+        f32(X.mm_left(m), k).set(sig.l.subarray(s, s + k));
+        f32(X.mm_right(m), k).set((stereo ? sig.r : sig.l).subarray(s, s + k));
+        X.mm_process(m, k);
+        l.set(f32(X.mm_left(m), k), s);
+        r.set(f32(X.mm_right(m), k), s);
+      });
+      const lm = X.lm_create(fs, n);
+      f32(X.lm_left(lm), n).set(l);
+      f32(X.lm_right(lm), n).set(r);
+      X.lm_process(lm, n, 1);
+      let peak = 0;
+      for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(l[i]), Math.abs(r[i]));
+      out.push(['lufs', X.lm_integrated(lm)], ['peak', peak], ['matchDb', X.mm_get(m, 14)]);
+      X.lm_destroy(lm);
+      X.mm_destroy(m);
       break;
     }
     case 'mastering': {

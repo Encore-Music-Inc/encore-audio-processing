@@ -10,12 +10,14 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <vector>
 #include "Stats.h"
 #include "Fft.h"
 #include "Windows.h"
+#include "Channels.h"
 
 namespace vs::drums
 {
@@ -85,4 +87,71 @@ namespace vs::drums
         for (int i = 0; i < count; ++i) notes.push_back (top - i * step);
         return notes;
     }
+
+    // Catching drum hits in a live input, for drumPeak: a hit is a 1024-sample
+    // block whose level (RMS) is above 0.01 and more than three times the last
+    // block's plus 0.003, at least 0.4 s after the last hit. The ring is the
+    // `capture` samples that follow, skipping the first 25 ms of stick noise.
+    class DrumHits
+    {
+    public:
+        static constexpr int block = 1024, capture = 8192;
+        static constexpr double skipSeconds = 0.025, gapSeconds = 0.4;
+
+        void prepare (double sampleRate) { sr = sampleRate; reset(); }
+
+        void reset()
+        {
+            fill = 0;
+            last = 0;
+            since = (std::int64_t) 1 << 40;
+            waiting = -1;
+            ringFill = 0;
+            have.assign ((size_t) block, 0.0f);
+            ring.assign ((size_t) capture, 0.0f);
+        }
+
+        // Takes the next n samples; returns true when a hit's ring has just been caught (ringed())
+        bool push (const float* x, int n)
+        {
+            bool caught = false;
+            for (int i = 0; i < n; ++i)
+            {
+                ++since;
+                if (waiting >= 0)
+                {
+                    if (waiting > 0) --waiting;
+                    else
+                    {
+                        ring[(size_t) ringFill++] = x[i];
+                        if (ringFill == capture) { waiting = -1; ringFill = 0; caught = true; }
+                    }
+                }
+                have[(size_t) fill++] = x[i];
+                if (fill == block)
+                {
+                    fill = 0;
+                    const float rms = channels::rmsOf (have.data(), block);
+                    if (waiting < 0 && rms > 0.01f && rms > last * 3.0f + 0.003f && (double) since >= gapSeconds * sr)
+                    {
+                        since = 0;
+                        waiting = (int) std::round (skipSeconds * sr);
+                        ringFill = 0;
+                    }
+                    last = rms;
+                }
+            }
+            return caught;
+        }
+
+        // The last hit's ring (capture samples)
+        const std::vector<float>& ringed() const { return ring; }
+
+    private:
+        double sr = 48000;
+        std::vector<float> have, ring;
+        int fill = 0, waiting = -1, ringFill = 0;
+        float last = 0;
+        std::int64_t since = 0;
+    };
 }

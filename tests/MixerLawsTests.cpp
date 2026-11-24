@@ -233,6 +233,8 @@ int main()
     {
         std::vector<float> x { 0.5f, -0.5f, 0.5f, -0.5f };
         expect ("RMS of a square wave is its height", near (channels::rmsOf (x.data(), 4), 0.5, 1e-7));
+        const float pair[] { 0.5f, 0.0f, 9.0f, -0.5f, 0.0f, 9.0f };
+        expect ("RMS of a pair: the first two of three channels together, not the third", near (channels::rmsOf (pair, 2, 3, 2), 0.5 / std::sqrt (2.0), 1e-7));
         std::vector<float> quiet (64, 0.0001f), loud (64, 0.0001f);
         loud[40] = 0.1f;
         expect ("nearly silent: a quiet block is, one with a peak isn't", channels::isNearlySilent (quiet.data(), 64) && ! channels::isNearlySilent (loud.data(), 64));

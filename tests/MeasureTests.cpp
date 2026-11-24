@@ -222,6 +222,7 @@ int main()
         expect ("analysis: three clipped stretches found", m.clip.runs == 3 && m.clip.events == 3 && m.clip.longest == 5,
                 "%.0f runs, %.0f events, longest %.0f", m.clip.runs, m.clip.events, m.clip.longest);
         expect ("analysis: the low end stays in phase (60 Hz on both sides)", m.band[0].corr > 0.9 && m.low.outTimes.empty(), "corr %.3f", m.band[0].corr);
+        expect ("analysis: a centred low end has its side far under its mid", m.low.sideToMidDb < -20, "%.1f dB", m.low.sideToMidDb);
         expect ("analysis: side noise lowers the correlation", m.corr < 0.99 && m.corr > 0.5, "%.3f", m.corr);
         expect ("analysis: a real 24-bit file is not 16-bit padded", m.hasPadded16 && ! m.padded16);
         expect ("analysis: matches the whole-buffer call", [&] {
@@ -238,6 +239,7 @@ int main()
         }
         const auto p = vs::FileAnalysis::analyse (f.data(), g.data(), (std::int64_t) n, fs, 2, { 24, false });
         expect ("analysis: flipped polarity reads correlation -1", p.corr < -0.999 && p.band[1].corr < -0.99 && ! p.low.outTimes.empty(), "%.4f", p.corr);
+        expect ("analysis: flipped polarity puts the low end all in the side", p.low.sideToMidDb > 40, "%.1f dB", p.low.sideToMidDb);
         expect ("analysis: DC offset", std::abs (p.dcL - 0.01) < 1e-4 && std::abs (p.dcR + 0.01) < 1e-4, "%.5f / %.5f", p.dcL, p.dcR);
         expect ("analysis: DC offset in dBFS, 20 log10 (|dc| + 1e-12) for each channel",
                 p.dcLDb == 20 * std::log10 (std::abs (p.dcL) + 1e-12) && p.dcRDb == 20 * std::log10 (std::abs (p.dcR) + 1e-12) && std::abs (p.dcLDb + 40) < 0.01,
@@ -340,6 +342,13 @@ int main()
         expect ("tonal balance: white noise rises about 3 dB an octave (500 Hz to 1 kHz)", std::abs ((tn.levelDb[5] - tn.levelDb[4]) - 3.0) < 0.3,
                 "%.2f dB", tn.levelDb[5] - tn.levelDb[4]);
         expect ("tonal balance: white noise reads lean low end and a hot top", tn.lows < -5 && tn.top > 4, "lows %.1f, top %.1f", tn.lows, tn.top);
+        // from two channels it's judged on their mid: identical channels read as one
+        const auto both = vs::tonalBalance (n.data(), n.data(), (std::int64_t) n.size(), fs);
+        expect ("tonal balance: two identical channels read as the one", both.lows == tn.lows && both.top == tn.top && both.levelDb[5] == tn.levelDb[5]);
+        std::vector<float> flip (n.size());
+        for (size_t i = 0; i < n.size(); ++i) flip[i] = -n[i];
+        const auto gone = vs::tonalBalance (n.data(), flip.data(), (std::int64_t) n.size(), fs);
+        expect ("tonal balance: opposite channels leave no mid", gone.levelDb[5] < -150, "%.1f dB", gone.levelDb[5]);
     }
 
     // ---- the clipping check on its own ----

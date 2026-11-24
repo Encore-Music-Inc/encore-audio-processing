@@ -6,7 +6,7 @@
 // drum), then peaks at its kit level. Plain C++20, no JUCE.
 //
 // The kits: ENCORE. (a punchy all-round kit), Boom (the classic analog drum
-// machine), Club (the classic house and techno machine), and Studio, 808,
+// machine), Club (the classic house and techno machine), and Studio, Deep,
 // Rock and Lo-fi, one recipe with different settings (Style), where Lo-fi
 // adds a bit crusher, sample-and-hold and a low-pass after the drums.
 //
@@ -308,7 +308,7 @@ namespace vs::drumsynth
 
     inline constexpr std::array<Style, 4> styles { {
         { "studio", "Studio", 48, 150, 0.035, 0.32, 0.5,  185, 330, 0.06, 1200, 0.12, 0.8,  1.0, 1.0,  1.0,  0.28, 0.0,  0, 1, 0 },
-        { "808",    "808",    45, 120, 0.060, 0.90, 0.15, 230, 476, 0.09, 2500, 0.08, 0.55, 0.7, 1.2,  0.85, 0.50, 0.3,  0, 1, 0 },
+        { "deep",   "Deep",   45, 120, 0.060, 0.90, 0.15, 230, 476, 0.09, 2500, 0.08, 0.55, 0.7, 1.2,  0.85, 0.50, 0.3,  0, 1, 0 },
         { "rock",   "Rock",   55, 180, 0.020, 0.22, 0.9,  170, 290, 0.10,  800, 0.20, 1.0,  1.3, 0.75, 0.9,  0.40, 0.5,  0, 1, 0 },
         { "lofi",   "Lo-fi",  50, 140, 0.035, 0.30, 0.4,  190, 320, 0.07, 1500, 0.10, 0.7,  0.9, 0.8,  1.0,  0.25, 0.25, 8, 3, 6500 },
     } };
@@ -437,7 +437,7 @@ namespace vs::drumsynth
             { prefix "LowTom", styleLevel, makeStyled<i, 45> }, { prefix "HighTom", styleLevel, makeStyled<i, 48> }, \
             { prefix "Crash", styleLevel, makeStyled<i, 49> }, { prefix "Ride", styleLevel, makeStyled<i, 51> },
             VS_STYLE_KIT (0, "studio")
-            VS_STYLE_KIT (1, "808")
+            VS_STYLE_KIT (1, "deep")
             VS_STYLE_KIT (2, "rock")
             VS_STYLE_KIT (3, "lofi")
 #undef VS_STYLE_KIT
@@ -503,7 +503,7 @@ namespace vs::drumsynth
               { { 1, 36, "clubKick" }, { 2, 38, "clubSnare" }, { 3, 42, "clubClosedHat", 1 }, { 4, 39, "clubClap" }, { 5, 37, "clubRim" },
                 { 6, 46, "clubOpenHat", 1 }, { 7, 48, "clubTom" }, { 8, 51, "clubRide" }, { 9, 49, "clubCrash" } } },
             { "studio", "Studio", "Short, punchy, mix-ready drums.", stylePads ("studio") },
-            { "808", "808", "A long booming kick and tight hats.", stylePads ("808") },
+            { "deep", "Deep", "A long booming kick and tight hats.", stylePads ("deep") },
             { "rock", "Rock", "Punchy and roomy, with a driven edge.", stylePads ("rock") },
             { "lofi", "Lo-fi", "Crunchy and dark: fewer bits, a lower sample rate.", stylePads ("lofi") },
         };

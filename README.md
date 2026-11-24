@@ -69,7 +69,7 @@ CI fails if either differs from what the script writes.
 |---|---|---|
 | Building blocks | `Fft.h` | the FFT, complex and real input |
 | | `Windows.h` | window functions and the windowed-sinc table |
-| | `Biquad.h` | second-order filter designs (the RBJ cookbook) and their curves |
+| | `Biquad.h` | second-order filter designs (the RBJ cookbook) and their curves, first-order sections, zero-phase filtering |
 | | `Crossover.h` | Linkwitz-Riley band splits that recombine flat |
 | | `Svf.h` | the state-variable filter |
 | | `Convolution.h` | zero-latency convolution, with crossfaded filter changes |
@@ -78,13 +78,14 @@ CI fails if either differs from what the script writes.
 | | `Oversampler.h` | power-of-two oversampling |
 | | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), its live form for playback, and decimation |
 | | `Ramp.h` | a value ramping to a new target, and how automation moves between its points |
-| | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels and a rack return's ramps |
-| | `Oscillator.h`, `Envelope.h` | band-limited oscillators, and the ADSR envelope |
+| | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels, a rack return's ramps and a gain track |
+| | `Oscillator.h`, `Envelope.h` | band-limited oscillators, a wave made of harmonics, and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut and the dynamic EQ bell that turn a sound down by its level |
-| | `Lpc.h` | linear prediction |
+| | `Lpc.h` | linear prediction, and filling a gap from the audio around it |
 | | `Random.h` | seeded random numbers, the same on every system |
 | | `Stats.h` | median, percentile, mean, deviation and a least-squares line |
 | | `Util.h` | smoothers, decibels, mid and side, rounding |
+| | `Json.h` | a small JSON reader and writer, for the browser's calls that take and give text |
 | | `Denormals.h` | the denormal guard: turns the processor's denormals off while audio code runs |
 | Measurement | `Loudness.h` | the loudness meter (ITU-R BS.1770, EBU R128), and the true-peak limiter the mastering chain ends with |
 | | `LoudnessReport.h` | a song's loudness report |
@@ -92,36 +93,48 @@ CI fails if either differs from what the script writes.
 | | `Analysis.h` | everything a release check measures on a finished song |
 | | `Spectrum.h` | the live analyser, the long-term spectrum, the lossy-encoder cliff, tonal balance and drawing axes |
 | | `ResonanceFinder.h` | narrow resonances in a long-term spectrum |
+| | `SongProfile.h` | what a song is, to compare with another: its loudest stretch, tone per octave, width and how squashed it is |
 | | `Waveform.h` | waveform overviews for drawing, and a DAW's waveform picture at any zoom |
 | | `Meters.h` | how a meter moves on screen (ballistics, peak hold, its scale) and the volume fader's law |
 | Processing and mastering | `EqBand.h`, `VocalEq.h` | a parametric EQ band, and the vocal EQ |
-| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider |
-| | `Saturator.h` | preamp drive |
+| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider (and its slow form, a gain track for a whole recording) |
+| | `Saturator.h` | preamp drive, and the safety curve on a bus where sounds pile up |
 | | `ReverbEngine.h`, `Space.h` | the reverb, and the delay (the vocal send, with its reverb) |
 | | `Chorus.h`, `Phaser.h` | the chorus and the phaser |
 | | `TimeStretch.h` | time stretching and pitch shifting (on Signalsmith Stretch) |
 | | `Doubler.h`, `GuitarFixes.h`, `BodyMatch.h` | the acoustic guitar tools: double, the Squeak, Pick and Boom fixes, and the pickup-to-mic body match |
 | | `MasterChain.h` | the one-knob mastering chain |
-| | `Mastering.h` | mastering a whole song with the chain |
+| | `Mastering.h` | mastering a whole song with the chain, and the loudest stretch it learns on |
+| | `MasterMonitor.h` | a song mastered as you listen: the chain, the original at the same loudness, a streaming service's level, a playback device and a live spectrum |
 | | `Dither.h` | float to integer samples, with dither |
-| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing and the clean-up after a plugin |
+| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing, the clean-up after a plugin, and a live recording's inputs (routing, what's on each, samples at full scale) |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
 | | `Dsd.h` | DSD (the one-bit audio of SACDs, .dsf and .dff files) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
 | | `Presets.h` | the presets of the Vox, Verb, Equalize, Master and Strum chains (written by `tools/presets.py`) |
+| Restoration | `Declicker.h` | de-click and de-crackle for transfers of records |
+| | `NoiseReduction.h` | spectral noise reduction, and the noise profile it learns from the quiet stretches |
+| | `Restoration.h` | the restoration chain for record and tape transfers: rumble, channels, de-click, de-hum, noise reduction, 78 playback curves, speed and wow |
+| | `RestorationAnalysis.h` | what's wrong with a transfer: hum, tuning (speed), wow, tape dropouts, the songs on a side, how the channels compare, how clicky it is |
+| Live recordings | `LiveSet.h` | the songs in a live set, and what's between them: applause, talk, tuning, quiet |
 | Pitch | `Yin.h` | the pitch detector, with its settings for following a voice, the tuner and singing |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction: its detector and its real-time engine |
-| | `TunerPitch.h`, `Tunings.h` | the tuner, and its instruments and tunings |
+| | `TunerPitch.h`, `Tunings.h` | the tuner and its reference tone, and its instruments and tunings |
 | | `VoiceTracker.h` | following a singing voice and measuring it, played notes, and the notes of warm-ups, sing-back and the keys that suit a range |
-| | `DrumPitch.h` | drum tuning |
+| | `DrumPitch.h` | drum tuning, and catching each hit in a live input |
 | Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
-| | `TimingCheck.h` | the speaker-to-mic latency and playing in time with a click |
+| | `TimingCheck.h` | the speaker-to-mic latency, playing in time with a click, and how much later a second recording of a performance hears it |
 | | `Metronome.h` | the beat grid, the sequencer, the click sounds, the click engine and its voices for a host's own timeline |
-| Sound | `Synth.h` | the synth |
-| | `Sampler.h` | the sampler |
+| Sound | `Synth.h` | the synth, with the options a score's instruments use |
+| | `Sampler.h` | the sampler, with a drum pad's options (region, end fade, tuning, cutting itself off), a loop rendered through it, and an instrument's recordings as zones (velocity layers, loops, an envelope and low-pass each) |
+| | `NoteExpression.h` | how a score plays one note (gain, brightness, a slur, a glide, a swell) |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
-| Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
+| | `VoiceGuide.h` | the guide a singer sings with: notes, sirens and a drone |
+| | `NotePlayer.h` | notes played for the theory tools: a chord strummed or struck together, a melody, a progression, with the voice guide's drone and the metronome's click beside them |
+| | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
+| | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak; or played live, notes scheduled and held as they come, with the metronome's click |
+| Music vocabulary | `Music.h` | note names, spelled notes, keys (and by their signature), a line's notes spelled in a key, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library |
 | | `ChordTypes.h` | the chord types: formulas, symbols, numerals, families, the picker's groups |
 | | `Harmony.h` | chords: degrees, symbols, naming a set of notes, numerals, the map of a key, key changes, the moves between chords and the facts behind them, transposing, guessing a song's key from its chords, a capo for a shift |
@@ -129,25 +142,27 @@ CI fails if either differs from what the script writes.
 | | `ScaleTheory.h` | scales on a root: spelling, steps, comparing, modes and parents, the chords they build, which scale fits a chord or a progression, the neck (box positions, notes per string) |
 | | `TheoryCalls.h` | the theory and the voice exercises as JSON requests and answers, for the browser and the reference set |
 | | `Scales.h` | pitch correction's keys, scales and harmony intervals |
-| | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids |
+| | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids, a loop recorder's timing |
 
 ### The browser engine
 
 | File | Prefix | What |
 |---|---|---|
-| `wasm/api_master.cpp` | `mc_` | the mastering chain |
+| `wasm/api_master.cpp` | `mc_`, `mm_` | the mastering chain, and a song mastered as you listen |
 | `wasm/api_mastering.cpp` | `mt_` | whole-song mastering |
 | `wasm/api_loudness.cpp` | `lm_` | the loudness meter |
-| `wasm/api_measure.cpp` | `ms_` | true peak, the loudness report, the analysis, spectrum, waveforms, meters on screen, the band that tames a resonance |
-| `wasm/api_processing.cpp` | `pr_` | resampling, delays, dither, channel work, device simulation, the vocal EQ, "hear the original", DSD to PCM, the true-peak limiter on its own, an MP3's sample rate |
+| `wasm/api_measure.cpp` | `ms_` | true peak, the loudness report, the analysis, spectrum, waveforms, meters on screen, the band that tames a resonance, a song's profile |
+| `wasm/api_processing.cpp` | `pr_` | resampling, delays, dither, channel work, gains, device simulation, the vocal EQ, "hear the original", DSD to PCM, the true-peak limiter on its own, an MP3's sample rate |
 | `wasm/api_effects.cpp` | `fx_` | the chorus, phaser, filter, pitch shifter, time stretch, compressor, delay and reverb, and the send law |
-| `wasm/api_instruments.cpp` | `in_` | the synth and the sampler |
+| `wasm/api_instruments.cpp` | `in_` | the synth, the sampler and a score played by its instruments |
 | `wasm/api_pitch.cpp` | `pi_` | voice pitch and its measurements, played notes, drum tuning |
 | `wasm/api_tuner.cpp` | `tp_` | the tuner, the block averaging before a reading, and following its readings |
 | `wasm/api_rhythm.cpp` | `rh_` | tempo, onsets, timing, the beat grid's meters (groupings, accents, note values, subdivisions, tempo names) |
-| `wasm/api_sound.cpp` | `sd_` | the drums and the metronome (its sounds, its click engine and mending its settings) |
+| `wasm/api_sound.cpp` | `sd_` | the drums, the metronome (its sounds, its click engine and mending its settings), the singing guide and the theory tools' notes |
 | `wasm/api_music.cpp` | `mu_` | note names, spelled notes and the sounds they make, keys and the key lists, Hz and MIDI, note editing on a grid |
 | `wasm/api_theory.cpp` | `th_` | the chord and scale theory: one function that answers a JSON request (`dsp/TheoryCalls.h` lists them) |
+| `wasm/api_restore.cpp` | `rs_` | the restoration of record and tape transfers: the chain, the analysis and its detectors, the noise profile, the clip check, a side's level envelope |
+| `wasm/api_live.cpp` | `lv_` | live recordings: the songs in a set, the slow ride's gain track, the inputs routed to the two channels heard and what's on each |
 
 The lists (tunings, scales, presets, chord types) are the `data/*.json` files, not functions.
 
@@ -257,6 +272,10 @@ This writes `wasm/master.wasm` (not committed). The same Emscripten version
 gives the same bytes, so a release's `master.wasm.sha256` can be checked
 against a local build. A release's `.json` files are the `data/*.json` files
 from the same commit.
+
+Its memory can grow as a call needs it (`wasm/build.sh` sets how), and
+growing replaces the module's memory buffer, so a product makes its view of
+that memory afresh after every call rather than keeping one across calls.
 
 ## Versioning
 

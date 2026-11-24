@@ -175,6 +175,72 @@ namespace vs::music
         return {};
     }
 
+    // ---- keys by their signature (sharps as +1 .. +7, flats as -1 .. -7) and notes spelled in them
+    // as written music spells a line: a chromatic note takes the key note below it raised on the
+    // way up and the one above it lowered on the way down, otherwise the degree it usually takes
+
+    // The alteration a key signature gives a letter (0 C .. 6 B): sharps go on F C G D A E B, flats on B E A D G C F
+    constexpr int signatureAlter (int letter, int fifths)
+    {
+        constexpr std::array<int, 7> sharpOrder { 3, 0, 4, 1, 5, 2, 6 }, flatOrder { 6, 2, 5, 1, 4, 0, 3 };
+        auto at = [] (const std::array<int, 7>& o, int l) { for (int i = 0; i < 7; ++i) if (o[(size_t) i] == l) return i; return -1; };
+        if (fifths > 0) return at (sharpOrder, letter) < fifths ? 1 : 0;
+        if (fifths < 0) return at (flatOrder, letter) < -fifths ? -1 : 0;
+        return 0;
+    }
+
+    // The key of a signature: each fifth up moves a major key's tonic four letters; a minor key is a sixth above
+    constexpr Key keyFromFifths (int fifths, Mode mode = Mode::major)
+    {
+        const int major = mod7 (fifths * 4), letter = mode == Mode::minor ? mod7 (major + 5) : major;
+        return { note (letter, signatureAlter (letter, fifths)), mode };
+    }
+
+    // The signature a transposing instrument reads for a concert key (fifths), written a number of semitones
+    // above it: a B-flat trumpet (+2) in C reads D (two sharps). Kept within seven sharps or flats.
+    constexpr int transposeFifths (int fifths, int semitones)
+    {
+        int d = mod12 (semitones * 7);
+        if (d > 6) d -= 12;
+        int k = fifths + d;
+        if (k > 7) k -= 12;
+        if (k < -7) k += 12;
+        return k;
+    }
+
+    // A pitch class spelled in a key (its signature and mode) on its way up (direction 1), down (-1) or
+    // neither (0). A note of the key takes the key's spelling; a chromatic one, with a direction, the key
+    // note a half step below it raised (up) or above it lowered (down); otherwise the alteration of the
+    // degree it usually takes (in minor the raised 6th and 7th and the Picardy third are sharps of the
+    // key's notes). Never past a double sharp or flat.
+    inline Note spellMoving (int pc, int fifths, Mode mode = Mode::major, int direction = 0)
+    {
+        pc = mod12 (pc);
+        auto keyPc = [fifths] (int l) { return mod12 (letterPc[(size_t) l] + signatureAlter (l, fifths)); };
+        int letter = -1, acc = 0;
+        for (int l = 0; l < 7 && letter < 0; ++l) if (keyPc (l) == pc) { letter = l; acc = signatureAlter (l, fifths); }
+        if (letter < 0 && direction != 0)
+            for (int l = 0; l < 7 && letter < 0; ++l)
+                if (mod12 (pc - keyPc (l)) == (direction > 0 ? 1 : 11)) { letter = l; acc = signatureAlter (l, fifths) + (direction > 0 ? 1 : -1); }
+        if (letter < 0)
+        {
+            // each chromatic degree from the tonic: letters up, and the alteration from the signature
+            constexpr std::array<std::array<int, 2>, 12> major { { { 0, 0 }, { 1, -1 }, { 1, 0 }, { 2, -1 }, { 2, 0 }, { 3, 0 }, { 3, 1 }, { 4, 0 }, { 5, -1 }, { 5, 0 }, { 6, -1 }, { 6, 0 } } };
+            constexpr std::array<std::array<int, 2>, 12> minor { { { 0, 0 }, { 1, -1 }, { 1, 0 }, { 2, 0 }, { 2, 1 }, { 3, 0 }, { 3, 1 }, { 4, 0 }, { 5, 0 }, { 5, 1 }, { 6, 0 }, { 6, 1 } } };
+            const int t = keyFromFifths (fifths, mode).tonic.letter;
+            const auto& deg = (mode == Mode::minor ? minor : major)[(size_t) mod12 (pc - keyPc (t))];
+            letter = mod7 (t + deg[0]);
+            acc = signatureAlter (letter, fifths) + deg[1];
+        }
+        if (std::abs (acc) > 2)
+            for (int l = 0; l < 7; ++l)
+            {
+                const int a = mod12 (pc - letterPc[(size_t) l] + 6) - 6;
+                if (std::abs (a) <= 1) { letter = l; acc = a; break; }
+            }
+        return note (letter, acc);
+    }
+
     // "F# major", "Eb minor"
     inline std::string keyName (const Key& k) { return noteText (k.tonic) + (k.mode == Mode::minor ? " minor" : " major"); }
 

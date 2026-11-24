@@ -227,6 +227,14 @@ extern "C"
         return (int) r->offsets.size();
     }
 
+    // The mean of the voiced readings (midi NaN: none) at times t from t0 to t1, NaN when there are none
+    EMSCRIPTEN_KEEPALIVE double pi_mean_pitch (const double* t, const double* midi, int n, double t0, double t1)
+    {
+        std::vector<vs::voice::PitchFrame> f ((size_t) std::max (0, n));
+        for (int i = 0; i < n; ++i) f[(size_t) i] = { t[i], midi[i] };
+        return vs::voice::meanPitch (f, t0, t1);
+    }
+
     // The main note of a drum hit in Hz (vs::drums::drumPeak), 0 when there isn't one.
     EMSCRIPTEN_KEEPALIVE double pi_drum_peak (const float* x, int n, double sampleRate, double minHz, double maxHz, int lowest, int size)
     {
@@ -241,6 +249,16 @@ extern "C"
         for (int i = 0; i < n; ++i) cents[i] = r.cents[(size_t) i];
         return r.mean;
     }
+
+    // ---- Catching drum hits in a live input (vs::drums::DrumHits): push n
+    // samples; 1 when a hit's ring has just been caught, then pi_hits_ring has
+    // its pi_hits_ring_length samples, ready for pi_drum_peak
+    EMSCRIPTEN_KEEPALIVE vs::drums::DrumHits* pi_hits_create (double sampleRate) { auto* h = new vs::drums::DrumHits(); h->prepare (sampleRate); return h; }
+    EMSCRIPTEN_KEEPALIVE void pi_hits_destroy (vs::drums::DrumHits* h) { delete h; }
+    EMSCRIPTEN_KEEPALIVE void pi_hits_reset (vs::drums::DrumHits* h) { h->reset(); }
+    EMSCRIPTEN_KEEPALIVE int pi_hits_push (vs::drums::DrumHits* h, const float* x, int n) { return h->push (x, n) ? 1 : 0; }
+    EMSCRIPTEN_KEEPALIVE const float* pi_hits_ring (vs::drums::DrumHits* h) { return h->ringed().data(); }
+    EMSCRIPTEN_KEEPALIVE int pi_hits_ring_length() { return vs::drums::DrumHits::capture; }
 
     // Notes for count toms tuned in steps, into out[0..count).
     EMSCRIPTEN_KEEPALIVE void pi_tom_steps (double top, int count, double step, double* out)

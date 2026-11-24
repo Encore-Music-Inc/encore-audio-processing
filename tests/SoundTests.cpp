@@ -10,6 +10,8 @@
 #include <vector>
 #include "dsp/DrumSynth.h"
 #include "dsp/Metronome.h"
+#include "dsp/VoiceGuide.h"
+#include "dsp/NotePlayer.h"
 
 namespace
 {
@@ -246,6 +248,20 @@ namespace
         g.stop();
         std::vector<float> tail (128 * 20);
         for (int k = 0; k < 20; ++k) g.render (tail.data() + k * 128, 128, 25600 + k * 128);
+        m::ClickEngine h (48000);
+        h.setSounds (m::makeSounds ("classic", 48000));
+        h.set ({});
+        h.setMaster (50);
+        h.start (480);
+        const auto half = run (h, 400, 128);
+        expect ("the master volume: slider 50 is 0.25 of the mix, times 0.8 headroom, at once",
+                std::abs (peak ({ half.begin() + 480, half.begin() + 4000 }) - 0.2f) < 1e-6f);
+        h.setMaster (50, true);
+        h.start (0);
+        std::vector<float> fade (1920);
+        h.render (fade.data(), 1920, 0);
+        expect ("muting ramps down over 20 ms, then silence",
+                fade[0] != 0 && std::abs (fade[0]) <= 0.2f && peak ({ fade.begin() + 960, fade.end() }) == 0);
         expect ("render hands out each count once; stop lets the last click ring out",
                 counts == 2 && ev[0].size() == 1 && ev[187].size() == 1 && tail[0] != 0 && peak ({ tail.begin() + 1280, tail.end() }) == 0);
     }
@@ -301,6 +317,15 @@ namespace
         }
         expect ("every sound renders at its kit level", levels);
         expect ("an unknown id is nothing", d::renderSound ("nope", 48000).empty());
+        // the kits are in the style of drum machines, never named after one (a product name is its maker's)
+        bool plain = true;
+        for (auto& k : d::kits())
+            for (const std::string text : { std::string (k.id), std::string (k.name), std::string (k.about) })
+                for (const char* mark : { "808", "909", "707", "606", "Roland", "TR-", "LinnDrum", "MPC" })
+                    plain = plain && text.find (mark) == std::string::npos;
+        for (auto& s : d::sounds())
+            for (const char* mark : { "808", "909", "707", "606" }) plain = plain && std::string (s.id).find (mark) == std::string::npos;
+        expect ("no kit or sound is named after a drum machine", plain);
         expect ("names: the kit's and the drum's",
                 d::soundName ("boomKick") == "Boom: Kick" && d::soundName ("kick") == "Kick" && d::soundName ("studioFloorTom") == "Studio: Low floor tom"
                     && d::soundName ("rim") == "Side stick" && d::soundName ("shaker") == "Shaker");
@@ -344,6 +369,16 @@ namespace
             { "clubSnare", 24480, 4834.14575 },
             { "clubTom", 28800, 7439.82553 },
             { "crash", 115200, 3242.00504 },
+            { "deepClap", 21839, 2130.76959 },
+            { "deepClosedHat", 6048, 547.085424 },
+            { "deepCrash", 105600, 20139.464 },
+            { "deepFloorTom", 60000, 21726.8108 },
+            { "deepHighTom", 60000, 21843.5393 },
+            { "deepKick", 129600, 40814.8159 },
+            { "deepLowTom", 60000, 21804.9854 },
+            { "deepOpenHat", 23519, 3682.8908 },
+            { "deepRide", 76800, 7867.10219 },
+            { "deepSnare", 19200, 3151.9619 },
             { "highTom", 24960, 7982.13946 },
             { "kick", 28800, 13258.1161 },
             { "lowTom", 37440, 12240.8449 },
@@ -351,16 +386,6 @@ namespace
             { "rim", 6720, 521.761243 },
             { "shaker", 5760, 229.465288 },
             { "snare", 18720, 3045.39358 },
-            { "808Clap", 21839, 2130.76959 },
-            { "808ClosedHat", 6048, 547.085424 },
-            { "808Crash", 105600, 20139.464 },
-            { "808FloorTom", 60000, 21726.8108 },
-            { "808HighTom", 60000, 21843.5393 },
-            { "808Kick", 129600, 40814.8159 },
-            { "808LowTom", 60000, 21804.9854 },
-            { "808OpenHat", 23519, 3682.8908 },
-            { "808Ride", 76800, 7867.10219 },
-            { "808Snare", 19200, 3151.9619 },
             { "lofiClap", 21838, 1907.50237 },
             { "lofiClosedHat", 7776, 621.229088 },
             { "lofiCrash", 105600, 15448.9515 },
@@ -486,8 +511,150 @@ namespace
     }
 }
 
+    // ---- the singing guide
+
+    void guide()
+    {
+        const double sr = 48000;
+        auto play = [&] (vs::VoiceGuide& g, int seconds)
+        {
+            std::vector<float> out ((size_t) (sr * seconds));
+            for (int b = 0; b * 128 < (int) out.size(); ++b) g.process (out.data() + b * 128, std::min (128, (int) out.size() - b * 128), (std::int64_t) b * 128);
+            return out;
+        };
+        vs::VoiceGuide g;
+        g.prepare (sr);
+        g.setVolume (100);
+        g.add (57, 4800, 1.0, vs::VoiceGuide::Sound::piano);
+        g.add (64, 96000, 1.0, vs::VoiceGuide::Sound::soft, 0.5);
+        const auto x = play (g, 4);
+        float before = 0;
+        for (size_t i = 0; i < 4800; ++i) before = std::max (before, std::abs (x[i]));
+        const float strike = peak ({ x.begin() + 4800, x.begin() + 9600 }), later = peak ({ x.begin() + 38400, x.begin() + 52800 });
+        expect ("guide: a piano note starts on its frame at A3, strikes near the volume (0.6) and mellows to under half of it",
+                before == 0 && std::abs (crossingHz (x, 9600, 52800, sr) - 220.0) < 0.05 && strike > 0.45f && strike < 0.66f && later < 0.3f * 1.1f && later > 0.1f);
+        const float soft = peak ({ x.begin() + 96000 + 4800, x.begin() + 96000 + 43200 });
+        expect ("guide: a soft note holds at three quarters of its share (0.6 x 0.5 x 0.75), at E4, and fades after its end",
+                std::abs (soft - 0.225f) < 0.02f && std::abs (crossingHz (x, 100800, 139200, sr) - 329.63) < 0.05
+                    && peak ({ x.begin() + 96000 + 62400, x.end() }) < 0.001f, std::to_string (soft));
+
+        vs::VoiceGuide s;
+        s.prepare (sr);
+        const vs::VoiceGuide::Glide gl { 48, 60, 1.0, 1.0 };
+        s.add (48, 0, 2.0, vs::VoiceGuide::Sound::piano, 1.0, &gl);
+        const auto y = play (s, 3);
+        const double low = crossingHz (y, 0, 2400, sr), top = crossingHz (y, 46800, 49200, sr), back = crossingHz (y, 93600, 96000, sr);
+        expect ("guide: a siren glides from C3 up an octave and back, each way in equal ratios",
+                std::abs (low - 130.8) < 3 && std::abs (top - 261.6) < 4 && std::abs (back - 130.8) < 3
+                    && std::abs (crossingHz (y, 23400, 25800, sr) - 185.0) < 4);
+
+        vs::VoiceGuide d;
+        d.prepare (sr);
+        d.setDrone (45, 0);
+        d.add (69, 24000, 5.0, vs::VoiceGuide::Sound::soft);
+        std::vector<float> z ((size_t) sr * 2);
+        int sounding = 0;
+        for (int b = 0; b * 128 < (int) z.size(); ++b)
+        {
+            const std::int64_t f0 = (std::int64_t) b * 128;
+            if (f0 == 48000) { d.stopAll (48000); d.setVolume (30); }
+            sounding = d.process (z.data() + b * 128, 128, f0);
+        }
+        float droneAlone = peak ({ z.begin() + 14400, z.begin() + 24000 });
+        expect ("guide: the drone (half the volume) plays on through a stop, the notes fade, a new volume glides the drone",
+                std::abs (droneAlone - 0.108f) < 0.01f && sounding == 1 && peak ({ z.begin() + 86400, z.end() }) < 0.04f && peak ({ z.begin() + 86400, z.end() }) > 0.02f);
+        d.setDrone (-1, 96000);
+        std::vector<float> w ((size_t) sr);
+        for (int b = 0; b * 128 < (int) w.size(); ++b) sounding = d.process (w.data() + b * 128, 128, 96000 + (std::int64_t) b * 128);
+        expect ("guide: turning the drone off fades it out and it ends", sounding == 0 && peak ({ w.begin() + 24000, w.end() }) == 0.0f);
+    }
+
+    // ---- the theory tools' notes
+
+    void notes()
+    {
+        const double sr = 48000;
+        auto run = [&] (vs::NotePlayer& p, double seconds, std::int64_t from = 0)
+        {
+            std::vector<float> out ((size_t) (sr * seconds));
+            bool on = false;
+            for (int b = 0; b * 128 < (int) out.size(); ++b) on = p.process (out.data() + b * 128, std::min (128, (int) out.size() - b * 128), from + (std::int64_t) b * 128);
+            return std::make_pair (out, on);
+        };
+        const auto pluck = vs::renderPluck (220.0, sr, 3.0, { 1, 0.62, 0.42, 0.3, 0.2, 0.14, 0.09, 0.06 }, 1.1, 0.9, 0.003, 0.3);
+        expect ("pluck: three seconds at A3, at full scale (less the rise), rising from silence and ending in it",
+                pluck.size() == 144000 && peak (pluck) > 0.95f && peak (pluck) <= 1.0f && pluck[0] == 0.0f && std::abs (pluck.back()) < 1e-3f
+                    && std::abs (crossingHz (pluck, 4800, 96000, sr) - 220.0) < 0.01);
+
+        vs::NotePlayer p;
+        p.prepare (sr);
+        p.setVolume (100);
+        p.play ({ 57 }, 4800, vs::NotePlayer::Sound::strings, 0, 0.02, 1.0);
+        const auto [quiet, on] = run (p, 2.0);
+        float before = 0;
+        for (size_t i = 0; i < 4800; ++i) before = std::max (before, std::abs (quiet[i]));
+        const float expected = 0.02f * 0.5f * 0.9f * vs::dbToGain (vs::NotePlayer::makeupDb());
+        expect ("notes: a quiet note starts on its frame, at its share of the volume and the compressor's makeup gain, and is cut off after its length",
+                before == 0 && std::abs (peak ({ quiet.begin() + 4800, quiet.begin() + 9600 }) - expected) < expected * 0.05f
+                    && peak ({ quiet.begin() + 4800 + 72000, quiet.end() }) == 0.0f && ! on,
+                std::to_string (peak ({ quiet.begin() + 4800, quiet.begin() + 9600 })) + " vs " + std::to_string (expected));
+
+        vs::NotePlayer s;
+        s.prepare (sr);
+        s.play ({ 40, 47, 52, 56, 59, 64 }, 0, vs::NotePlayer::Sound::strings, 0.03, 1.0, 2.0);
+        const auto [strum, sOn] = run (s, 1.0);
+        const float loud = peak (strum);
+        vs::NotePlayer one;
+        one.prepare (sr);
+        one.play ({ 40 }, 0, vs::NotePlayer::Sound::strings, 0, 1.0, 2.0);
+        const auto [low, lOn] = run (one, 0.06);
+        // until the second string comes in 30 ms (1440 frames) later, it's the low E alone
+        bool alone = true;
+        for (size_t i = 1; i < 1440; ++i) alone = alone && (strum[i] == 0.0f) == (low[i] == 0.0f);
+        expect ("notes: a six-string strum, each string 30 ms after the last, held under full scale by the compressor",
+                strum[0] == 0.0f && alone && loud < 1.0f && loud > 0.2f && sOn && lOn && std::abs (strum[1500]) > 0, std::to_string (loud));
+
+        s.silence (48000);
+        const auto [after, aOn] = run (s, 0.5, 48000);
+        expect ("notes: silence fades everything out and drops it", ! aOn && peak ({ after.begin() + 12000, after.end() }) == 0.0f);
+        s.play ({ 60 }, 72000, vs::NotePlayer::Sound::piano, 0, 1.0, 1.0);
+        const auto [next, nOn] = run (s, 0.5, 72000);
+        expect ("notes: what's played next is at the volume again, and a piano note is its own sound", nOn && peak (next) > 0.1f);
+
+        // the drone: the voice guide's, held under the notes until it's turned off
+        vs::NotePlayer d;
+        d.prepare (48000);
+        d.setVolume (100);
+        d.drone (45, 0);
+        const auto [held, hOn] = run (d, 1.0, 0);
+        const float droneLevel = peak ({ held.begin() + 24000, held.end() });
+        expect ("notes: a drone holds, a little under a note's level", hOn && droneLevel > 0.05f && droneLevel < 0.35f, std::to_string (droneLevel));
+        d.drone (-1, 48000);
+        const auto [gone, gOn] = run (d, 0.6, 48000);
+        expect ("notes: the drone fades out when turned off", ! gOn && peak ({ gone.begin() + 19200, gone.end() }) == 0.0f);
+        d.drone (45, 76800);
+        d.silence (76800);
+        const auto [hush, hushOn] = run (d, 0.5, 76800);
+        expect ("notes: silence takes the drone with it", ! hushOn && peak ({ hush.begin() + 12000, hush.end() }) == 0.0f);
+
+        // the click: the metronome's classic click, on its frame
+        vs::NotePlayer c;
+        c.prepare (48000);
+        c.setVolume (100);
+        c.click (4800, true);
+        c.click (28800, false);
+        const auto [clk, cOn] = run (c, 0.75, 0);
+        size_t first = 0;
+        while (first < clk.size() && clk[first] == 0.0f) ++first;
+        const float accent = peak ({ clk.begin() + 4800, clk.begin() + 9600 }), beat = peak ({ clk.begin() + 28800, clk.begin() + 33600 });
+        expect ("notes: a click starts on its frame, the accent louder than the beat", first >= 4800 && first < 4810 && accent > beat && beat > 0.05f && ! cOn,
+                std::to_string (accent) + " " + std::to_string (beat));
+    }
+
 int main()
 {
+    guide();
+    notes();
     meters();
     trainerAndGap();
     cleaning();

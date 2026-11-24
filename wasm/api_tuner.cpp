@@ -56,4 +56,26 @@ extern "C"
     EMSCRIPTEN_KEEPALIVE int tp_window_stride (double sampleRate) { return vs::TunerPitch::window (sampleRate).stride; }
     EMSCRIPTEN_KEEPALIVE int tp_window_length (double sampleRate) { return vs::TunerPitch::window (sampleRate).n; }
     EMSCRIPTEN_KEEPALIVE float tp_estimate_latest (const float* x, int count, double sampleRate) { return vs::TunerPitch::estimateLatest (x, count, sampleRate); }
+
+    // ---- Where a note sits in the temperament (offsets: 12 cents on C, turned
+    // to root), in Hz: what a string should sound
+    EMSCRIPTEN_KEEPALIVE double tp_target_hz (int note, double a4, const float* offsets, int root)
+    {
+        std::array<float, 12> o {};
+        for (size_t k = 0; k < 12; ++k) o[k] = offsets[k];
+        return vs::TunerReading::targetHzOf (note, a4, o, root);
+    }
+
+    // ---- The reference tone (vs::TunerTone): start at hz, plucked (kind 0) or
+    // steady (1), at a volume slider 0 to 100; tp_tone_process writes n samples
+    // into out and returns 1 while it's sounding
+    EMSCRIPTEN_KEEPALIVE vs::TunerTone* tp_tone_create (double sampleRate) { auto* t = new vs::TunerTone(); t->prepare (sampleRate); return t; }
+    EMSCRIPTEN_KEEPALIVE void tp_tone_destroy (vs::TunerTone* t) { delete t; }
+    EMSCRIPTEN_KEEPALIVE void tp_tone_start (vs::TunerTone* t, double hz, int kind, double volume)
+    {
+        t->start (hz, kind == 1 ? vs::TunerTone::steady : vs::TunerTone::pluck, volume);
+    }
+    EMSCRIPTEN_KEEPALIVE void tp_tone_volume (vs::TunerTone* t, double volume) { t->setVolume (volume); }
+    EMSCRIPTEN_KEEPALIVE void tp_tone_stop (vs::TunerTone* t) { t->stop(); }
+    EMSCRIPTEN_KEEPALIVE int tp_tone_process (vs::TunerTone* t, float* out, int n) { return t->process (out, n) ? 1 : 0; }
 }

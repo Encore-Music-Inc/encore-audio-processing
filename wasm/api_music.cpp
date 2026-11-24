@@ -117,6 +117,22 @@ extern "C"
         put (vs::music::spellNote (pc, hasKey ? &k : nullptr, side), out);
     }
 
+    // ---- keys by their signature (fifths: +1 .. +7 sharps, -1 .. -7 flats)
+    // The alteration the signature gives a letter (0 C .. 6 B)
+    EMSCRIPTEN_KEEPALIVE int mu_signature_alter (int letter, int fifths) { return vs::music::signatureAlter (letter, fifths); }
+    // The signature's tonic (major, or minor 1), into out[0..1]
+    EMSCRIPTEN_KEEPALIVE void mu_key_from_fifths (int fifths, int minor, int* out)
+    {
+        put (vs::music::keyFromFifths (fifths, minor ? vs::music::Mode::minor : vs::music::Mode::major).tonic, out);
+    }
+    // The signature a transposing instrument reads, written semitones above concert
+    EMSCRIPTEN_KEEPALIVE int mu_transpose_fifths (int fifths, int semitones) { return vs::music::transposeFifths (fifths, semitones); }
+    // A pitch class spelled in a signature's key on its way up (1), down (-1) or neither (0), into out[0..1]
+    EMSCRIPTEN_KEEPALIVE void mu_spell_moving (int pc, int fifths, int minor, int direction, int* out)
+    {
+        put (vs::music::spellMoving (pc, fifths, minor ? vs::music::Mode::minor : vs::music::Mode::major, direction), out);
+    }
+
     // "F# major", "Eb minor"
     EMSCRIPTEN_KEEPALIVE int mu_key_name (int tonicLetter, int tonicAcc, int minor, char* out, int cap)
     {
@@ -178,4 +194,24 @@ extern "C"
     // A step grid: how many steps a clip of `beats` beats has, and a hit's length
     EMSCRIPTEN_KEEPALIVE int mu_steps (double beats, double grid) { return vs::noteedit::StepGrid { grid, 0.0 }.steps (beats); }
     EMSCRIPTEN_KEEPALIVE double mu_hit_length (double grid) { return vs::noteedit::StepGrid { grid, 0.0 }.hitLength(); }
+
+    // ---- a loop being played and recorded over and over (vs::noteedit::loop)
+    EMSCRIPTEN_KEEPALIVE double mu_loop_beat_at (double time, double start, double bpm, double loopBeats) { return vs::noteedit::loop::beatAt (time, start, bpm, loopBeats); }
+    EMSCRIPTEN_KEEPALIVE double mu_loop_snap (double beat, int steps, double loopBeats) { return vs::noteedit::loop::snap (beat, steps, loopBeats); }
+    EMSCRIPTEN_KEEPALIVE double mu_next_grid_time (double t, double origin, double interval) { return vs::noteedit::loop::nextGridTime (t, origin, interval); }
+    // The hits due in [from, to): their times and which hit each is, up to cap; returns how many there are
+    EMSCRIPTEN_KEEPALIVE int mu_loop_hits (const double* beats, const double* notBefore, int count, double from, double to, double start, double bpm,
+                                           double loopBeats, double* times, int* which, int cap)
+    {
+        const auto due = vs::noteedit::loop::hitsBetween (beats, notBefore, count, from, to, start, bpm, loopBeats);
+        for (int i = 0; i < (int) due.size() && i < cap; ++i) { times[i] = due[(size_t) i].time; which[i] = due[(size_t) i].hit; }
+        return (int) due.size();
+    }
+    // The clicks in [from, to): their times, beats and downbeats (1), up to cap; returns how many there are
+    EMSCRIPTEN_KEEPALIVE int mu_loop_clicks (double from, double to, double start, double bpm, int beatsPerBar, double* times, int* beats, int* down, int cap)
+    {
+        const auto clicks = vs::noteedit::loop::clicksBetween (from, to, start, bpm, beatsPerBar);
+        for (int i = 0; i < (int) clicks.size() && i < cap; ++i) { times[i] = clicks[(size_t) i].time; beats[i] = clicks[(size_t) i].beat; down[i] = clicks[(size_t) i].down ? 1 : 0; }
+        return (int) clicks.size();
+    }
 }

@@ -12,9 +12,12 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <vector>
 #include <emscripten/emscripten.h>
 #include "dsp/DrumSynth.h"
 #include "dsp/Metronome.h"
+#include "dsp/VoiceGuide.h"
+#include "dsp/NotePlayer.h"
 
 namespace
 {
@@ -219,6 +222,8 @@ extern "C"
         h->engine.start (frame, { countIn != 0, seed });
     }
 
+    // The master volume (a slider, 0 to 100) and mute, ramped after the first setting
+    EMSCRIPTEN_KEEPALIVE void sd_engine_set_master (ClickEngineHandle* h, double slider, int muted) { h->engine.setMaster (slider, muted != 0); }
     EMSCRIPTEN_KEEPALIVE void sd_engine_stop (ClickEngineHandle* h) { h->engine.stop(); }
 
     // Mixes frames [frame0, frame0 + n) into out (from malloc); returns how
@@ -238,4 +243,41 @@ extern "C"
                            (double) e.countIn, (double) e.gap, (double) e.muted, e.bpm, (double) e.units, e.swing, (double) e.polyN, (double) e.subs.size() };
         std::memcpy (out, v, sizeof (v));
     }
+
+    // ---- The guide a singer sings with (vs::VoiceGuide): notes at a frame
+    // (sound 0 piano, 1 soft; glideUp > 0 makes a siren from glideFrom to
+    // glideTo and back), the drone (a negative midi turns it off), the volume
+    // slider, a fade on every note, and sd_guide_process writing n samples
+    // from frame0, returning how many are sounding
+    EMSCRIPTEN_KEEPALIVE vs::VoiceGuide* sd_guide_create (double sampleRate) { auto* g = new vs::VoiceGuide(); g->prepare (sampleRate); return g; }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_destroy (vs::VoiceGuide* g) { delete g; }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_add (vs::VoiceGuide* g, double midi, double at, double seconds, int sound, double level,
+                                            double glideFrom, double glideTo, double glideUp, double glideDown)
+    {
+        const vs::VoiceGuide::Glide gl { glideFrom, glideTo, glideUp, glideDown };
+        g->add (midi, (std::int64_t) at, seconds, sound == 0 ? vs::VoiceGuide::Sound::piano : vs::VoiceGuide::Sound::soft, level, glideUp > 0 ? &gl : nullptr);
+    }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_drone (vs::VoiceGuide* g, double midi, double at) { g->setDrone (midi, (std::int64_t) at); }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_volume (vs::VoiceGuide* g, double slider) { g->setVolume (slider); }
+    EMSCRIPTEN_KEEPALIVE void sd_guide_stop_all (vs::VoiceGuide* g, double at) { g->stopAll ((std::int64_t) at); }
+    EMSCRIPTEN_KEEPALIVE int sd_guide_process (vs::VoiceGuide* g, float* out, int n, double frame0) { return g->process (out, n, (std::int64_t) frame0); }
+
+    // ---- Notes for the theory tools (vs::NotePlayer): count MIDI notes at a frame
+    // (sound 0 plucked strings, 1 piano), spread seconds apart (up: last first),
+    // a level and a length; the drone on a note from a frame (a negative note turns
+    // it off); a click at a frame (accent 1 for the first count); the volume slider;
+    // everything faded from a frame; and
+    // sd_notes_process writing n samples from frame0, returning 1 while any sound
+    EMSCRIPTEN_KEEPALIVE vs::NotePlayer* sd_notes_create (double sampleRate) { auto* p = new vs::NotePlayer(); p->prepare (sampleRate); return p; }
+    EMSCRIPTEN_KEEPALIVE void sd_notes_destroy (vs::NotePlayer* p) { delete p; }
+    EMSCRIPTEN_KEEPALIVE void sd_notes_play (vs::NotePlayer* p, const int* notes, int count, double at, int sound, double spread, double level, double seconds, int up)
+    {
+        p->play (std::vector<int> (notes, notes + std::max (0, count)), (std::int64_t) at, sound == 1 ? vs::NotePlayer::Sound::piano : vs::NotePlayer::Sound::strings,
+                 spread, level, seconds, up != 0);
+    }
+    EMSCRIPTEN_KEEPALIVE void sd_notes_drone (vs::NotePlayer* p, double midi, double at) { p->drone (midi, (std::int64_t) at); }
+    EMSCRIPTEN_KEEPALIVE void sd_notes_click (vs::NotePlayer* p, double at, int accent) { p->click ((std::int64_t) at, accent != 0); }
+    EMSCRIPTEN_KEEPALIVE void sd_notes_volume (vs::NotePlayer* p, double slider) { p->setVolume (slider); }
+    EMSCRIPTEN_KEEPALIVE void sd_notes_silence (vs::NotePlayer* p, double at) { p->silence ((std::int64_t) at); }
+    EMSCRIPTEN_KEEPALIVE int sd_notes_process (vs::NotePlayer* p, float* out, int n, double frame0) { return p->process (out, n, (std::int64_t) frame0) ? 1 : 0; }
 }

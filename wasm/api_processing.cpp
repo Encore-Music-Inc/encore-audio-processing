@@ -22,6 +22,8 @@
 #include "dsp/VocalEq.h"
 #include "dsp/Lpc.h"
 #include "dsp/Windows.h"
+#include "dsp/Restoration.h"
+#include "dsp/Saturator.h"
 
 namespace
 {
@@ -47,6 +49,7 @@ namespace
         for (auto& c : b) p.push_back (c.data());
         return p;
     }
+    struct Rumble { vs::BiquadChain f; std::vector<std::vector<float>> io; };
 }
 
 extern "C"
@@ -174,6 +177,12 @@ extern "C"
         vs::channels::crossfade (into, from, numCh, len, (vs::channels::FadeCurve) curve, (vs::channels::FadePoint) point);
     }
     EMSCRIPTEN_KEEPALIVE float pr_peak (const float* const* chans, int numCh, int n) { return vs::channels::peakOf (chans, numCh, n); }
+    // n samples of each channel times a fixed gain, in place
+    EMSCRIPTEN_KEEPALIVE void pr_apply_gain (float* const* chans, int numCh, int n, float gain) { vs::mix::applyGain (gain, chans, numCh, n); }
+    // the same with the gain in dB (a level change worked out as a difference of loudnesses)
+    EMSCRIPTEN_KEEPALIVE void pr_apply_gain_db (float* const* chans, int numCh, int n, float gainDb) { vs::mix::applyGain (vs::dbToGain (gainDb), chans, numCh, n); }
+    // n samples of src times a gain added into dst (a gain of -1: dst minus src, what one version took out of another)
+    EMSCRIPTEN_KEEPALIVE void pr_add_with_gain (const float* src, float* dst, int n, float gain) { vs::mix::addWithGain (src, dst, n, gain); }
     // mode: 0 off, 1 peak (-1 dBFS), 2 LUFS (-14, capped at -1 dBFS peak). out: four doubles,
     // gain dB, outcome (0 unchanged, 1 applied, 2 silent, 3 too quiet, 4 stopped at the peak), measured LUFS, LUFS reached when stopped
     EMSCRIPTEN_KEEPALIVE void pr_normalize (float* const* chans, int numCh, int n, double fs, int mode, double* out)
@@ -349,9 +358,11 @@ extern "C"
         return vs::curve::valueAt (x, x1, y1, curve, x2, y2);
     }
 
-    // ---- Levels: one channel's RMS, whether a block is nearly silent, every
+    // ---- Levels: one channel's RMS (or a pair's, in dB), whether a block is nearly silent, every
     // channel averaged into out, and the gain in dB that brings a peak to targetDb.
     EMSCRIPTEN_KEEPALIVE float pr_rms (const float* x, int n) { return vs::channels::rmsOf (x, n); }
+    // the RMS level in dB of n interleaved frames of numCh channels, the first count of them together (a recording's main pair)
+    EMSCRIPTEN_KEEPALIVE float pr_rms_db (const float* x, int n, int numCh, int count) { return vs::ampToDb (vs::channels::rmsOf (x, n, numCh, count)); }
     EMSCRIPTEN_KEEPALIVE int pr_nearly_silent (const float* x, int n) { return vs::channels::isNearlySilent (x, n) ? 1 : 0; }
     EMSCRIPTEN_KEEPALIVE void pr_mono_average (const float* const* chans, int numCh, int n, float* out) { vs::channels::monoAverage (chans, numCh, n, out); }
     EMSCRIPTEN_KEEPALIVE float pr_gain_to_peak_db (float peak, float targetDb, float minDb, float maxDb) { return vs::channels::gainToPeakDb (peak, targetDb, minDb, maxDb); }
@@ -395,5 +406,42 @@ extern "C"
             count = order;
         });
         return count;
+    }
+
+    // ---- a gain track (input volume and a ride's moves), on audio
+
+    // db: count values (dB) every hopSec, each plus offsetDb; none: offsetDb alone. start:
+    // the first sample's frame in the track's time. r may be 0.
+    EMSCRIPTEN_KEEPALIVE void pr_apply_gain_track (const float* db, int count, double hopSec, double offsetDb, double fs, double start, float* l, float* r, int n)
+    {
+        vs::mix::applyGainTrack (db, count, hopSec, offsetDb, fs, (std::int64_t) start, l, r, n);
+    }
+
+    // ---- the rumble filter (24 dB an octave below hz), streamed
+
+    EMSCRIPTEN_KEEPALIVE void* pr_rumble_create (double fs, double hz, int maxBlock)
+    {
+        return new Rumble { vs::BiquadChain (vs::restore::rumbleSections (fs, true, hz, false), 2), std::vector<std::vector<float>> (2, std::vector<float> ((size_t) std::max (1, maxBlock), 0.0f)) };
+    }
+    EMSCRIPTEN_KEEPALIVE void pr_rumble_destroy (void* p) { delete static_cast<Rumble*> (p); }
+    EMSCRIPTEN_KEEPALIVE float* pr_rumble_input (void* p, int c) { return static_cast<Rumble*> (p)->io[(size_t) c].data(); }
+    // Filters the first n samples of each channel's input in place (stereo 0: the left alone)
+    EMSCRIPTEN_KEEPALIVE void pr_rumble_process (void* p, int n, int stereo)
+    {
+        auto* h = static_cast<Rumble*> (p);
+        h->f.process (0, h->io[0].data(), n);
+        if (stereo) h->f.process (1, h->io[1].data(), n);
+    }
+
+    // ---- the safety curve on a bus (vs::softClip), in place
+    EMSCRIPTEN_KEEPALIVE void pr_soft_clip (float* const* chans, int numCh, int n, float knee)
+    {
+        for (int c = 0; c < numCh; ++c) for (int i = 0; i < n; ++i) chans[c][i] = vs::softClip (chans[c][i], knee);
+    }
+
+    // ---- where a sound first gets loud: the first sample, in any channel, at thresholdDb under the loudest or more
+    EMSCRIPTEN_KEEPALIVE double pr_trim_start (const float* const* chans, int numCh, int n, double fs, double thresholdDb, double leadSeconds)
+    {
+        return vs::channels::trimStart (chans, numCh, n, fs, std::pow (10.0, thresholdDb / 20.0), leadSeconds);
     }
 }

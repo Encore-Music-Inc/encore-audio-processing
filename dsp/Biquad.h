@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <optional>
 #include <vector>
 #include "JuceInclude.h"
 #include "Util.h"
@@ -258,4 +259,39 @@ namespace vs
         std::vector<BiquadCoefs> sections;
         std::vector<std::vector<double>> state;
     };
+
+    // A first-order analog filter H(s) = (1 + s/wz) / (1 + s/wp), corners at fz
+    // and fp Hz (0: that corner absent), turned digital by the bilinear
+    // transform pre-warped at each corner, as a section with b2 = a2 = 0. A
+    // lone pole gives (1 + 1/z) over its denominator; a lone zero can't be
+    // built and gives nothing (nullopt), as does no corner at all.
+    inline std::optional<BiquadCoefs> firstOrder (double fz, double fp, double fs)
+    {
+        const double K = 2.0 * fs, pi = juce::MathConstants<double>::pi;
+        const double wz = fz > 0 ? K * std::tan (pi * fz / fs) : 0.0, wp = fp > 0 ? K * std::tan (pi * fp / fs) : 0.0;
+        if (wz == 0 && wp == 0) return std::nullopt;
+        const double nb0 = wz != 0 ? 1 + K / wz : 1.0, nb1 = wz != 0 ? 1 - K / wz : 1.0;
+        const double da0 = wp != 0 ? 1 + K / wp : 1.0, da1 = wp != 0 ? 1 - K / wp : 1.0;
+        if (wz == 0) return BiquadCoefs { 1 / da0, 1 / da0, 0.0, da1 / da0, 0.0 };
+        return BiquadCoefs { nb0 / da0, nb1 / da0, 0.0, da1 / da0, 0.0 };
+    }
+
+    // A gentle first-order DC blocker, y = x - x1 + R y1, its corner at 5 Hz.
+    inline BiquadCoefs dcBlocker (double fs)
+    {
+        const double R = std::exp (-juce::MathConstants<double>::twoPi * 5.0 / fs);
+        return { 1.0, -1.0, 0.0, -R, 0.0 };
+    }
+
+    // x[0..n) filtered by the sections forwards, then backwards: no phase
+    // shift, for analysis of a whole stretch at once (double throughout).
+    inline std::vector<double> zeroPhase (const std::vector<BiquadCoefs>& sections, const double* x, int n)
+    {
+        std::vector<double> y (x, x + n);
+        BiquadChain (sections, 1).process (0, y.data(), n);
+        std::reverse (y.begin(), y.end());
+        BiquadChain (sections, 1).process (0, y.data(), n);
+        std::reverse (y.begin(), y.end());
+        return y;
+    }
 }

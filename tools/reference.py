@@ -90,6 +90,12 @@ TOLERANCES = {
             "why": "Gains and positions from the pan, fader, fade and automation laws and the drawing axes: float sin, cos, pow, exp and log, which maths libraries round differently in the last place."},
     "lpc": {"abs": 1e-7, "rel": 1e-7,
             "why": "Linear prediction's coefficients and errors: double-precision sums and a cosine window, which maths libraries and compilers round differently in the last places, and the recursion through the orders magnifies that on a block whose predictors are nearly ill-conditioned (MSVC's /fp:fast moves them by about 1e-8). An encoder quantizes the coefficients far more coarsely than this."},
+    "restore-count": {"abs": 2, "rel": 0,
+                      "why": "Clicks found or counted by the de-clicker: a click whose jump sits right at the threshold can tip either way when a compiler orders the predictors' sums differently; the inputs keep every click well clear of it."},
+    "restore-rounded": {"abs": 0.011, "rel": 0,
+                        "why": "Restoration analysis results rounded as the reports give them (Hz and seconds to 0.01, cents and dB to 0.1 on a tenfold scale): rounding can tip one step either way when the unrounded value moves in its last places."},
+    "restore-tenth": {"abs": 0.11, "rel": 0,
+                      "why": "Restoration analysis results rounded to 0.1 (cents, dB, prominence): rounding can tip one step either way when the unrounded value moves in its last places."},
     "dsd": {"abs": 1e-6, "rel": 1e-6,
             "why": "DSD to PCM: the low-pass is designed in double with sin and cos, which maths libraries round differently in the last place, so its float tables can differ in the last place, and a sample (a sum of up to 512 of them) by a few float steps."},
 }
@@ -124,13 +130,46 @@ def rule(op, name):
     stem = last.rstrip("0123456789")
     if op == "lpc":
         return "exact" if last == "orders" else "lpc"
+    if op == "trim-start":
+        return "exact"
+    if op == "loop-timing":
+        return "exact" if stem in ("due", "clicks", "hit", "down") else "seconds"
+    if op == "live-set":
+        return {"confidence": "restore-rounded", "level": "restore-tenth", "threshold": "ratio", "peak": "level", "start": "seconds", "end": "seconds"}.get(last, "exact")
+    if op == "live-ride":
+        return {"count": "exact", "levelDb": "db", "sum": "proc-sum", "peak": "proc-peak"}[last]
+    if op == "input-survey":
+        return "ratio" if last == "corr" else "db"
+    if op in ("delay-between", "peaks-overloads"):
+        return "exact"
+    if op == "restore-chain":
+        return {"events": "restore-count", "length": "exact"}.get(last, "proc-peak" if last.startswith("peak") else "proc-sum")
+    if op == "restore-analysis":
+        if last in ("perMinute", "clicks"):
+            return "restore-count"
+        if last in ("found", "harmonics", "tracks", "spots", "levels", "candidates", "frames", "mono"):
+            return "exact"
+        if last in ("cents", "musicDbRounded", "profileDb", "sideDb", "prominence", "peakCents"):
+            return "restore-tenth"
+        if last in ("hz", "gapStart", "gapEnd", "wowHz", "balanceDb", "delay", "candidateAt"):
+            return "restore-rounded"
+        if last in ("musicDb", "peakDb"):
+            return "db"
+        if last == "corr":
+            return "ratio"
+        return "proc-sum"
+    if op == "song-profile":
+        return {"from": "exact", "length": "exact", "lufs": "lufs", "wholeLufs": "lufs", "plr": "db"}.get(last, "spectrum-db")
+    if op == "master-monitor":
+        return {"lufs": "master-lufs", "peak": "master-peak", "matchDb": "master-db"}[last]
     if last in EXACT_WORDS or stem in ("pad", "midi", "trim"):
         return "exact"
     if op == "laws":
         return "exact" if parts[0] in ("tempo", "tuner") else "law"
     if op == "levels":
-        return {"rms": "level", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
-    if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument"):
+        return {"rms": "level", "pairDb": "db", "gainDb": "db", "sum": "proc-sum", "peak": "proc-peak", "lufs": "proc-lufs"}.get(last, "exact")
+    if op in ("processor", "host-mix", "fades", "channels", "resample", "live-resample", "fracdelay", "decimate", "devices", "vocal-eq", "ab", "effect", "vocoder", "instrument",
+              "gain-track", "live-route", "rumble", "pad-loop", "soft-clip", "ensemble", "ensemble-live"):
         if op == "vocoder" and last == "peak":
             return "vocoder-peak"
         if last in ("sum", "peak", "lufs"):
@@ -166,7 +205,7 @@ def rule(op, name):
     if op == "minmax":
         return "exact"
     if op in ("waveform", "block-peaks"):
-        return "exact" if parts[0] == "shape" else "level"
+        return "exact" if parts[0] == "shape" else "db" if parts[0] == "levelDb" else "level"
     if op == "clip-runs":
         return "seconds"
     if op == "music":
@@ -349,6 +388,10 @@ for i, name in enumerate(STYLES):
     case(f"mastering/{name}", "mastering", MIX, style=i, block=4096)
 case("mastering/balanced-at-9", "mastering", MIX, style=0, target=-9, block=4096)
 case("mastering/gentle-at-16", "mastering", MIX, style=4, target=-16, block=4096)
+# ---- mastering as you listen (mm_*): the chain alone, hearing the original, and a service's level on a device
+case("mastering/monitor/chain", "master-monitor", MIX, block=128)
+case("mastering/monitor/original", "master-monitor", MIX, block=128, original=1)
+case("mastering/monitor/service-on-device", "master-monitor", MIX, block=128, level=1, master=-3, orig=1.5, device=2)
 
 # ---- every sound: each metronome set and role, each drum sound, each kit's pads
 
@@ -386,6 +429,9 @@ case("analysis/spectrum/web-audio", "spectrum", TONES, block=1024, mode="analyse
 case("analysis/welch/song", "welch", SONG, size=4096, maxSegments=16, bins=[1, 10, 100, 1000])
 case("analysis/welch/at", "welch", SONG, size=2048, starts=[0, 44100, 88200, 300000], bins=[1, 10, 100])
 case("analysis/tonal-balance/song", "tonal-balance", SONG)
+case("analysis/tonal-balance/song-lr", "tonal-balance", SONG, lr=1)
+case("analysis/song-profile/song", "song-profile", SONG)
+case("analysis/song-profile/chosen-stretch", "song-profile", SONG, stretchFrom=44100, stretchLength=176400, whole=-12)
 case("analysis/waveform/song", "waveform", SONG, block=4096, columns=16, rms=1, bands=1)
 case("analysis/waveform/mono-stride", "waveform", SPARSE, block=4096, columns=12, stride=4)
 case("analysis/block-peaks/song", "block-peaks", SONG, block=4096, blockSize=441, points=200, width=64)
@@ -565,6 +611,12 @@ THEORY = [
     {"fn": "nextMatchNote", "level": 4, "range": VOICE_RANGE, "prev": 55, "rand": RAND},
     {"fn": "buildSingBack", "level": 5, "range": VOICE_RANGE, "rand": RAND},
     {"fn": "buildWarmup", "range": VOICE_RANGE, "full": True}, {"fn": "buildWarmup", "range": {"low": 50, "high": 56, "tessLo": 52, "tessHi": 54}},
+    {"fn": "patternSeconds", "pattern": {"notes": [{"midi": 60, "at": 0, "dur": 0.6}, {"midi": 62, "at": 0.6, "dur": 0.6}, {"midi": 64, "at": 1.1, "dur": 0.4}]}},
+    {"fn": "patternSeconds", "pattern": {"glide": {"from": 52, "to": 67, "up": 2.5, "down": 2}}},
+    {"fn": "patternSeconds", "pattern": {"notes": []}},
+    {"fn": "glideAt", "glide": {"from": 52, "to": 67, "up": 2.5, "down": 2}, "t": 1},
+    {"fn": "glideAt", "glide": {"from": 52, "to": 67, "up": 2.5, "down": 2}, "t": 3.5},
+    {"fn": "glideAt", "glide": {"from": 52, "to": 67, "up": 2.5, "down": 2}, "t": 9},
 ]
 case("music/theory", "theory", requests=[json.dumps(r, separators=(",", ":")) for r in THEORY])
 
@@ -608,6 +660,108 @@ native("native/pitch-engine/correction", VOX, "pitch-engine", key=0, scale=0, sp
 native("native/pitch-engine/harmony", VOX, "pitch-engine", key=0, scale=0, speedMs=20, harmony=1, interval=3, block=512)
 native("native/body/guitar", GUITAR, "body", block=512)
 case("native/host-mix/song", "host-mix", SONG, block=512, native=True)
+
+
+# ---- restoration of record and tape transfers (rs_*): a short side, damaged: two songs with a
+# gap between them, played 18 cents sharp, with hiss, 60.4 Hz mains hum and clicks
+
+def transfer(rate):
+    sharp = 2 ** (18 / 1200)
+    notes = []
+    for frm, to in ((0, 5), (7, 12)):
+        span = {"from": frm, "to": to}
+        notes += [voiced(233.082 * sharp, 0.14, REED, attack=0.005, decay=13, every=0.5, **span),
+                  voiced(293.665 * sharp, 0.1, PLUCKED, attack=0.005, decay=13, every=0.5, **span),
+                  voiced(349.228 * sharp, 0.08, SUNG, attack=0.005, decay=12, every=0.25, **span),
+                  voiced(58.270 * sharp, 0.2, [1, 0.4, 0.2], attack=0.005, decay=14, every=1, **span)]
+    hum = [tone(60.4, 0.006), tone(60.4, 0.003, mult=2), tone(60.4, 0.004, mult=3)]
+    clicks = [dict(type="samples", l=1, r=1, values=[0.45, -0.3, 0.2, -0.1, 0.05], **{"from": t})
+              for t in (1.137, 2.711, 3.902, 8.213, 9.557, 11.104)]
+    return signal(rate, 12, 2, notes, noise(301, 0.003, 0.003), hum, clicks)
+
+
+RESTORE_LP = {"rumble": {"on": True, "hz": 20, "dc": True}, "declick": {"on": True, "clicks": 50, "crackle": 40, "maxMs": 4},
+              "dehum": {"on": True, "hz": 60.4, "harmonics": [1, 2, 3], "width": 0.6}, "denoise": {"on": True, "amount": 40}}
+RESTORE_78 = {"source": "78", "rumble": {"on": True, "hz": 40, "dc": True},
+              "channels": {"on": True, "mode": "sum", "balanceOn": True, "balanceDb": 1.5},
+              "declick": {"on": True, "clicks": 65, "crackle": 60, "maxMs": 4}, "denoise": {"on": True, "amount": 55},
+              "eq": {"on": True, "curve": "aes", "shelf": 50, "riaaApplied": True, "air": 2},
+              "speed": {"on": True, "cents": -18, "rpm": "none"}}
+for rate in (44100, 96000):
+    # the noise profile is learned from the gap (5.2 s on), as the settings' denoise.profile
+    case(f"restore/chain/lp-{rate // 1000}k", "restore-chain", transfer(rate), settings=json.dumps(RESTORE_LP), learnFrom=5.2, block=65536)
+    case(f"restore/chain/78-{rate // 1000}k", "restore-chain", transfer(rate), settings=json.dumps(RESTORE_78), learnFrom=5.2, block=65536)
+    case(f"restore/analysis/side-{rate // 1000}k", "restore-analysis", transfer(rate), block=65536)
+
+
+# ---- live recordings (lv_*, with the gain track and the rumble filter (pr_*), the room's delay (rh_*) and a
+# batch's full-scale samples (ms_*)): a short set, two songs with applause between them, room tone all through
+
+def show(rate):
+    songs = []
+    for frm, to in ((1, 11), (15, 25)):
+        span = {"from": frm, "to": to}
+        songs += [voiced(196, 0.12, REED, attack=0.005, decay=14, every=0.5, **span),
+                  voiced(247, 0.08, PLUCKED, attack=0.005, decay=13, every=0.5, **span),
+                  voiced(98, 0.15, [1, 0.4, 0.2], attack=0.005, decay=15, every=1, **span)]
+    clapping = noise(401, 0.25, 0.22, highpass=1, **{"from": 11.5, "to": 14.5})
+    return signal(rate, 28, 2, songs, clapping, noise(402, 0.002, 0.002))
+
+
+for rate in (44100, 48000):
+    case(f"live/set/show-{rate // 1000}k", "live-set", show(rate), minSong=5, mergeGap=2, block=65536)
+    case(f"live/ride/show-{rate // 1000}k", "live-ride", show(rate), block=65536)
+case("live/gain-track/song", "gain-track", SONG, db=[0, -3, 2.5, 6, -1], hop=0.1, offset=1.5, start=1234)
+case("live/gain-track/volume-alone", "gain-track", SONG, db=[], offset=-4)
+case("live/route/board-and-room", "live-route", SONG, main=[0, 1], room=[2, 3], roomDb=-6, delay=37)
+case("live/route/blend", "live-route", SONG, main=[0, 1], mono=1, delay=0)
+case("live/route/one-input", "live-route", SONG, main=[1, 1], delay=0)
+case("live/survey/song", "input-survey", SONG)
+case("live/delay/song", "delay-between", SONG, lag=777)
+# the left clipped at full scale, the right well under it
+case("live/peaks/clipped", "peaks-overloads", signal(48000, 1, 2, tone(220, 1.2, 0.6), dict(type="clip", l=0.9995)))
+case("live/rumble/song", "rumble", SONG, hz=30)
+
+
+# ---- a pad player (in_sampler_* pads and loops, pr_soft_clip, pr_trim_start, mu_loop_*): a drum-like hit
+# played by three pads (a region with an end fade, retuned up, panned and choked), and a loop recorder's timing
+
+HIT = signal(48000, 0.6, 1, voiced(110, 0.6, [1, 0.5, 0.2], attack=0.002, decay=11, **{"from": 0.05}), noise(501, 0.2, highpass=1, decay=10, **{"from": 0.05}))
+PADS = [36, 0, 0, 0, 0, 1, 0, 0, 1,            # the whole hit, retriggering
+        38, 0.05, 0.3, 0.1, 7, 0.8, -0.5, 1, 0,  # a region, an end fade, up a fifth, left, choke group 1
+        42, 0.05, 0, 0.02, -5, 0.6, 0.6, 1, 0]   # down, right, cut by 38
+LOOP_HITS = [36, 0, 1, 38, 0.5, 0.7, 42, 1, 0.9, 36, 1.5, 0.5, 38, 2.25, 1, 36, 3, 1, 36, 3.5, 1, 42, 3.75, 0.3]
+for rate in (44100, 48000):
+    case(f"pads/loop/{rate // 1000}k", "pad-loop", dict(HIT, rate=rate), pads=PADS, hits=LOOP_HITS, bpm=127, loopBeats=4, velocityCurve=1.6, block=4096)
+# eight hits at once on a pad that doesn't cut itself: the safety curve holds the pile-up under full scale
+case("pads/loop/pile-up", "pad-loop", HIT, pads=[36, 0, 0, 0, 0, 1, 0, 0, 0], hits=[36, 0, 1] * 8, bpm=90, loopBeats=2, block=4096)
+case("pads/soft-clip/song", "soft-clip", SONG, gain=2.5)
+case("pads/trim-start/hit", "trim-start", signal(48000, 0.5, 2, tone(0, 0.0004), noise(502, 0.3, 0.1, decay=9, **{"from": 0.1})), thresholds=[-20, -40, -60], lead=0.0005)
+case("pads/timing", "loop-timing", None, bpm=127, loopBeats=8, times=[0, 0.3, 1.234, 3.9, 7.5, 11.11], beats=[0, 0.5, 1.75, 3, 7.9], **{"from": 3.1, "to": 9.7})
+
+# ---- a score played by its instruments (in_ensemble_*): two synth sounds and a recorded instrument whose one
+# recording is the input (two velocity layers of it, a loop, a slurred note, a glide, a swell, a muted note,
+# pizzicato on the synth), three parts across the stereo field, through the hall and the compressor
+NOTE = signal(48000, 0.5, 1, voiced(220, 0.5, [1, 0.4, 0.2], attack=0.005, decay=14))
+MANIFEST = {"v": 1, "gain": 1, "zones": [
+    {"lo": 0, "hi": 127, "vlo": 1, "vhi": 80, "s": 0, "root": 57, "tune": 0, "scale": 100, "gain": 0.6, "pan": -0.3, "fc": 4000, "q": 3, "mode": 1, "excl": 0,
+     "ls": 0, "le": 0, "env": {"delay": 0, "attack": 0.004, "hold": 0.05, "decay": 1.2, "sustain": 0.4, "release": 0.3}},
+    {"lo": 0, "hi": 127, "vlo": 81, "vhi": 127, "s": 0, "root": 57, "tune": 5, "scale": 100, "gain": 1, "pan": 0.3, "fc": 0, "q": 0, "mode": 1, "excl": 0,
+     "ls": 0, "le": 0, "env": {"delay": 0.01, "attack": 0.02, "hold": 0, "decay": 0, "sustain": 1, "release": 0.2}}],
+    "samples": [{"c": 0, "o": 0, "n": 1, "rate": 48000, "ls": 12000, "le": 21600}], "chunks": [{"file": "x", "bytes": 1}]}
+# each note: time, dur, midi, velocity, swell's end, part, instrument, flags (1 slurred, 2 muted), technique, glide's note, where it starts
+SCORE = [0.0, 0.6, 60, 90, 0, 0, 0, 0, 0, -1, 0.35,   0.5, 0.5, 64, 70, 0, 0, 0, 1, 0, -1, 0.35,   0.0, 1.5, 48, 60, 110, 1, 1, 0, 0, -1, 0.35,
+         0.2, 0.8, 57, 50, 0, 2, 2, 0, 0, 62, 0.4,   1.0, 0.6, 69, 110, 0, 2, 2, 0, 0, -1, 0.35,   1.2, 0.4, 67, 90, 0, 1, 1, 2, 1, -1, 0.35,
+         1.4, 0.3, 72, 80, 0, 0, 0, 0, 3, -1, 0.35]
+case("ensemble/score", "ensemble", NOTE, parts=[0.8, -0.5, 0.7, 0.0, 0.9, 0.5], synths=["piano", "strings"], manifest=json.dumps(MANIFEST), trimDb=-2, family="strings",
+     notes=SCORE, normalize=1)
+case("ensemble/stem", "ensemble", NOTE, parts=[0.8, -0.5, 0.7, 0.0, 0.9, 0.5], synths=["piano", "strings"], manifest=json.dumps(MANIFEST), trimDb=-2, family="strings",
+     notes=SCORE, normalize=0, only=[2])
+# the same score played live (in_ensemble_live_*): scheduled on the clock, in 128-frame blocks, the classic click
+# beside it (time, accent, level), and a stop at `cancel` seconds, for `seconds` in all
+case("ensemble/live", "ensemble-live", NOTE, parts=[0.8, -0.5, 0.7, 0.0, 0.9, 0.5], synths=["piano", "strings"], manifest=json.dumps(MANIFEST), trimDb=-2, family="strings",
+     notes=SCORE, clicks=[0.25, 1, 0.5, 0.75, 0, 0.5, 1.25, 0, 0.5], cancel=1.3, seconds=3.5)
+
 
 
 # ---- writing

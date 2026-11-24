@@ -29,6 +29,7 @@
 #include "dsp/AbCompare.h"
 #include "dsp/Chorus.h"
 #include "dsp/Phaser.h"
+#include "dsp/Ensemble.h"
 #include "dsp/Sampler.h"
 #include "dsp/Synth.h"
 #include "dsp/TimeStretch.h"
@@ -51,20 +52,25 @@
 #include "dsp/Loudness.h"
 #include "dsp/LoudnessReport.h"
 #include "dsp/MasterChain.h"
+#include "dsp/MasterMonitor.h"
 #include "dsp/Mastering.h"
 #include "dsp/Metronome.h"
 #include "dsp/Music.h"
+#include "dsp/NoteEdit.h"
 #include "dsp/Onsets.h"
 #include "dsp/PitchDetector.h"
 #include "dsp/ReferenceSignals.h"
 #include "dsp/Resampler.h"
 #include "dsp/ReverbEngine.h"
+#include "dsp/LiveSet.h"
 #include "dsp/Rider.h"
 #include "dsp/Saturator.h"
 #include "dsp/ScaleLibrary.h"
+#include "dsp/SongProfile.h"
 #include "dsp/Space.h"
 #include "dsp/Spectrum.h"
 #include "dsp/Tempo.h"
+#include "dsp/TimingCheck.h"
 #include "dsp/TruePeak.h"
 #include "dsp/TunerPitch.h"
 #include "dsp/TheoryCalls.h"
@@ -74,6 +80,8 @@
 #include "dsp/BodyMatch.h"
 #include "dsp/DeEsser.h"
 #include "dsp/PitchEngine.h"
+#include "dsp/Restoration.h"
+#include "dsp/RestorationAnalysis.h"
 
 namespace
 {
@@ -377,7 +385,7 @@ namespace
         "shortTermMaxAt", "lra", "balanceDb", "truePeakDb", "truePeakAt", "tpOverCount", "tpOverZeroCount", "clipRuns",
         "clipEvents", "clipLongest", "clipHasLevel", "clipLevelDb", "lowCorr", "lowMonoLossDb", "lowShareDb", "leadSec",
         "tailSec", "firstSampleDb", "lastSampleDb", "headRmsDb", "endRmsDb", "endDecayDb", "hasSpectrum", "cliffHz",
-        "cliffDrop", "hasPadded16", "padded16", "dcLDb", "dcRDb" };
+        "cliffDrop", "hasPadded16", "padded16", "dcLDb", "dcRDb", "lowSideToMidDb" };
     constexpr int numAnalysis = (int) std::size (analysisNames);
 
     double analysisValue (const vs::analysis::Measurements& m, int what)
@@ -432,6 +440,7 @@ namespace
             case 45: return m.padded16 ? 1 : 0;
             case 46: return m.dcLDb;
             case 47: return m.dcRDb;
+            case 48: return m.low.sideToMidDb;
             default: return 0.0;
         }
     }
@@ -477,6 +486,328 @@ namespace
     {
         const std::int64_t n = in != nullptr ? (std::int64_t) in->l.size() : 0;
         const bool stereo = in != nullptr && in->channels > 1;
+
+        // ---- a pad player
+        if (op == "pad-loop")
+        {
+            // pads: [note, start, end, fade, pitch, volume, pan, choke, retrigger], each playing the signal
+            vs::Sampler smp;
+            smp.prepare (fs);
+            smp.setVelocityCurve ((float) c.get ("velocityCurve", 1));
+            const auto pads = nums (c, "pads");
+            for (size_t k = 0; k + 8 < pads.size(); k += 9)
+            {
+                vs::Sampler::Sound snd;
+                snd.left = in->l;
+                if (stereo) snd.right = in->r;
+                snd.sampleRate = fs;
+                snd.rootNote = snd.lowNote = snd.highNote = (int) pads[k];
+                snd.startSeconds = pads[k + 1]; snd.endSeconds = pads[k + 2]; snd.fadeSeconds = pads[k + 3]; snd.pitchSemitones = pads[k + 4];
+                snd.gainDb = vs::ampToDb ((float) pads[k + 5], 0.0f); snd.pan = (float) pads[k + 6]; snd.choke = (int) pads[k + 7]; snd.retrigger = pads[k + 8] != 0;
+                snd.releaseSeconds = (float) c.get ("release", 0.005);
+                smp.addSound (std::move (snd));
+            }
+            const auto hits = nums (c, "hits");   // [note, beat, velocity] each
+            std::vector<vs::sampler::LoopHit> loopHits;
+            for (size_t k = 0; k + 2 < hits.size(); k += 3) loopHits.push_back ({ (int) hits[k], hits[k + 1], (float) hits[k + 2] });
+            auto [L, R] = vs::sampler::renderLoop (smp, loopHits, c.get ("bpm", 120), c.get ("loopBeats", 4), fs, c.get ("tail", 3), (float) c.get ("busGain", 0.85));
+            fingerprintAudio (out, "", { L, R }, fs);
+            return true;
+        }
+        if (op == "ensemble" || op == "ensemble-live")
+        {
+            // a score: parts [volume, pan], synth sounds, a recorded instrument (its one recording the input), notes of 11 numbers each
+            vs::Ensemble e;
+            e.prepare (fs);
+            if (const auto* syn = c.find ("synths")) for (const auto& f : syn->items) e.addSynth (f.str);
+            const auto rec = std::make_shared<const std::vector<float>> (in->l);
+            e.addRecorded (c.text ("manifest"), [rec] (int i) -> std::shared_ptr<const std::vector<float>> { return i == 0 ? rec : nullptr; }, c.get ("trimDb", 0), c.text ("family"));
+            const auto pv = nums (c, "parts");
+            std::vector<vs::Ensemble::Part> parts;
+            for (size_t k = 0; k + 1 < pv.size(); k += 2) parts.push_back ({ (float) pv[k], (float) pv[k + 1] });
+            e.setParts (parts);
+            const auto nv = nums (c, "notes");
+            std::vector<vs::Ensemble::Note> notes;
+            for (size_t k = 0; k + 10 < nv.size(); k += 11)
+            {
+                vs::Ensemble::Note n;
+                n.time = nv[k]; n.dur = nv[k + 1]; n.midi = (int) nv[k + 2]; n.velocity = (float) nv[k + 3]; n.velocityEnd = (float) nv[k + 4];
+                n.part = (int) nv[k + 5]; n.instrument = (int) nv[k + 6]; n.slurred = ((int) nv[k + 7] & 1) != 0; n.muted = ((int) nv[k + 7] & 2) != 0;
+                n.technique = (vs::Ensemble::Technique) (int) nv[k + 8]; n.bendTo = (int) nv[k + 9]; n.bendAt = (float) nv[k + 10];
+                notes.push_back (n);
+            }
+            if (op == "ensemble-live")
+            {
+                // live: scheduled on the clock, the clicks beside it, a stop part-way, in 128-frame blocks
+                e.startLive();
+                for (const auto& n : notes) e.schedule (n);
+                const auto cv = nums (c, "clicks");
+                for (size_t k = 0; k + 2 < cv.size(); k += 3) e.click (cv[k], cv[k + 1] != 0, (float) cv[k + 2]);
+                const auto frames = (size_t) std::llround (c.get ("seconds", 3) * fs), stopAt = (size_t) std::llround (c.get ("cancel", 1e9) * fs);
+                std::vector<float> L (frames), R (frames);
+                bool stopped = false;
+                for (size_t at = 0; at < frames; at += 128)
+                {
+                    if (! stopped && at >= stopAt) { e.cancel (c.get ("cancel", 0)); stopped = true; }
+                    e.renderLive (L.data() + at, R.data() + at, (std::int64_t) at, (int) std::min<size_t> (128, frames - at));
+                }
+                fingerprintAudio (out, "", { L, R }, fs);
+                return true;
+            }
+            std::vector<int> only;
+            for (double x : nums (c, "only")) only.push_back ((int) x);
+            auto [L, R] = e.render (notes, c.get ("normalize", 1) != 0, only);
+            fingerprintAudio (out, "", { L, R }, fs);
+            return true;
+        }
+        if (op == "soft-clip")
+        {
+            auto ch = copyOf (*in);
+            const float gain = (float) c.get ("gain", 1);
+            for (auto& x : ch) for (auto& v : x) v = vs::softClip (v * gain, (float) c.get ("knee", 0.7));
+            fingerprintAudio (out, "", ch, fs);
+            return true;
+        }
+        if (op == "trim-start")
+        {
+            const Channels ch = copyOf (*in);
+            const auto p = constPointers (ch);
+            for (double db : nums (c, "thresholds"))
+                out.push_back ({ "at" + std::to_string ((int) -db),
+                                 vs::channels::trimStart (p.data(), (int) ch.size(), (int) n, fs, std::pow (10.0, db / 20.0), c.get ("lead", 0.0)) });
+            return true;
+        }
+        if (op == "loop-timing")
+        {
+            namespace lp = vs::noteedit::loop;
+            const double bpm = c.get ("bpm", 120), L = c.get ("loopBeats", 4);
+            const auto times = nums (c, "times");
+            for (size_t i = 0; i < times.size(); ++i)
+            {
+                out.push_back ({ "beatAt" + std::to_string (i), lp::beatAt (times[i], 0.25, bpm, L) });
+                for (int steps : { 2, 3, 4, 6 }) out.push_back ({ "snap" + std::to_string (steps) + "." + std::to_string (i), lp::snap (times[i], steps, L) });
+                out.push_back ({ "grid" + std::to_string (i), lp::nextGridTime (times[i], 0.1, 60.0 / bpm / 4) });
+            }
+            const auto beats = nums (c, "beats");
+            const auto due = lp::hitsBetween (beats.data(), nullptr, (int) beats.size(), c.get ("from", 0), c.get ("to", 4), 0.25, bpm, L);
+            out.push_back ({ "due", (double) due.size() });
+            for (size_t i = 0; i < due.size(); ++i) { out.push_back ({ "due" + std::to_string (i) + ".time", due[i].time }); out.push_back ({ "due" + std::to_string (i) + ".hit", (double) due[i].hit }); }
+            const auto clicks = lp::clicksBetween (c.get ("from", 0), c.get ("to", 4), 0.25, bpm, 4);
+            out.push_back ({ "clicks", (double) clicks.size() });
+            for (size_t i = 0; i < clicks.size(); ++i) { out.push_back ({ "click" + std::to_string (i) + ".time", clicks[i].time }); out.push_back ({ "click" + std::to_string (i) + ".down", clicks[i].down ? 1.0 : 0.0 }); }
+            return true;
+        }
+
+        // ---- live recordings
+        if (op == "live-set")
+        {
+            vs::LiveSetAnalyzer a (fs);
+            blocks (n, block, [&] (std::int64_t s, int k) { a.push (in->l.data() + s, stereo ? in->r.data() + s : nullptr, k); });
+            vs::liveset::Options o;
+            o.minSongSec = c.get ("minSong", 40);
+            o.mergeGapSec = c.get ("mergeGap", 6);
+            const auto set = a.finish (o);
+            out.push_back ({ "seconds", (double) set.seconds });
+            out.push_back ({ "judged", set.judged ? 1.0 : 0.0 });
+            out.push_back ({ "threshold", set.threshold });
+            out.push_back ({ "peak", set.peak });
+            out.push_back ({ "songs", (double) set.songs.size() });
+            for (size_t i = 0; i < set.songs.size(); ++i)
+            {
+                const auto& x = set.songs[i];
+                const std::string p = "song" + std::to_string (i) + ".";
+                out.push_back ({ p + "start", x.start });
+                out.push_back ({ p + "end", x.end });
+                out.push_back ({ p + "confidence", x.confidence });
+                out.push_back ({ p + "level", x.level });
+            }
+            out.push_back ({ "gaps", (double) set.gaps.size() });
+            for (size_t i = 0; i < set.gaps.size(); ++i) out.push_back ({ "gap" + std::to_string (i) + ".kind", (double) (int) set.gaps[i].kind });
+            for (int k = 0; k < 5; ++k)
+                out.push_back ({ std::string ("timeline.") + vs::liveset::kindName ((vs::liveset::Kind) k),
+                                 (double) std::count (set.timeline.begin(), set.timeline.end(), (vs::liveset::Kind) k) });
+            return true;
+        }
+        if (op == "live-ride")
+        {
+            vs::LevelRider r (fs, c.get ("target", -18), c.get ("range", 12));
+            blocks (n, block, [&] (std::int64_t s, int k) { r.push (in->l.data() + s, stereo ? in->r.data() + s : nullptr, k); });
+            out.push_back ({ "count", (double) r.track().size() });
+            double sum = 0.0, peak = 0.0;
+            for (float v : r.track()) { sum += std::abs ((double) v); peak = std::max (peak, std::abs ((double) v)); }
+            out.push_back ({ "track.sum", sum });
+            out.push_back ({ "track.peak", peak });
+            out.push_back ({ "levelDb", r.levelDb() });
+            return true;
+        }
+        if (op == "gain-track")
+        {
+            auto ch = copyOf (*in);
+            std::vector<float> db;
+            for (double v : nums (c, "db")) db.push_back ((float) v);
+            const auto start = (std::int64_t) c.get ("start", 0);
+            blocks (n, block, [&] (std::int64_t s, int k)
+            {
+                vs::mix::applyGainTrack (db.data(), (int) db.size(), c.get ("hop", 0.1), c.get ("offset", 0), fs, start + s,
+                                         ch[0].data() + s, ch.size() > 1 ? ch[1].data() + s : nullptr, k);
+            });
+            fingerprintAudio (out, "", ch, fs);
+            return true;
+        }
+        if (op == "live-route")
+        {
+            // four inputs: the signal's pair as the board, and again as the room
+            const int delay = (int) c.get ("delay", 0);
+            const int count = (int) n - delay;
+            const float* raw[4] { in->l.data(), (stereo ? in->r : in->l).data(), in->l.data(), (stereo ? in->r : in->l).data() };
+            Channels o (2, std::vector<float> ((size_t) std::max (0, count)));
+            const auto main = nums (c, "main");
+            const auto room = nums (c, "room");
+            vs::channels::routeLive (raw, (int) c.get ("inputs", 4), count, delay, (int) main[0], (int) main[1], c.get ("mono", 0) != 0,
+                                     room.empty() ? -1 : (int) room[0], room.empty() ? -1 : (int) room[1], c.get ("roomDb", -6), o[0].data(), o[1].data());
+            fingerprintAudio (out, "", o, fs);
+            return true;
+        }
+        if (op == "input-survey")
+        {
+            const Channels ch = copyOf (*in);
+            vs::channels::InputSurvey sv ((int) ch.size());
+            const int win = vs::channels::InputSurvey::windowLength (n, fs);
+            for (int k = 0; k < vs::channels::InputSurvey::spots; ++k)
+            {
+                const auto at = vs::channels::InputSurvey::windowStart (k, n, fs);
+                std::vector<const float*> p;
+                for (const auto& x : ch) p.push_back (x.data() + at);
+                sv.add (p.data(), (int) std::min<std::int64_t> (win, n - at));
+            }
+            for (int k = 0; k < (int) ch.size(); ++k)
+            {
+                out.push_back ({ "input" + std::to_string (k) + ".levelDb", sv.levelDb (k) });
+                out.push_back ({ "input" + std::to_string (k) + ".corr", sv.nextCorr (k) });
+                if (k + 1 < (int) ch.size()) out.push_back ({ "input" + std::to_string (k) + ".pairLevelDb", sv.pairLevelDb (k) });
+            }
+            return true;
+        }
+        if (op == "delay-between")
+        {
+            // the board hears the signal `lag` frames sooner than the room
+            const int lag = (int) c.get ("lag", 0);
+            const float* a = in->l.data() + lag;
+            const float* b = in->l.data();
+            out.push_back ({ "lag", (double) vs::timing::delayBetween (a, a, b, b, (int) n - lag, fs, c.get ("maxSec", 0.15)) });
+            return true;
+        }
+        if (op == "peaks-overloads")
+        {
+            const Channels ch = copyOf (*in);
+            const int nc = (int) ch.size();
+            std::vector<float> inter ((size_t) n * (size_t) nc);
+            for (std::int64_t i = 0; i < n; ++i) for (int k = 0; k < nc; ++k) inter[(size_t) i * (size_t) nc + (size_t) k] = ch[(size_t) k][(size_t) i];
+            std::vector<float> peaks ((size_t) nc);
+            std::vector<int> overloads ((size_t) nc);
+            vs::channels::peaksAndOverloads (inter.data(), (int) n, nc, peaks.data(), overloads.data());
+            for (int k = 0; k < nc; ++k)
+            {
+                out.push_back ({ "input" + std::to_string (k) + ".peak", (double) peaks[(size_t) k] });
+                out.push_back ({ "input" + std::to_string (k) + ".overloads", (double) overloads[(size_t) k] });
+            }
+            return true;
+        }
+        if (op == "rumble")
+        {
+            auto ch = copyOf (*in);
+            vs::BiquadChain f (vs::restore::rumbleSections (fs, true, c.get ("hz", 30), false), 2);
+            for (int k = 0; k < (int) ch.size(); ++k) blocks (n, block, [&] (std::int64_t s, int len) { f.process (k, ch[(size_t) k].data() + s, len); });
+            fingerprintAudio (out, "", ch, fs);
+            return true;
+        }
+
+        // ---- restoration of record and tape transfers
+        if (op == "restore-chain" || op == "restore-analysis")
+        {
+            const float* l = in->l.data();
+            const float* r = stereo ? in->r.data() : in->l.data();
+            if (op == "restore-chain")
+            {
+                // the noise profile learned from 20 frames, half a frame apart, from learnFrom seconds on
+                const int N = vs::denoise::frameSize (fs);
+                vs::NoiseProfileLearner learner (fs, N);
+                const std::int64_t from = (std::int64_t) std::llround (c.get ("learnFrom", 0) * fs);
+                for (int k = 0; k < 20 && from + k * (N / 2) + N <= n; ++k) learner.add (l + from + k * (N / 2), r + from + k * (N / 2));
+                auto s = vs::restore::settingsFromJson (*vs::json::parse (c.text ("settings")));
+                if (const auto prof = learner.profile()) s.denoise.profile = *prof;
+                vs::restore::Chain chain (fs, s);
+                std::vector<float> L, R;
+                for (std::int64_t p = 0; p < n; p += block)
+                {
+                    const int m = (int) std::min<std::int64_t> (block, n - p);
+                    const int got = chain.push (l + p, r + p, m);
+                    L.insert (L.end(), chain.output (0).begin(), chain.output (0).begin() + got);
+                    R.insert (R.end(), chain.output (1).begin(), chain.output (1).begin() + got);
+                }
+                const int got = chain.flush();
+                L.insert (L.end(), chain.output (0).begin(), chain.output (0).begin() + got);
+                R.insert (R.end(), chain.output (1).begin(), chain.output (1).begin() + got);
+                double sumL = 0, sumR = 0;
+                float peakL = 0, peakR = 0;
+                for (size_t i = 0; i < L.size(); ++i) { sumL += std::abs (L[i]); sumR += std::abs (R[i]); peakL = std::max (peakL, std::abs (L[i])); peakR = std::max (peakR, std::abs (R[i])); }
+                out.push_back ({ "length", (double) L.size() });
+                out.push_back ({ "events", (double) chain.clicks().size() });
+                out.push_back ({ "sumL", sumL });
+                out.push_back ({ "sumR", sumR });
+                out.push_back ({ "peakL", (double) peakL });
+                out.push_back ({ "peakR", (double) peakR });
+                return true;
+            }
+            vs::restore::RestoreAnalyzer a (fs, n);
+            for (std::int64_t p = 0; p < n; p += block) a.push (l + p, r + p, (int) std::min<std::int64_t> (block, n - p));
+            a.finish();
+            out.push_back ({ "summary.peakDb", a.peakDb() });
+            out.push_back ({ "summary.musicDb", a.musicDb().value_or (-200) });
+            const auto hum = vs::restore::detectHum (a.lowLeft(), a.lowRight(), a.lowRate());
+            out.push_back ({ "hum.found", hum.found ? 1.0 : 0.0 });
+            out.push_back ({ "hum.hz", hum.hz });
+            out.push_back ({ "hum.harmonics", (double) hum.harmonics.size() });
+            const auto t = vs::restore::detectTuning (a.lowMid(), a.lowRate());
+            out.push_back ({ "tuning.found", t.found ? 1.0 : 0.0 });
+            out.push_back ({ "tuning.cents", t.cents });
+            out.push_back ({ "wow.found", vs::restore::detectWow (a.lowMid(), a.lowRate()).found ? 1.0 : 0.0 });
+            const auto tr = vs::restore::findTracksIn (a.lowMid(), a.lowRate(), 1.2, 3);
+            out.push_back ({ "tracks.tracks", (double) tr.tracks.size() });
+            out.push_back ({ "tracks.gapStart", tr.gaps.empty() ? -1.0 : tr.gaps[0].start });
+            out.push_back ({ "tracks.gapEnd", tr.gaps.empty() ? -1.0 : tr.gaps[0].end });
+            const auto spots = vs::restore::quietSpots (a.hopEnergy(), a.hopSize());
+            out.push_back ({ "spots.spots", (double) spots.size() });
+            std::vector<double> humHz;
+            for (const auto& h : hum.harmonics) humHz.push_back (h.hz);
+            vs::NoiseProfileLearner learner (fs, a.frameSize(), humHz);
+            int taken = 0;
+            for (auto at : spots) { if (at + a.frameSize() > n) continue; learner.add (l + at, r + at); if (++taken >= 300) break; }
+            const auto prof = learner.profile();
+            out.push_back ({ "noise.frames", (double) learner.framesKept() });
+            out.push_back ({ "noise.profileDb", prof ? vs::restore::rounded (vs::denoise::profileDb (*prof, a.frameSize()), 1) : -200.0 });
+            const auto wins = vs::restore::checkWindows (n, fs);
+            vs::restore::ChannelCompare cc (fs);
+            vs::restore::ClickCounter counter (fs);
+            for (const auto& w : wins)
+            {
+                cc.add (l + w.at, r + w.at, std::min (w.length, (int) fs / 2));
+                counter.add (l + w.at, r + w.at, w.length, w.at);
+            }
+            const auto ch = cc.result();
+            out.push_back ({ "channels.corr", ch.corr });
+            out.push_back ({ "channels.balanceDb", ch.balanceDb });
+            out.push_back ({ "channels.delay", ch.delay });
+            out.push_back ({ "channels.mono", ch.mono ? 1.0 : 0.0 });
+            out.push_back ({ "clicks.perMinute", counter.result().perMinute[0] });
+            vs::restore::LevelEnvelope env (fs);
+            env.push (l, r, (int) n);
+            const auto g = vs::restore::gapCandidates (env.levels(), env.hopSeconds());
+            out.push_back ({ "envelope.levels", (double) env.levels().size() });
+            out.push_back ({ "envelope.candidates", (double) g.cands.size() });
+            out.push_back ({ "envelope.candidateAt", g.cands.empty() ? -1.0 : g.cands[0].at });
+            return true;
+        }
 
         // ---- measurement
         if (op == "file-analysis")
@@ -551,7 +882,9 @@ namespace
         }
         else if (op == "tonal-balance")
         {
-            const auto t = vs::tonalBalance (in->l.data(), n, fs);
+            // "lr": judged on the mid of both channels, as a song is
+            const auto t = c.get ("lr", 0) != 0 && stereo ? vs::tonalBalance (in->l.data(), in->r.data(), n, fs)
+                                                                    : vs::tonalBalance (in->l.data(), n, fs);
             for (int b = 0; b < vs::TonalBalance::numBands; ++b)
             {
                 out.push_back ({ "level" + std::to_string (b), t.levelDb[b] });
@@ -579,6 +912,7 @@ namespace
             stat ("peakR", w.peakR());
             if (o.rms) stat ("rms", w.rms());
             if (o.bands) stat ("bands", w.bands());
+            if (o.rms || o.bands) stat ("levelDb", w.levelDb());
         }
         else if (op == "minmax")
         {
@@ -712,6 +1046,12 @@ namespace
             const auto chans = copyOf (*in);
             const auto src = constPointers (chans);
             out.push_back ({ "rms", (double) rmsOf (in->l.data(), (int) n) });
+            {
+                std::vector<float> inter ((size_t) n * (size_t) in->channels);
+                for (size_t i = 0; i < (size_t) n; ++i)
+                    for (int c = 0; c < in->channels; ++c) inter[i * (size_t) in->channels + (size_t) c] = chans[(size_t) c][i];
+                out.push_back ({ "pairDb", (double) vs::ampToDb (rmsOf (inter.data(), (int) n, in->channels, std::min (2, in->channels))) });
+            }
             out.push_back ({ "silent", isNearlySilent (in->l.data(), (int) n) ? 1.0 : 0.0 });
             std::vector<float> quiet ((size_t) n, 0.0001f);
             out.push_back ({ "quietSilent", isNearlySilent (quiet.data(), (int) n) ? 1.0 : 0.0 });
@@ -719,6 +1059,12 @@ namespace
             monoAverage (src.data(), in->channels, (int) n, mono[0].data());
             fingerprintAudio (out, "mono", mono, fs);
             out.push_back ({ "gainDb", (double) gainToPeakDb (peakOf (src.data(), in->channels, (int) n), -0.3f) });
+            // a gain given in dB (pr_apply_gain_db)
+            auto gained = copyOf (*in);
+            std::vector<float*> gp;
+            for (auto& c : gained) gp.push_back (c.data());
+            vs::mix::applyGain (vs::dbToGain (-6.5f), gp.data(), (int) gp.size(), (int) n);
+            fingerprintAudio (out, "gained", gained, fs);
         }
         else if (op == "fracdelay")
         {
@@ -1011,6 +1357,25 @@ namespace
                 out.push_back ({ p + ".inF#", spelled (inKey (pc, note (3, 1))) });
                 out.push_back ({ p + ".inDb", spelled (inKey (pc, note (1, -1))) });
             }
+            // keys by their signature, and notes spelled in them on their way up, down or neither
+            for (int f = -7; f <= 7; ++f)
+                for (int minor = 0; minor < 2; ++minor)
+                {
+                    const auto mode = minor ? Mode::minor : Mode::major;
+                    const auto id = "fifths" + std::to_string (f) + (minor ? "m" : "");
+                    out.push_back ({ id + ".key", keyName (keyFromFifths (f, mode)) });
+                    std::string sig;
+                    for (int l = 0; l < 7; ++l) sig += std::to_string (signatureAlter (l, f)) + (l < 6 ? " " : "");
+                    out.push_back ({ id + ".signature", sig });
+                    out.push_back ({ id + ".written2", (double) transposeFifths (f, 2) });
+                    out.push_back ({ id + ".written9", (double) transposeFifths (f, 9) });
+                    for (int dir = -1; dir <= 1; ++dir)
+                    {
+                        std::string line;
+                        for (int pc = 0; pc < 12; ++pc) line += (pc ? " " : "") + spelled (spellMoving (pc, f, mode, dir));
+                        out.push_back ({ id + ".moving" + std::to_string (dir), line });
+                    }
+                }
             for (const auto& t : c.find ("parse")->items)
             {
                 const auto nn = parseNote (t.str);
@@ -1132,6 +1497,7 @@ namespace
             {
                 out.push_back ({ "fader.pos" + at (i) + ".db", (double) vs::meters::faderPositionToDb ((float) positions[i]) });
                 out.push_back ({ "fader.pos" + at (i) + ".gain", (double) vs::meters::faderPositionToGain ((float) positions[i]) });
+                out.push_back ({ "amp.pos" + at (i) + ".db", (double) vs::ampToDb ((float) positions[i]) });
             }
             for (size_t i = 0; i < dbs.size(); ++i)
             {
@@ -1607,6 +1973,44 @@ namespace
             blocks (n, block, [&] (std::int64_t s, int k) { d.push (in->l.data() + s, k, s, found); });
             out.push_back ({ "count", (double) found.size() });
             for (size_t i = 0; i < found.size(); ++i) out.push_back ({ "onset" + std::to_string (i), found[i] });
+        }
+        else if (op == "song-profile")
+        {
+            vs::SongProfile p;
+            p.begin (fs, n);
+            if (c.get ("stretchLength", 0) > 0) p.setStretch ((long long) c.get ("stretchFrom", 0), (long long) c.get ("stretchLength", 0), (float) c.get ("whole", -100));
+            else blocks (n, block, [&] (std::int64_t s, int k) { p.feedSong (in->l.data() + s, right (s), k); });
+            const auto w = p.stretch();
+            blocks (w.length, block, [&] (std::int64_t s, int k) { p.feedStretch (in->l.data() + w.from + s, right (w.from + s), k); });
+            const auto r = p.finish();
+            out.push_back ({ "from", (double) w.from });
+            out.push_back ({ "length", (double) w.length });
+            out.push_back ({ "lufs", (double) r.lufs });
+            out.push_back ({ "wholeLufs", (double) r.wholeLufs });
+            out.push_back ({ "plr", (double) r.plr });
+            for (int b = 0; b < vs::SongProfile::numTone; ++b) out.push_back ({ "tone" + std::to_string (b), (double) r.tone[(size_t) b] });
+            for (int b = 0; b < vs::SongProfile::numWidth; ++b) out.push_back ({ "width" + std::to_string (b), (double) r.width[(size_t) b] });
+        }
+        else if (op == "master-monitor")
+        {
+            vs::MasterMonitor m;
+            m.prepare (fs, block);
+            vs::MasterChain::Settings st;
+            st.style = (int) c.get ("style", 0);
+            m.chain.setSettings (st);
+            m.setHearOriginal (c.get ("original", 0) != 0);
+            if (c.get ("level", 0) != 0) m.setPlaybackLevel (true, (float) c.get ("master", 0), (float) c.get ("orig", 0));
+            m.setDevice ((int) c.get ("device", 0));
+            std::vector<float> l (in->l), r (stereo ? in->r : in->l);
+            blocks (n, block, [&] (std::int64_t s, int k) { m.process (l.data() + s, r.data() + s, k); });
+            vs::LoudnessMeter lm;
+            lm.prepare (fs);
+            lm.process (l.data(), r.data(), (int) n);
+            float peak = 0;
+            for (std::int64_t i = 0; i < n; ++i) peak = std::max ({ peak, std::abs (l[(size_t) i]), std::abs (r[(size_t) i]) });
+            out.push_back ({ "lufs", (double) lm.integrated() });
+            out.push_back ({ "peak", (double) peak });
+            out.push_back ({ "matchDb", (double) m.ab.matchGainDb() });
         }
         else if (op == "mastering")
         {

@@ -85,7 +85,7 @@ The headers, by area (each header's top comment says more):
 |---|---|---|
 | Building blocks | `Fft.h` | the one FFT (complex and real input), on Apple's Accelerate framework on Apple systems |
 | | `Windows.h` | window functions and the shared windowed-sinc table |
-| | `Biquad.h` | second-order filter coefficients (the RBJ cookbook designs) and their curves |
+| | `Biquad.h` | second-order filter coefficients (the RBJ cookbook designs) and their curves, first-order sections, zero-phase filtering |
 | | `Crossover.h` | Linkwitz-Riley band splits that recombine flat |
 | | `Svf.h` | the state-variable filter (the de-esser's split, and the step the Linkwitz-Riley splits use) |
 | | `Convolution.h` | zero-latency convolution, with crossfaded filter changes (Body match) |
@@ -94,13 +94,14 @@ The headers, by area (each header's top comment says more):
 | | `Oversampler.h` | power-of-two oversampling |
 | | `Resampler.h` | streaming sample rate conversion (also speed and wow fixes), its live form for playback, and integer decimation |
 | | `Ramp.h` | a value ramping to a new target, linearly or by equal ratios, and automation curves |
-| | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels and a rack return's ramps |
-| | `Oscillator.h`, `Envelope.h` | band-limited oscillators (the one polyBLEP), and the ADSR envelope |
+| | `Mix.h` | gain stages, crossfades, the dry/wet send law, pan laws, a hosted plugin's dry and wet levels, a rack return's ramps and a gain track |
+| | `Oscillator.h`, `Envelope.h` | band-limited oscillators (the one polyBLEP), a wave made of harmonics, and the ADSR envelope |
 | | `Dynamics.h` | the gain curve, the glide of a cut, and the dynamic EQ bell |
 | | `Lpc.h` | linear prediction (gap and click repair, onsets, FLAC) |
 | | `Random.h` | seeded random number generators, the same on every system |
 | | `Stats.h` | median, percentile, mean, deviation, least-squares line |
 | | `Util.h` | smoothers, envelope steps, decibels, mid and side, rounding |
+| | `Json.h` | a small JSON reader and writer, for the browser's calls that take and give text |
 | | `Denormals.h` | the denormal guard: turns the processor's denormals off while audio code runs |
 | Measurement | `Loudness.h` | the BS.1770 / EBU R128 loudness meter, and the mastering chain's true-peak limiter |
 | | `LoudnessReport.h` | a song's loudness report |
@@ -108,37 +109,49 @@ The headers, by area (each header's top comment says more):
 | | `Analysis.h` | everything a release check measures on a finished song |
 | | `Spectrum.h` | the live analyser, the long-term spectrum, the encoder cliff, tonal balance, drawing axes |
 | | `ResonanceFinder.h` | narrow resonances in a long-term spectrum |
+| | `SongProfile.h` | what a song is, to compare with another: its loudest stretch, tone per octave, width and how squashed it is |
 | | `Waveform.h` | waveform overviews for drawing, and a DAW's waveform picture (min and max per block) |
 | | `Meters.h` | how a meter moves on screen: ballistics, peak hold, its scale; the volume fader's law |
 | Processing and mastering | `EqBand.h` | one band of a parametric EQ |
 | | `VocalEq.h` | the vocal EQ (low cut and four bands) |
-| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider |
-| | `Saturator.h` | preamp drive |
+| | `Compressor.h`, `DeEsser.h`, `Gate.h`, `Rider.h` | the vocal compressor (with a key input for a sidechain), de-esser, gate and fader rider (and its slow form, a gain track for a whole recording) |
+| | `Saturator.h` | preamp drive, and the safety curve on a bus where sounds pile up |
 | | `ReverbEngine.h`, `Space.h` | the reverb, and the delay (the vocal delay and reverb send) |
 | | `Chorus.h`, `Phaser.h` | the chorus and the phaser |
 | | `TimeStretch.h` | time stretching and pitch shifting |
 | | `Doubler.h`, `GuitarFixes.h`, `BodyMatch.h` | Strum's double, its Squeak, Pick and Boom fixes, and its Body match |
 | | `MasterChain.h` | the one-knob mastering chain |
-| | `Mastering.h` | the one way to master a whole song with the chain |
+| | `Mastering.h` | the one way to master a whole song with the chain, and the loudest stretch it learns on |
+| | `MasterMonitor.h` | a song mastered as you listen: the chain, the original at the same loudness, a streaming service's level, a playback device and a live spectrum |
 | | `Dither.h` | the one float to integer conversion, with dither |
-| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing and the clean-up after a plugin |
+| | `Channels.h` | channel maps, trims, fade shapes, peak, RMS, silence, normalizing, the clean-up after a plugin, and a live recording's inputs (routing, what's on each, samples at full scale) |
 | | `DeviceSim.h` | how a mix sounds on everyday playback devices |
 | | `Dsd.h` | DSD (one-bit SACD audio, .dsf and .dff) to PCM |
 | | `AbCompare.h` | the loudness-matched "hear the original" |
 | | `Presets.h` | the chains' presets (written by `tools/presets.py`) |
+| Restoration | `Declicker.h` | de-click and de-crackle (found by prediction error, rebuilt by gap fill) |
+| | `NoiseReduction.h` | spectral noise reduction and the noise profile it learns |
+| | `Restoration.h` | the restoration chain for record and tape transfers (rumble, channels, de-click, de-hum, noise, playback curves, speed and wow), its settings and the sources' starting points |
+| | `RestorationAnalysis.h` | what's wrong with a transfer: the analysis pass, hum, tuning, wow, dropouts, the songs on a side, the noise's quiet spots, the channels, the clicks, a side's level envelope and its gaps |
+| Live recordings | `LiveSet.h` | the songs in a live set, and what's between them (applause, talk, tuning, quiet) |
 | Pitch | `Yin.h` | the one pitch detector, with its follow, tuner and voice settings |
 | | `PitchDetector.h`, `PitchEngine.h` | pitch correction's detector and its real-time engine |
-| | `TunerPitch.h` | the tuner's pitch and what it means on the instrument |
+| | `TunerPitch.h` | the tuner's pitch, what it means on the instrument, and its reference tone |
 | | `Tunings.h` | the tuner's list (written by `tools/tunings.py`) |
 | | `VoiceTracker.h` | following a singing voice and measuring it; played notes; the notes of warm-ups, sing-back and the keys that suit a range |
-| | `DrumPitch.h` | drum tuning |
+| | `DrumPitch.h` | drum tuning, and catching each hit in a live input |
 | Rhythm | `Tempo.h` | the tempo range, tap tempo and the tempo finder |
 | | `Onsets.h` | note onsets in a live stream |
-| | `TimingCheck.h` | latency and playing in time with a click |
+| | `TimingCheck.h` | latency, playing in time with a click, and how much later a second recording of a performance hears it |
 | | `Metronome.h` | the beat grid, sequencer, click sounds, click engine and its voices for a host's timeline |
-| Sound | `Synth.h`, `Sampler.h` | the synth and the sampler |
+| Sound | `Synth.h`, `Sampler.h` | the synth (with the options a score's instruments use) and the sampler (with a drum pad's options, a loop rendered through it, and an instrument's recordings as zones) |
+| | `NoteExpression.h` | how a score plays one note (gain, brightness, a slur, a glide, a swell), for the synth and the sampler |
 | | `DrumSynth.h` | the drum synthesizer and its kits |
-| Music vocabulary | `Music.h` | note names, spelled notes, keys, Hz and MIDI, General MIDI drum names |
+| | `VoiceGuide.h` | the guide a singer sings with: notes, sirens and a drone |
+| | `NotePlayer.h` | notes played for the theory tools: a chord strummed or struck together, a melody, a progression, with the voice guide's drone and the metronome's click beside them |
+| | `Instruments.h` | a score's instruments: a synth sound for each family (piano, strings, brass and so on), and a recorded instrument read from its manifest |
+| | `Ensemble.h` | a score played by its instruments: each part at its volume and pan, a small hall, a gentle compressor, -1 dB peak; or played live, notes scheduled and held as they come, with the metronome's click |
+| Music vocabulary | `Music.h` | note names, spelled notes, keys (and by their signature), a line's notes spelled in a key, Hz and MIDI, General MIDI drum names |
 | | `ScaleLibrary.h` | the scale library (written by `tools/scales.py`) |
 | | `ChordTypes.h` | the chord types (written by `tools/chords.py`) |
 | | `Harmony.h` | chords: naming notes, numerals, the map of a key, key changes, the moves between chords and their facts, transposing, guessing a song's key, a capo for a shift |
@@ -146,18 +159,19 @@ The headers, by area (each header's top comment says more):
 | | `ScaleTheory.h` | scales on a root: spelling, modes, their chords, which scale fits a chord or a progression, the neck |
 | | `TheoryCalls.h` | the theory and the voice exercises as JSON requests and answers (the browser's `th_call`, and the reference set) |
 | | `Scales.h` | pitch correction's keys, scales and harmony intervals |
-| | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids |
+| | `NoteEdit.h` | editing notes on a beat grid: grid sizes, quantize, transpose, velocities, step grids, a loop recorder's timing |
 
 The browser engine, by file and prefix: `api_master.cpp` the mastering chain
-(`mc_*`), `api_mastering.cpp` whole-song mastering (`mt_*`), `api_loudness.cpp`
+(`mc_*`) and a song mastered as you listen (`mm_*`), `api_mastering.cpp` whole-song mastering (`mt_*`), `api_loudness.cpp`
 the loudness meter (`lm_*`), `api_measure.cpp` measurement (`ms_*`),
 `api_processing.cpp` processing, DSD to PCM and the true-peak limiter on its
 own (`pr_*`), `api_pitch.cpp` pitch (`pi_*`), `api_tuner.cpp` the tuner
 (`tp_*`), `api_rhythm.cpp` rhythm and the beat grid's meters (`rh_*`),
-`api_sound.cpp` sounds and the metronome's settings (`sd_*`), `api_music.cpp`
+`api_sound.cpp` sounds, the metronome's settings, the singing guide and the theory tools' notes (`sd_*`), `api_music.cpp`
 music vocabulary and note editing (`mu_*`), `api_effects.cpp` the effects
-(`fx_*`), `api_instruments.cpp` the synth and the sampler (`in_*`),
-`api_theory.cpp` the chord and scale theory (`th_*`). The lists
+(`fx_*`), `api_instruments.cpp` the synth, the sampler and a score played by its instruments (`in_*`),
+`api_theory.cpp` the chord and scale theory (`th_*`), `api_restore.cpp` the restoration of record
+and tape transfers (`rs_*`), `api_live.cpp` live recordings (`lv_*`). The lists
 (scales, tunings, presets, chord types) are `data/*.json`
 files, not functions. A new area is a new file with its own prefix.
 

@@ -7,6 +7,7 @@
 #include <limits>
 #include <vector>
 #include "Loudness.h"
+#include "Meters.h"
 #include "Util.h"
 
 namespace vs
@@ -264,13 +265,15 @@ namespace vs
         }
 
         // The RMS level of one channel's n samples (0 for none), every
-        // stride-th value for a channel interleaved with others.
-        inline float rmsOf (const float* x, int n, int stride = 1)
+        // stride-th value for a channel interleaved with others; with count,
+        // the first count channels of each stride-wide frame together (a pair).
+        inline float rmsOf (const float* x, int n, int stride = 1, int count = 1)
         {
-            if (n <= 0) return 0.0f;
+            if (n <= 0 || count <= 0) return 0.0f;
             double sum = 0.0;
-            for (int i = 0; i < n; ++i) { const double v = x[(std::ptrdiff_t) i * stride]; sum += v * v; }
-            return (float) std::sqrt (sum / n);
+            for (int i = 0; i < n; ++i)
+                for (int k = 0; k < count; ++k) { const double v = x[(std::ptrdiff_t) i * stride + k]; sum += v * v; }
+            return (float) std::sqrt (sum / ((double) n * count));
         }
 
         // Whether a block is as good as silent: its first, middle and peak
@@ -344,14 +347,36 @@ namespace vs
             return std::isnan (peak) || std::isnan (v) ? std::numeric_limits<float>::quiet_NaN() : std::max (peak, std::abs (v));
         }
 
+        // Where a sound first gets loud: the first sample, in any channel, at
+        // `fraction` of the loudest sample of them all or more (0 for silence;
+        // n when none is, which only a NaN peak gives).
+        inline int onsetIndex (const float* const* ch, int numCh, int n, double fraction)
+        {
+            float peak = 0;
+            for (int c = 0; c < numCh; ++c) for (int i = 0; i < n; ++i) peak = runningPeak (peak, ch[c][i]);
+            int first = n;
+            for (int c = 0; c < numCh; ++c)
+                for (int i = 0; i < first; ++i)
+                    if (! (std::abs (ch[c][i]) < fraction * peak)) { first = i; break; }
+            return first;
+        }
+
+        // Where a recorded hit should start (seconds): its onset at `fraction`
+        // of the peak, less `leadSeconds` so the front of the attack is kept
+        // (never before the start). 0 for silence.
+        inline double trimStart (const float* const* ch, int numCh, int n, double fs, double fraction, double leadSeconds)
+        {
+            const int first = onsetIndex (ch, numCh, n, fraction);
+            if (first >= n) return 0.0;
+            return std::max (0, first - (int) std::lround (leadSeconds * fs)) / fs;
+        }
+
         // A sound from where it first gets loud (0.3 of its peak), keeping
         // the two samples before: a synthesized hit lands right on its time.
         inline std::vector<float> fromOnset (const std::vector<float>& x)
         {
-            float peak = 0;
-            for (float v : x) peak = runningPeak (peak, v);
-            size_t i = 0;
-            while (i < x.size() && std::abs (x[i]) < 0.3 * peak) ++i;
+            const float* ch[1] { x.data() };
+            const size_t i = (size_t) onsetIndex (ch, 1, (int) x.size(), 0.3);
             return std::vector<float> (x.begin() + (std::ptrdiff_t) (i >= 2 ? i - 2 : 0), x.end());
         }
 
@@ -421,5 +446,102 @@ namespace vs
                     for (int i = 0; i < n; ++i) ch[c][i] = (float) (ch[c][i] * g);
             return r;
         }
+
+        // A batch of interleaved input (frames of numCh samples): each channel's
+        // peak, and how many of its samples sit at full scale (at or over the
+        // meter's overload level), which only a device driven past its maximum
+        // gives in a row.
+        inline void peaksAndOverloads (const float* interleaved, int frames, int numCh, float* peaks, int* overloads)
+        {
+            for (int c = 0; c < numCh; ++c) { peaks[c] = 0.0f; overloads[c] = 0; }
+            for (int i = 0; i < frames; ++i)
+                for (int c = 0; c < numCh; ++c)
+                {
+                    const float m = std::abs (interleaved[(size_t) i * (size_t) numCh + (size_t) c]);
+                    if (m > peaks[c]) peaks[c] = m;
+                    if (m >= meters::overloadGain) ++overloads[c];
+                }
+        }
+
+        // A live recording's inputs as the two channels heard: the main pair (the
+        // same input twice for one heard in both ears), or its two inputs blended
+        // to the centre (two separate mics or instruments, not a stereo pair),
+        // with a room pair (roomL < 0: none) blended in at roomDb when there are
+        // more than two inputs, and the main held back `delay` frames to line up
+        // with the room. raw: every input for the stretch starting `delay`
+        // frames early (count + delay frames each); channel numbers outside the
+        // inputs are taken as the nearest one.
+        inline void routeLive (const float* const* raw, int numCh, int count, int delay, int mainL, int mainR, bool mono,
+                               int roomL, int roomR, double roomDb, float* outL, float* outR)
+        {
+            const auto pick = [&] (int c) { return raw[std::max (0, std::min (numCh - 1, c))]; };
+            const float* mL = pick (mainL);
+            const float* mR = pick (mainR < 0 ? mainL : mainR);
+            if (mono && mL != mR)
+                for (int i = 0; i < count; ++i) { const float m = (float) midOf ((double) mL[i], (double) mR[i]); outL[i] = m; outR[i] = m; }
+            else
+                for (int i = 0; i < count; ++i) { outL[i] = mL[i]; outR[i] = mR[i]; }
+            if (roomL >= 0 && numCh > 2)
+            {
+                const double g = std::pow (10.0, roomDb / 20.0);
+                const float* rL = pick (roomL);
+                const float* rR = pick (roomR < 0 ? roomL : roomR);
+                for (int i = 0; i < count; ++i)
+                {
+                    outL[i] = (float) ((double) outL[i] + g * (double) rL[i + delay]);
+                    outR[i] = (float) ((double) outR[i] + g * (double) rR[i + delay]);
+                }
+            }
+        }
+
+        // What's on each input of a recording, from a dozen short windows spread
+        // across it: each input's level (dB, every other sample's power) and how
+        // alike each input is to the next (their correlation; 0 for the last).
+        class InputSurvey
+        {
+        public:
+            static constexpr int spots = 12;
+            InputSurvey (int numChannels) : pow ((size_t) numChannels, 0.0), xy ((size_t) numChannels, 0.0) {}
+
+            // Where window k of the dozen starts, and how long each is (frames)
+            static int windowLength (std::int64_t frames, double fs) { return (int) std::min<std::int64_t> ((std::int64_t) std::floor (fs * 2 + 0.5), frames); }
+            static std::int64_t windowStart (int k, std::int64_t frames, double fs)
+            {
+                const int win = windowLength (frames, fs);
+                return std::max<std::int64_t> (0, (std::int64_t) std::floor (((k + 0.5) / spots) * (double) frames + 0.5) - (std::int64_t) std::floor (win / 2.0 + 0.5));
+            }
+
+            // One window, every input (n frames each)
+            void add (const float* const* raw, int n)
+            {
+                const int ch = (int) pow.size();
+                for (int i = 0; i < n; i += 2)
+                {
+                    for (int c = 0; c < ch; ++c)
+                    {
+                        const double v = raw[c][i];
+                        pow[(size_t) c] += v * v;
+                        if (c + 1 < ch) xy[(size_t) c] += v * (double) raw[c + 1][i];
+                    }
+                    ++count;
+                }
+            }
+
+            double levelDb (int c) const { return db10 (pow[(size_t) c] / std::max<double> (1.0, (double) count), 1e-12); }
+            // An input and the next together (dB): their powers summed, for finding the loudest pair
+            double pairLevelDb (int c) const
+            {
+                const double p = pow[(size_t) c] + (c + 1 < (int) pow.size() ? pow[(size_t) c + 1] : 0.0);
+                return db10 (p / std::max<double> (1.0, (double) count), 1e-12);
+            }
+            double nextCorr (int c) const
+            {
+                return c + 1 < (int) pow.size() ? xy[(size_t) c] / std::sqrt (pow[(size_t) c] * pow[(size_t) c + 1] + 1e-20) : 0.0;
+            }
+
+        private:
+            std::vector<double> pow, xy;
+            std::int64_t count = 0;
+        };
     }
 }

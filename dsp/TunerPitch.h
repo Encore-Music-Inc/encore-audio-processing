@@ -5,6 +5,9 @@
 #include <cmath>
 #include <vector>
 #include "Music.h"
+#include "Oscillator.h"
+#include "Ramp.h"
+#include "Util.h"
 #include "Yin.h"
 
 namespace vs
@@ -62,7 +65,7 @@ namespace vs
             TunerReading r;
             if (! (hz > 0)) return r;
             const double m = music::hzToMidi ((double) hz, a4);
-            auto target = [&] (int n) { return n + offsets[(size_t) (((n - root) % 12 + 12) % 12)] / 100.0; };
+            auto target = [&] (int n) { return targetMidi (n, offsets, root); };
             if (! strings.empty())
             {
                 double best = 1.0e9;
@@ -83,6 +86,122 @@ namespace vs
             }
             r.targetHz = (float) music::midiToHz (target (r.note), a4);
             return r;
+        }
+
+        // Where a note sits in the temperament (the offsets on C, turned to root), as a
+        // fractional MIDI note, and its pitch in Hz: what a string should sound, and
+        // what its reference tone plays
+        static double targetMidi (int note, const std::array<float, 12>& offsets, int root)
+        {
+            return note + offsets[(size_t) (((note - root) % 12 + 12) % 12)] / 100.0;
+        }
+        static double targetHzOf (int note, double a4, const std::array<float, 12>& offsets, int root)
+        {
+            return music::midiToHz (targetMidi (note, offsets, root), a4);
+        }
+    };
+
+    // A tuner's reference tone: tap a string and hear the note to tune to.
+    // Plucked, it rings out and dies away (each overtone faster than the last,
+    // over five seconds); steady, it holds until stopped. Its spectrum is a full
+    // fundamental with fading overtones, so a low note still comes through
+    // small speakers, at exactly the pitch asked for. The volume slider (0 to
+    // 100) is squared and halved; the tone fades in (4 ms plucked, 50 ms
+    // steady), a new volume glides over 30 ms, and stopping fades it out over
+    // 30 ms and ends it after 200 ms.
+    class TunerTone
+    {
+    public:
+        enum Kind { pluck = 0, steady = 1 };
+
+        static constexpr std::array<float, 8> harmonics { 1.0f, 0.62f, 0.42f, 0.3f, 0.2f, 0.14f, 0.09f, 0.06f };
+        static constexpr double pluckSeconds = 5.0, glideSeconds = 0.03, stopSeconds = 0.2;
+
+        static float levelOf (double volume) { const double v = std::clamp (volume, 0.0, 100.0) / 100; return (float) (v * v * 0.5); }
+
+        void prepare (double sampleRate) { sr = sampleRate; playing = false; }
+
+        void start (double hz, Kind k, double volume)
+        {
+            kind = k;
+            freq = hz;
+            pos = 0;
+            phase = 0;
+            stopping = false;
+            stopLeft = 0;
+            target = levelOf (volume);
+            gain = target;
+            glide = onePole ((float) (glideSeconds * 1000), sr);
+            attack.reset (sr, kind == pluck ? 0.004 : 0.05);
+            attack.setCurrentAndTarget (0.0f);
+            attack.setTarget (1.0f);
+            if (kind == pluck) renderPluck();
+            playing = true;
+        }
+
+        void setVolume (double volume) { target = levelOf (volume); }
+
+        void stop()
+        {
+            if (! playing || stopping) return;
+            stopping = true;
+            target = 0;
+            stopLeft = (int) std::round (stopSeconds * sr);
+        }
+
+        bool sounding() const { return playing; }
+
+        // Writes n samples of the tone (silence once it's over); returns whether it's still sounding
+        bool process (float* out, int n)
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                if (! playing) { out[i] = 0.0f; continue; }
+                gain += glide * (target - gain);
+                float v;
+                if (kind == pluck)
+                {
+                    if (pos >= (int) buf.size()) { playing = false; out[i] = 0.0f; continue; }
+                    v = buf[(size_t) pos++];
+                }
+                else
+                {
+                    v = (float) steadyWave().at (phase);
+                    phase += freq / sr;
+                    phase -= std::floor (phase);
+                }
+                out[i] = v * gain * attack.next();
+                if (stopping && --stopLeft <= 0) playing = false;
+            }
+            return playing;
+        }
+
+    private:
+        double sr = 48000, freq = 440, phase = 0;
+        Kind kind = pluck;
+        std::vector<float> buf;
+        int pos = 0, stopLeft = 0;
+        bool playing = false, stopping = false;
+        float gain = 0, target = 0, glide = 1;
+        Ramp<false> attack;
+
+        // the pluck: each overtone dying away faster than the last, a 4 ms rise and a 250 ms fall at the end
+        void renderPluck()
+        {
+            buf = vs::renderPluck (freq, sr, pluckSeconds, std::vector<double> (harmonics.begin(), harmonics.end()), 1.1, 0.9, 0.004, 0.25);
+        }
+
+        // the steady tone's wave: the overtones, each 0.8 of the last's share
+        static const HarmonicWave& steadyWave()
+        {
+            static const HarmonicWave w = []
+            {
+                std::vector<double> a;
+                double share = 1;
+                for (float h : harmonics) { a.push_back (h * share); share *= 0.8; }
+                return HarmonicWave (a);
+            }();
+            return w;
         }
     };
 

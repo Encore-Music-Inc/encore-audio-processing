@@ -227,6 +227,15 @@ namespace
         expect ("warm-up: every note inside the safe range", safe);
         expect ("warm-up: a siren lasts its slide up and back", voice::patternSeconds (w[2].patterns[0]) == 5.0
                 && voice::glideAt (*w[2].patterns[0].glide, 2.5) == w[2].patterns[0].glide->to);
+        expect ("a request: a pattern's length, from its notes and from its slide",
+                call (R"({"fn":"patternSeconds","pattern":{"notes":[{"midi":60,"at":0,"dur":0.6},{"midi":62,"at":0.6,"dur":0.6},{"midi":64,"at":1.1,"dur":0.4}]}})") == "1.5"
+                && call (R"({"fn":"patternSeconds","pattern":{"glide":{"from":52,"to":67,"up":2.5,"down":2}}})") == "4.5");
+        expect ("a request: a siren's pitch going up, coming down, and after it ends",
+                call (R"({"fn":"glideAt","glide":{"from":52,"to":67,"up":2.5,"down":2},"t":1})") == "58"
+                && call (R"({"fn":"glideAt","glide":{"from":52,"to":67,"up":2.5,"down":2},"t":3.5})") == "59.5"
+                && call (R"({"fn":"glideAt","glide":{"from":52,"to":67,"up":2.5,"down":2},"t":9})") == "52");
+        expect ("a pattern with no notes and no slide is an error",
+                call (R"({"fn":"patternSeconds","pattern":{"notes":[]}})") == R"({"error":"a pattern needs notes or a glide"})");
         expect ("a request with too few random numbers is an error", call (R"({"fn":"buildSingBack","level":3,"range":{"low":48,"high":67,"tessLo":52,"tessHi":62},"rand":[0.1]})") == R"({"error":"rand ran out"})");
     }
 
