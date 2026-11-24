@@ -245,11 +245,19 @@ namespace vs
             std::map<std::string, std::vector<std::unique_ptr<Synth>>> synths;
         };
 
+        // Moved, never copied: its players own their samplers and synths. Said outright, since a
+        // vector of buses grows by copying wherever a map's move may throw (MSVC's does).
         struct Bus
         {
             Part part;
             std::map<int, Player> players;
             std::vector<float> l = std::vector<float> (block), r = std::vector<float> (block);
+
+            Bus() = default;
+            Bus (Bus&&) noexcept = default;
+            Bus& operator= (Bus&&) noexcept = default;
+            Bus (const Bus&) = delete;
+            Bus& operator= (const Bus&) = delete;
         };
 
         struct Event
