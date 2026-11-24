@@ -135,7 +135,7 @@ def rule(op, name):
     if op == "loop-timing":
         return "exact" if stem in ("due", "clicks", "hit", "down") else "seconds"
     if op == "live-set":
-        return {"confidence": "restore-rounded", "level": "restore-tenth", "threshold": "ratio", "peak": "level"}.get(last, "exact")
+        return {"confidence": "restore-rounded", "level": "restore-tenth", "threshold": "ratio", "peak": "level", "start": "seconds", "end": "seconds"}.get(last, "exact")
     if op == "live-ride":
         return {"count": "exact", "levelDb": "db", "sum": "proc-sum", "peak": "proc-peak"}[last]
     if op == "input-survey":
