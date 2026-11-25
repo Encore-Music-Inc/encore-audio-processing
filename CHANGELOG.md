@@ -4,6 +4,86 @@ Each release's notes, newest first. When a release is published, the release
 job puts its section on the GitHub release (see "Release notes" in
 `CLAUDE.md`).
 
+## v4.0.0
+
+What the Green Room's tools in the ENCORE. app need: restoration of record
+and tape transfers, live recordings, a pad player, scores played by their
+instruments, and mastering as you listen. The 808 kit is now called Deep, so
+a product that saved the old name needs the new one.
+
+### What's new
+- Restoration of record and tape transfers (`Restoration.h`,
+  `RestorationAnalysis.h`, `Declicker.h`, `NoiseReduction.h`, `rs_*` in the
+  browser): rumble, channels, de-click and de-crackle, de-hum, noise
+  reduction, playback curves, speed and wow. Its analysis finds hum, tuning,
+  wow, dropouts, clicks, the songs on a side, a side's level and its gaps, and
+  hears when a side's recording is over.
+- Live recordings (`LiveSet.h`, `lv_*`): the songs in a set and what's
+  between them (applause, talk, tuning, quiet), the slow ride (a gain track
+  for a whole recording), a live recording's inputs, and a pair of inputs'
+  level together.
+- A pad player: the sampler's pad options, a loop rendered through it, a
+  safety curve where sounds pile up, and a recorded hit's start in seconds
+  with its lead-in.
+- Scores (`Instruments.h`, `Ensemble.h`, `NoteExpression.h`): a synth sound
+  for each family of instruments, an instrument's recordings as sampler
+  zones, which recordings a score's notes play (to fetch first), and a score
+  played by its instruments, as a whole or live on a running clock.
+- Mastering as you listen (`MasterMonitor.h`, `mm_*`): the chain, the
+  original at the same loudness, a streaming service's level, a playback
+  device and a live spectrum. A song's profile (`SongProfile.h`), to compare
+  one song with another.
+- A mix's tonal balance from both channels, and how far the side sits under
+  the mid below 120 Hz in the whole-file analysis.
+- For the theory tools and the voice: the note player (a chord strummed or
+  struck, a melody, a progression) with the singing guide's drone and the
+  metronome's click, the singing guide, a voice's centred pitch, keys by their
+  signature, a line's notes spelled in a key, and a warm-up's length and a
+  siren's pitch as theory calls.
+- Smaller pieces: the tuner's reference tone, catching drum hits in a live
+  input, the click engine's master volume, a gain in dB, a pair's RMS level in
+  dB, and a level in dB for a meter's number.
+- The synthesizer gains options for the score's instruments, each off by
+  default (a burst at a note's start, a cutoff that follows the note, a
+  vibrato that fades in, a velocity curve, a start phase per oscillator,
+  per-note expression), and the envelope a second, slower decay.
+
+### What's changed
+- The 808 kit is now Deep (`deep`, its sounds `deepKick`, `deepSnare` and so
+  on). Every sound keeps its settings and its seed, so every sample is the
+  same; only the names change. A product that saved `808` or an `808` sound
+  name needs the new one.
+- The triangle wave now starts a note where the triangle is, with no offset.
+  Before, each note started at the wave's lowest point and carried an offset
+  that faded over about a hundred cycles. Every triangle oscillator and LFO
+  sounds slightly different at a note's start.
+- The reference set (`reference.json`) has the new requests and results, and
+  the drum kit's new names. Every case already in v3.0.0 keeps its results.
+
+### Downloads
+- `master.wasm`: the browser engine, with `master.wasm.sha256`.
+- `tunings.json`, `scales.json`, `chords.json`, `presets.json`: the tuner's
+  instruments and tunings, the scale library, the chord types and the chains'
+  presets for the browser, each with its `.sha256`.
+- `reference.json`: the reference set, with `reference.json.sha256`.
+
+### Using it
+Pin `external/encore-audio-processing` to `v4.0.0`, then fetch its JUCE by
+path:
+
+```
+git -C external/encore-audio-processing submodule update --init --depth 1 external/JUCE
+```
+
+On Apple systems, link the Accelerate framework (JUCE products already do).
+Green Room pins `master.wasm`, `tunings.json`, `scales.json`, `chords.json`
+and `reference.json` by their SHA-256 and runs `wasm/reference.mjs` on them.
+
+### Built on
+JUCE 9.0.5. `master.wasm` is built without JUCE, with Emscripten 6.0.13.
+
+Questions or problems: support@encoremusic.studio
+
 ## v3.0.0
 
 One implementation of everything: what the plugins, Basement Studio and the
